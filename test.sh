@@ -155,6 +155,99 @@ assert_contains "返回包含 response 字段" "$resp" '"response"'
 assert_contains "推荐了耳机相关商品" "$resp" "Sony\|耳机\|2499\|WH-1000XM5"
 
 # ══════════════════════════════════════════════════════════
+#  TEST 6: 确认模式 (confirm-before-mutate)
+# ══════════════════════════════════════════════════════════
+echo ""
+bold "[TEST 6] 确认模式 - 前端执行场景"
+
+if ! command -v jq &>/dev/null; then
+    red "  ⚠ 跳过 TEST 6: 需要安装 jq"
+    FAIL=$((FAIL + 1))
+else
+    # 停止当前应用
+    bold "  Restarting with confirm-before-mutate=true..."
+    kill "$APP_PID" 2>/dev/null
+    wait "$APP_PID" 2>/dev/null
+    APP_PID=""
+    lsof -ti:8080 | xargs kill -9 2>/dev/null
+    sleep 2
+
+    # 以确认模式重启
+    mvn spring-boot:run -DskipTests \
+        -Dspring-boot.run.arguments="--app.confirm-before-mutate=true" \
+        > /tmp/spring-ai-test.log 2>&1 &
+    APP_PID=$!
+
+    WAITED=0
+    while [ $WAITED -lt $MAX_WAIT ]; do
+        if curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/products" 2>/dev/null | grep -q "200"; then
+            break
+        fi
+        sleep 2
+        WAITED=$((WAITED + 2))
+    done
+
+    if [ $WAITED -ge $MAX_WAIT ]; then
+        red "  错误: 确认模式应用启动超时"
+        FAIL=$((FAIL + 1))
+    else
+        green "  Application restarted in confirm mode (${WAITED}s)"
+
+        # 6a: REST API 仍然正常工作（确认模式不影响直接 API 调用）
+        resp=$(curl -s -X POST "$BASE_URL/api/products/cart?userId=1&productId=3")
+        assert_contains "确认模式下 REST API 仍可用" "$resp" '"success":true'
+        # 清空购物车
+        curl -s -X POST "$BASE_URL/api/products/checkout?userId=1" > /dev/null
+
+        # 6b: Agent 聊天 - 变更操作应返回 http-request 代码块
+        echo "  (调用 LLM API，可能需要 30-90 秒...)"
+        resp=$(curl -s -X POST "$BASE_URL/api/chat" \
+            -H "Content-Type: application/json" \
+            -d '{"content":"请把商品ID为3的商品加入购物车（用户ID=1）"}' \
+            --max-time 120)
+
+        assert_not_empty "确认模式聊天端点有响应" "$resp"
+        assert_contains "响应包含 http-request 代码块" "$resp" "http-request"
+
+        # 6c: 从响应中提取 http-request 代码块中的 JSON
+        chat_text=$(echo "$resp" | jq -r '.response // empty')
+        request_json=$(echo "$chat_text" | sed -n '/```http-request/,/```/{/```/d;p}')
+
+        if [ -n "$request_json" ]; then
+            green "  ✓ 成功提取请求元数据"
+            PASS=$((PASS + 1))
+
+            # 解析 JSON 并构造 curl 请求（模拟前端执行）
+            req_method=$(echo "$request_json" | jq -r '.method')
+            req_url=$(echo "$request_json" | jq -r '.url')
+            req_params=$(echo "$request_json" | jq -r '.params // {} | to_entries | map("\(.key)=\(.value)") | join("&")')
+            req_body=$(echo "$request_json" | jq -r '.body // empty')
+
+            full_url="$BASE_URL$req_url"
+            if [ -n "$req_params" ]; then
+                full_url="${full_url}?${req_params}"
+            fi
+
+            # 执行请求
+            if [ -n "$req_body" ] && [ "$req_body" != "null" ]; then
+                exec_resp=$(curl -s -X "$req_method" "$full_url" \
+                    -H "Content-Type: application/json" \
+                    -d "$req_body")
+            else
+                exec_resp=$(curl -s -X "$req_method" "$full_url" \
+                    -H "Content-Type: application/json")
+            fi
+
+            assert_contains "前端执行请求成功" "$exec_resp" '"success":true'
+        else
+            red "  ✗ 未能提取 http-request 元数据"
+            red "    response: $(echo "$chat_text" | head -c 300)"
+            FAIL=$((FAIL + 1))
+        fi
+    fi
+fi
+
+# ══════════════════════════════════════════════════════════
 #  结果汇总
 # ══════════════════════════════════════════════════════════
 echo ""

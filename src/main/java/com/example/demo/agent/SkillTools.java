@@ -8,6 +8,8 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -19,14 +21,20 @@ public class SkillTools {
     private final SkillRegistry registry;
     private final RestTemplate restTemplate;
     private final String apiBaseUrl;
+    private final boolean confirmBeforeMutate;
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<String> loadedSkills = new CopyOnWriteArrayList<>();
 
     public SkillTools(SkillRegistry registry, RestTemplate restTemplate,
-                      @Value("${app.api.base-url}") String apiBaseUrl) {
+                      @Value("${app.api.base-url}") String apiBaseUrl,
+                      @Value("${app.confirm-before-mutate:false}") boolean confirmBeforeMutate) {
         this.registry = registry;
         this.restTemplate = restTemplate;
         this.apiBaseUrl = apiBaseUrl;
+        this.confirmBeforeMutate = confirmBeforeMutate;
     }
+
+    public boolean isConfirmBeforeMutate() { return confirmBeforeMutate; }
 
     public void reset() { loadedSkills.clear(); }
     public List<String> getLoadedSkills() { return loadedSkills; }
@@ -58,6 +66,20 @@ public class SkillTools {
         @ToolParam(description = "请求体（JSON 对象）") Map<String, Object> body
     ) {
         try {
+            // 确认模式：非 GET 请求不在后端执行，返回元数据让前端确认
+            if (confirmBeforeMutate && !"GET".equalsIgnoreCase(method)) {
+                Map<String, Object> meta = new LinkedHashMap<>();
+                meta.put("method", method.toUpperCase());
+                meta.put("url", url);
+                if (params != null && !params.isEmpty()) meta.put("params", params);
+                if (body != null && !body.isEmpty()) meta.put("body", body);
+                String json = objectMapper.writeValueAsString(meta);
+                return "[CONFIRM_REQUIRED]\n此操作需要用户确认后才能执行。" +
+                       "请用自然语言向用户说明将要执行什么操作及其影响，" +
+                       "然后在消息末尾原样附上以下代码块：\n\n" +
+                       "```http-request\n" + json + "\n```";
+            }
+
             String fullUrl = url.startsWith("http") ? url : apiBaseUrl + url;
             var uriBuilder = UriComponentsBuilder.fromHttpUrl(fullUrl);
             if (params != null) params.forEach(uriBuilder::queryParam);

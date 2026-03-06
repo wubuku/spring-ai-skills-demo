@@ -13,6 +13,7 @@ spring:
 app:
   api:
     base-url: http://localhost:${server.port:8080}
+  confirm-before-mutate: false
 
 server:
   port: 8080

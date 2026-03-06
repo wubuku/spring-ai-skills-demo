@@ -52,6 +52,10 @@ Endpoints after startup:
 - **`service/AgentService`** — Wires `ChatClient` with the advisor and tools; resets skill state per request (stateless turns).
 - **`service/ProductService`** — In-memory product catalog and cart (no database). Pre-loaded with sample data.
 
+### Confirm-Before-Mutate Mode
+
+When `app.confirm-before-mutate=true`, non-GET `httpRequest` calls return `[CONFIRM_REQUIRED]` + a `` ```http-request `` code block (JSON metadata) instead of executing. The system prompt instructs the LLM to describe the operation and pass through the code block. The frontend (`index.html`) detects this block, shows confirm/cancel buttons, and executes the request client-side on confirmation.
+
 ### Skills Format
 
 Each skill lives in `src/main/resources/skills/<skill-name>/SKILL.md` with:

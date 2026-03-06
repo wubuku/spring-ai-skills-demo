@@ -13,12 +13,15 @@ public class SkillsAdvisor implements CallAroundAdvisor {
     private final SkillRegistry registry;
     private final SkillTools skillTools;
     private final String apiBaseUrl;
+    private final boolean confirmBeforeMutate;
 
     public SkillsAdvisor(SkillRegistry registry, SkillTools skillTools,
-                         @Value("${app.api.base-url}") String apiBaseUrl) {
+                         @Value("${app.api.base-url}") String apiBaseUrl,
+                         @Value("${app.confirm-before-mutate:false}") boolean confirmBeforeMutate) {
         this.registry = registry;
         this.skillTools = skillTools;
         this.apiBaseUrl = apiBaseUrl;
+        this.confirmBeforeMutate = confirmBeforeMutate;
     }
 
     @Override
@@ -60,6 +63,18 @@ public class SkillsAdvisor implements CallAroundAdvisor {
             4. API 基础 URL 是 %s（技能文档中的路径都是相对路径，调用 httpRequest 时只需传相对路径）
             5. 默认用户 ID 是 1
             %s
-            """.formatted(skillList, apiBaseUrl, loadedContext);
+            %s
+            """.formatted(skillList, apiBaseUrl, loadedContext, buildConfirmRule());
+    }
+    private String buildConfirmRule() {
+        if (!confirmBeforeMutate) return "";
+        return """
+            6. 【用户确认模式】当 httpRequest 工具返回包含 [CONFIRM_REQUIRED] 的结果时，
+               表示该操作需要用户手动确认后才能执行。你必须：
+               a) 先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据、预期结果）
+               b) 在消息末尾原样保留工具返回的 ```http-request 代码块（不要修改其中的 JSON 内容）
+               c) 绝不要省略代码块，也不要尝试自行执行该操作
+               d) 不要在代码块外重复展示请求参数的技术细节
+            """;
     }
 }

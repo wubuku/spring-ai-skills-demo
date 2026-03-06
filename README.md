@@ -39,10 +39,10 @@ SkillsAdvisor (CallAroundAdvisor, HIGHEST_PRECEDENCE)
   ▼
 LLM 决策
   ├── 调用 SkillTools.loadSkill(name)  → 获取完整 Markdown 指令 + 关联技能提示
-  ├── 调用 SkillTools.httpRequest(...)  → 请求本地 REST API
+  ├── 调用 SkillTools.httpRequest(...)  → 请求本地 REST API（或返回确认请求）
   │
   ▼
-返回结果给用户
+返回结果给用户（确认模式下，变更操作返回确认请求由前端执行）
 ```
 
 ### 核心组件
@@ -109,6 +109,9 @@ mvn clean package -DskipTests
 
 # 运行
 mvn spring-boot:run -DskipTests
+
+# 运行（开启确认模式：变更操作需用户手动确认）
+mvn spring-boot:run -DskipTests '-Dspring-boot.run.arguments=--app.confirm-before-mutate=true'
 ```
 
 ### 访问地址
@@ -186,7 +189,28 @@ curl -s -X POST http://localhost:8080/api/chat \
 
 预期行为：Agent 会依次加载 `add-to-cart` 和 `checkout` 技能，完成加购和结算。
 
-### 3. Web 界面测试
+### 3. 确认模式测试
+
+以 `confirm-before-mutate=true` 启动应用后，Agent 对变更操作（POST/PUT/DELETE）不会直接执行，而是返回包含 `` ```http-request `` 代码块的确认请求：
+
+```bash
+# 以确认模式启动
+mvn spring-boot:run -DskipTests '-Dspring-boot.run.arguments=--app.confirm-before-mutate=true'
+
+# 发送加购请求
+curl -s -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"content":"请把商品ID为3的商品加入购物车（用户ID=1）"}' \
+  --max-time 90
+```
+
+预期行为：
+1. Agent 不直接执行加购操作
+2. 返回操作说明 + `` ```http-request `` 代码块（含 method、url、params 等元数据）
+3. 前端展示说明文本和「确定」/「取消」按钮
+4. 用户点击「确定」后，前端根据元数据构造 HTTP 请求并发送到后端 API
+
+### 4. Web 界面测试
 
 在浏览器打开 http://localhost:8080 ，在聊天框中输入自然语言，如：
 
@@ -194,6 +218,18 @@ curl -s -X POST http://localhost:8080/api/chat \
 - "第一个商品的详细信息"
 - "把它加入购物车"
 - "帮我结算"
+
+开启确认模式后，加购和结算等变更操作会显示确认按钮，需用户手动确认后才执行。
+
+### 自动化测试
+
+项目包含回归测试脚本，覆盖 REST API、Agent 聊天、确认模式（前端执行）等场景：
+
+```bash
+./test.sh
+```
+
+测试脚本会自动启动应用、运行全部测试用例（含确认模式重启验证），最后输出通过/失败汇总。
 
 ### 已验证环境
 

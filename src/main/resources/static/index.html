@@ -104,6 +104,31 @@
             0%, 80%, 100% { transform: scale(0); }
             40% { transform: scale(1); }
         }
+        .confirm-buttons {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+        }
+        .confirm-btn, .cancel-btn {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 15px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .confirm-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .cancel-btn {
+            background: #e0e0e0;
+            color: #666;
+        }
+        .confirm-btn:hover, .cancel-btn:hover {
+            transform: scale(1.05);
+        }
     </style>
 </head>
 <body>
@@ -152,10 +177,15 @@
                     body: JSON.stringify({ content: userMessage })
                 });
                 const data = await response.json();
-
-                // 移除加载消息，显示回复
                 messages.removeChild(loadingDiv);
-                appendMessage('assistant', data.response);
+
+                // 检测是否包含需要用户确认的操作
+                const confirmAction = parseConfirmAction(data.response);
+                if (confirmAction) {
+                    showConfirmAction(confirmAction);
+                } else {
+                    appendMessage('assistant', data.response);
+                }
             } catch (error) {
                 messages.removeChild(loadingDiv);
                 appendMessage('assistant', '抱歉，服务出错了：' + error.message);
@@ -173,6 +203,78 @@
             messages.appendChild(div);
             messages.scrollTop = messages.scrollHeight;
             return div;
+        }
+
+        /** 检测响应中是否包含 ```http-request 代码块，提取描述和请求元数据 */
+        function parseConfirmAction(text) {
+            const regex = /```http-request\s*\n([\s\S]*?)\n\s*```/;
+            const match = text.match(regex);
+            if (!match) return null;
+            try {
+                const description = text.substring(0, match.index).trim();
+                const requestMeta = JSON.parse(match[1].trim());
+                return { description, requestMeta };
+            } catch (e) {
+                return null;
+            }
+        }
+
+        /** 前端版 httpRequest —— 根据元数据构造并发送 HTTP 请求 */
+        async function executeHttpRequest(meta) {
+            let url = meta.url;
+            if (meta.params) {
+                const sp = new URLSearchParams(meta.params);
+                url += '?' + sp.toString();
+            }
+            const opts = {
+                method: meta.method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (meta.body) {
+                opts.body = JSON.stringify(meta.body);
+            }
+            const resp = await fetch(url, opts);
+            return await resp.text();
+        }
+
+        /** 展示确认操作：说明文本 + 确定/取消按钮 */
+        function showConfirmAction(action) {
+            const messages = document.getElementById('messages');
+            const descHtml = action.description.replace(/\n/g, '<br>');
+            const msgDiv = appendMessage('assistant', descHtml);
+
+            const btnContainer = document.createElement('div');
+            btnContainer.className = 'confirm-buttons';
+
+            const confirmBtn = document.createElement('button');
+            confirmBtn.textContent = '确定';
+            confirmBtn.className = 'confirm-btn';
+            confirmBtn.onclick = async () => {
+                btnContainer.remove();
+                const loading = appendMessage('assistant',
+                    '<span class="loading"></span> 正在执行...');
+                try {
+                    const result = await executeHttpRequest(action.requestMeta);
+                    messages.removeChild(loading);
+                    appendMessage('assistant', '✅ 操作结果：' + result);
+                } catch (e) {
+                    messages.removeChild(loading);
+                    appendMessage('assistant', '❌ 操作失败：' + e.message);
+                }
+            };
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.textContent = '取消';
+            cancelBtn.className = 'cancel-btn';
+            cancelBtn.onclick = () => {
+                btnContainer.remove();
+                appendMessage('assistant', '已取消该操作。');
+            };
+
+            btnContainer.appendChild(confirmBtn);
+            btnContainer.appendChild(cancelBtn);
+            msgDiv.appendChild(btnContainer);
+            messages.scrollTop = messages.scrollHeight;
         }
     </script>
 </body>
