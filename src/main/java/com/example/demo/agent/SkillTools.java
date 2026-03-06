@@ -3,6 +3,7 @@ package com.example.demo.agent;
 import com.example.demo.model.Skill;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -17,11 +18,14 @@ public class SkillTools {
 
     private final SkillRegistry registry;
     private final RestTemplate restTemplate;
+    private final String apiBaseUrl;
     private final List<String> loadedSkills = new CopyOnWriteArrayList<>();
 
-    public SkillTools(SkillRegistry registry, RestTemplate restTemplate) {
+    public SkillTools(SkillRegistry registry, RestTemplate restTemplate,
+                      @Value("${app.api.base-url}") String apiBaseUrl) {
         this.registry = registry;
         this.restTemplate = restTemplate;
+        this.apiBaseUrl = apiBaseUrl;
     }
 
     public void reset() { loadedSkills.clear(); }
@@ -49,12 +53,13 @@ public class SkillTools {
     @Tool(description = "发送 HTTP 请求调用 REST API")
     public String httpRequest(
         @ToolParam(description = "HTTP 方法：GET/POST/PUT/DELETE") String method,
-        @ToolParam(description = "完整 URL，例如 http://localhost:8080/api/products") String url,
+        @ToolParam(description = "API 路径，例如 /api/products（相对路径会自动拼接 base URL）") String url,
         @ToolParam(description = "Query 参数（JSON 对象）") Map<String, String> params,
         @ToolParam(description = "请求体（JSON 对象）") Map<String, Object> body
     ) {
         try {
-            var uriBuilder = UriComponentsBuilder.fromHttpUrl(url);
+            String fullUrl = url.startsWith("http") ? url : apiBaseUrl + url;
+            var uriBuilder = UriComponentsBuilder.fromHttpUrl(fullUrl);
             if (params != null) params.forEach(uriBuilder::queryParam);
 
             var headers = new HttpHeaders();

@@ -14,7 +14,7 @@ links:
 
 ## API 端点
 ```
-POST http://localhost:8080/api/products/cart
+POST /api/products/cart
 ```
 
 ## 请求参数（Query）

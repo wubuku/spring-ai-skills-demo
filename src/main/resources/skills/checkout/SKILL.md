@@ -11,7 +11,7 @@ version: 1.0
 
 ## API 端点
 ```
-POST http://localhost:8080/api/products/checkout
+POST /api/products/checkout
 ```
 
 ## 请求参数（Query）

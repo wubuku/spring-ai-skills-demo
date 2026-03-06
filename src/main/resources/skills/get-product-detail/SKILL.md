@@ -14,7 +14,7 @@ links:
 
 ## API 端点
 ```
-GET http://localhost:8080/api/products/{id}
+GET /api/products/{id}
 ```
 
 ## 路径参数

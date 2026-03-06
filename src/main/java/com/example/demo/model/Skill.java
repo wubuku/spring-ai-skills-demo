@@ -18,6 +18,7 @@ public class Skill {
     public static class SkillMeta {
         private String name;
         private String description;
+        private String version;
         private List<SkillLink> links;
     }
 
