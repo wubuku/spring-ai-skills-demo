@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # 回归测试脚本 - 启动应用并验证所有端点
-# 用法: ./test.sh
+# 用法: ./test.sh [--stop]
+#   --stop  测试完成后停止已存在的服务（默认保留）
 # 前置条件: .env 文件已配置（参见 README.md）
 #
 
@@ -11,11 +12,21 @@ BASE_URL="http://localhost:8080"
 APP_PID=""
 PASS=0
 FAIL=0
+SERVICE_ALREADY_RUNNING=false
+STOP_AFTER_TEST=false
 
 # ── 颜色输出 ──────────────────────────────────────────────
 green()  { printf "\033[32m%s\033[0m\n" "$*"; }
 red()    { printf "\033[31m%s\033[0m\n" "$*"; }
 bold()   { printf "\033[1m%s\033[0m\n" "$*"; }
+yellow() { printf "\033[33m%s\033[0m\n" "$*"; }
+
+# ── 检查服务是否健康 ──────────────────────────────────────
+check_service_health() {
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/products" 2>/dev/null)
+    [ "$http_code" = "200" ]
+}
 
 # ── 清理函数 ──────────────────────────────────────────────
 cleanup() {
@@ -25,7 +36,10 @@ cleanup() {
         kill "$APP_PID" 2>/dev/null
         wait "$APP_PID" 2>/dev/null
     fi
-    lsof -ti:8080 | xargs kill -9 2>/dev/null
+    # 只有在指定 --stop 或者是我们自己启动的服务时才清理
+    if [ "$STOP_AFTER_TEST" = "true" ] || [ "$SERVICE_ALREADY_RUNNING" = "false" ]; then
+        lsof -ti:8080 | xargs kill -9 2>/dev/null
+    fi
 }
 trap cleanup EXIT
 
@@ -59,6 +73,13 @@ assert_not_empty() {
     fi
 }
 
+# ── 解析参数 ──────────────────────────────────────────────
+for arg in "$@"; do
+    case $arg in
+        --stop) STOP_AFTER_TEST=true ;;
+    esac
+done
+
 # ── 加载环境变量 ──────────────────────────────────────────
 if [ ! -f .env ]; then
     red "错误: .env 文件不存在，请参考 README.md 创建"
@@ -66,33 +87,44 @@ if [ ! -f .env ]; then
 fi
 set -a && source .env && set +a
 
-# ── 确保端口空闲 ──────────────────────────────────────────
-lsof -ti:8080 | xargs kill -9 2>/dev/null
-sleep 1
-
-# ── 启动应用 ──────────────────────────────────────────────
-bold "Starting application..."
-mvn spring-boot:run -DskipTests > /tmp/spring-ai-test.log 2>&1 &
-APP_PID=$!
-
-# 等待应用启动
+# ── 检查服务是否已运行 ────────────────────────────────────
 MAX_WAIT=60
 WAITED=0
-while [ $WAITED -lt $MAX_WAIT ]; do
-    if curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/products" 2>/dev/null | grep -q "200"; then
-        break
-    fi
-    sleep 2
-    WAITED=$((WAITED + 2))
-done
 
-if [ $WAITED -ge $MAX_WAIT ]; then
-    red "错误: 应用启动超时 (${MAX_WAIT}s)"
-    red "日志: $(tail -20 /tmp/spring-ai-test.log)"
-    exit 1
+if check_service_health; then
+    yellow "检测到端口 8080 已有服务运行"
+    SERVICE_ALREADY_RUNNING=true
+    green "使用现有服务执行测试"
+    echo ""
+else
+    # ── 确保端口空闲 ──────────────────────────────────────
+    lsof -ti:8080 | xargs kill -9 2>/dev/null
+    sleep 1
+
+    # ── 启动应用 ──────────────────────────────────────────
+    bold "Starting application..."
+    # 强制 JDK HttpClient 使用 HTTP/1.1，规避 HTTP/2 EOF 问题
+    MAVEN_OPTS="-Djdk.httpclient.HttpClient.log=errors -Djava.net.preferIPv4Stack=true" \
+    mvn spring-boot:run -DskipTests > /tmp/spring-ai-test.log 2>&1 &
+    APP_PID=$!
+
+    # 等待应用启动
+    while [ $WAITED -lt $MAX_WAIT ]; do
+        if check_service_health; then
+            break
+        fi
+        sleep 2
+        WAITED=$((WAITED + 2))
+    done
+
+    if [ $WAITED -ge $MAX_WAIT ]; then
+        red "错误: 应用启动超时 (${MAX_WAIT}s)"
+        red "日志: $(tail -20 /tmp/spring-ai-test.log)"
+        exit 1
+    fi
+    green "Application started (PID $APP_PID, ${WAITED}s)"
+    echo ""
 fi
-green "Application started (PID $APP_PID, ${WAITED}s)"
-echo ""
 
 # ══════════════════════════════════════════════════════════
 #  TEST 1: REST API
@@ -163,6 +195,9 @@ bold "[TEST 6] 确认模式 - 前端执行场景"
 if ! command -v jq &>/dev/null; then
     red "  ⚠ 跳过 TEST 6: 需要安装 jq"
     FAIL=$((FAIL + 1))
+elif [ "$SERVICE_ALREADY_RUNNING" = "true" ]; then
+    yellow "  ⚠ 跳过 TEST 6: 使用现有服务无法测试确认模式重启"
+    yellow "    (如需测试确认模式，请先停止现有服务后重新运行)"
 else
     # 停止当前应用
     bold "  Restarting with confirm-before-mutate=true..."
@@ -173,6 +208,7 @@ else
     sleep 2
 
     # 以确认模式重启
+    MAVEN_OPTS="-Djdk.httpclient.HttpClient.log=errors -Djava.net.preferIPv4Stack=true" \
     mvn spring-boot:run -DskipTests \
         -Dspring-boot.run.arguments="--app.confirm-before-mutate=true" \
         > /tmp/spring-ai-test.log 2>&1 &
