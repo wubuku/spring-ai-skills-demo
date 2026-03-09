@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.core.io.ClassPathResource;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -101,6 +102,22 @@ public class SkillTools {
                 : responseBody;
         } catch (Exception e) {
             return "HTTP 请求失败：" + e.getMessage();
+        }
+    }
+
+    @Tool(description = "读取技能的参考文件（适用于具有分层结构的技能，如 OpenAPI 生成的技能）")
+    public String readSkillReference(
+        @ToolParam(description = "技能名称，例如 swagger-petstore-openapi-3-0") String skillName,
+        @ToolParam(description = "相对于该技能 references 目录的路径，例如 resources/pet.md 或 operations/addPet.md") String relativePath
+    ) {
+        try {
+            var resource = new ClassPathResource("skills/" + skillName + "/references/" + relativePath);
+            String content = new String(resource.getInputStream().readAllBytes());
+            return content.length() > 4000
+                ? content.substring(0, 4000) + "\n...[文件过长已截断]"
+                : content;
+        } catch (Exception e) {
+            return "✗ 读取参考文件失败：skills/" + skillName + "/references/" + relativePath + " — " + e.getMessage();
         }
     }
 }

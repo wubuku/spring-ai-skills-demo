@@ -50,7 +50,7 @@ public class SkillsAdvisor implements CallAroundAdvisor {
             .collect(Collectors.joining());
 
         return """
-            你是一个智能购物助手。可用技能如下：
+            你是一个智能助手。可用技能如下：
 
             <available_skills>
             %s
@@ -61,7 +61,8 @@ public class SkillsAdvisor implements CallAroundAdvisor {
             2. 不要凭记忆猜测 API 参数，必须先加载技能查看文档
             3. 加载技能后，注意其 links 字段提示的关联技能
             4. API 基础 URL 是 %s（技能文档中的路径都是相对路径，调用 httpRequest 时只需传相对路径）
-            5. 默认用户 ID 是 1
+            5. 部分技能具有分层结构（如 OpenAPI 生成的技能），其 SKILL.md 中会列出 references 目录下的参考文件路径，
+               需要调用 `readSkillReference` 工具读取具体的资源/操作文档，再据此调用 `httpRequest`
             %s
             %s
             """.formatted(skillList, apiBaseUrl, loadedContext, buildConfirmRule());
