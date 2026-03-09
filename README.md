@@ -1,8 +1,16 @@
 # Spring AI Skills Demo
 
-一个 Spring Boot 示例项目，展示如何使用 **Spring AI Skills 渐进式披露**机制构建 AI 购物助手 Agent。
+一个 Spring Boot 示例项目，展示如何使用 **Spring AI Skills 渐进式披露**机制构建 AI Agent。
 
-核心思路：LLM 初始只看到简短的技能目录（Level 1 元数据），需要时再调用 `loadSkill` 按需加载完整 API 指令（Level 2），相比一次性注入完整 OpenAPI 规范可减少 60-75% 的 token 消耗。
+核心思路：LLM 初始只看到简短的技能目录（Level 1 元数据），需要时再调用 `loadSkill` 按需加载完整 API 指令（Level 2），对于复杂的分层 Skill（如 OpenAPI 规范生成的），可进一步调用 `readSkillReference` 按需读取具体操作/资源文档（Level 3），相比一次性注入完整规范可减少 60-90% 的 token 消耗。
+
+## 功能特性
+
+- **渐进式披露 Skills** - 三级加载机制：目录 → 技能文档 → 参考文件
+- **分层 Skill 结构** - 支持 OpenAPI 规范生成的复杂技能
+- **PetStore Mock 后端** - 完整的 Swagger PetStore API 示例实现
+- **确认模式** - 变更操作需用户手动确认后才执行
+- **OkHttp 重试机制** - 处理 LLM API 的间歇性网络问题
 
 ## 技术栈
 
@@ -12,6 +20,7 @@
 | Spring AI | 1.0.0-M6 |
 | Java | 17+ |
 | springdoc-openapi | 2.8.6 |
+| OkHttp | 4.12.0 |
 | Maven | 3.8+ |
 
 兼容任何 OpenAI API 兼容的 LLM 服务（OpenAI、DeepSeek 等）。
@@ -38,26 +47,39 @@ SkillsAdvisor (CallAroundAdvisor, HIGHEST_PRECEDENCE)
   │
   ▼
 LLM 决策
-  ├── 调用 SkillTools.loadSkill(name)  → 获取完整 Markdown 指令 + 关联技能提示
-  ├── 调用 SkillTools.httpRequest(...)  → 请求本地 REST API（或返回确认请求）
+  ├── 调用 SkillTools.loadSkill(name)       → 获取技能概述 + 参考文件索引
+  ├── 调用 SkillTools.readSkillReference()  → 按需读取具体操作/资源/Schema 文档
+  ├── 调用 SkillTools.httpRequest(...)      → 请求 REST API（或返回确认请求）
   │
   ▼
 返回结果给用户（确认模式下，变更操作返回确认请求由前端执行）
 ```
+
+### 三级渐进式披露
+
+| Level | 工具 | 内容 | 示例 |
+|-------|------|------|------|
+| 1 | System Prompt | 技能目录（名称+描述） | `swagger-petstore-openapi-3-0: Pet Store API` |
+| 2 | `loadSkill` | 技能概述 + 参考文件索引 | SKILL.md（含 resources/operations/schemas 目录结构） |
+| 3 | `readSkillReference` | 具体操作/资源文档 | `operations/findPetsByStatus.md`, `schemas/Pet.md` |
 
 ### 核心组件
 
 | 组件 | 职责 |
 |------|------|
 | `agent/SkillRegistry` | 启动时读取 `resources/skills/*/SKILL.md`，解析 YAML frontmatter + Markdown body |
-| `agent/SkillTools` | `@Tool` 方法：`loadSkill`（渐进式披露入口）和 `httpRequest`（通用 HTTP 调用） |
+| `agent/SkillTools` | `@Tool` 方法：`loadSkill`（加载技能）、`readSkillReference`（读取参考文件）、`httpRequest`（HTTP 调用） |
 | `agent/SkillsAdvisor` | `CallAroundAdvisor`，构建含 Level 1 目录 + Level 2 已加载内容的 System Prompt |
 | `service/AgentService` | 编排 `ChatClient` + Advisor + Tools，每次请求重置技能状态 |
 | `service/ProductService` | 内存商品目录和购物车（无数据库），预置 5 条示例数据 |
+| `petstore/*` | PetStore Mock 后端（Controller + Service + Model） |
+| `config/SpringAiConfig` | OkHttp 配置，含响应体缓冲和 EOFException 重试机制 |
 
 ### Skills 格式
 
 每个技能位于 `src/main/resources/skills/<skill-name>/SKILL.md`：
+
+#### 简单技能（单文件）
 
 ```yaml
 ---
@@ -71,12 +93,36 @@ links:
 
 # 商品搜索技能
 ## API 端点
-GET http://localhost:8080/api/products
+GET /api/products
 ...
 ```
 
-- YAML frontmatter（`---` 分隔）：`name`、`description`、`version`、可选 `links`（关联技能）
-- Markdown body：API 端点、参数、示例、下一步建议
+#### 分层技能（OpenAPI 生成）
+
+```
+skills/swagger-petstore-openapi-3-0/
+├── SKILL.md                    # Level 2: 技能概述 + 目录索引
+└── references/                 # Level 3: 参考文件
+    ├── authentication.md       # 认证说明
+    ├── resources/              # 资源文档
+    │   ├── pet.md
+    │   ├── store.md
+    │   └── user.md
+    ├── operations/             # 操作文档（19个）
+    │   ├── findPetsByStatus.md
+    │   ├── getPetById.md
+    │   └── ...
+    └── schemas/                # Schema 文档（6个）
+        ├── Pet/Pet.md
+        ├── Order/Order.md
+        └── ...
+```
+
+LLM 工作流程：
+1. 看到 `swagger-petstore-openapi-3-0` 目录条目
+2. 调用 `loadSkill("swagger-petstore-openapi-3-0")` 获取概述
+3. 根据需要调用 `readSkillReference("swagger-petstore-openapi-3-0", "operations/findPetsByStatus.md")` 获取详细文档
+4. 调用 `httpRequest` 执行 API 操作
 
 技能通过 `links` 形成有向图，支持链式发现：`search-products → get-product-detail → add-to-cart → checkout`。
 
@@ -226,13 +272,57 @@ curl -s -X POST http://localhost:8080/api/chat \
 项目包含回归测试脚本，覆盖 REST API、Agent 聊天、确认模式（前端执行）等场景：
 
 ```bash
+# 主测试脚本（购物助手场景）- 21 个测试用例
 ./test.sh
+
+# PetStore 测试脚本（分层 Skill 场景）- 13 个测试用例
+./test-petstore.sh
 ```
 
-测试脚本会自动启动应用、运行全部测试用例（含确认模式重启验证），最后输出通过/失败汇总。
+测试脚本会自动启动应用、运行全部测试用例，最后输出通过/失败汇总。
 
 ### 已验证环境
 
-- macOS + JDK 23 + Maven 3.9
+- macOS + JDK 17+ + Maven 3.9
 - DeepSeek API (`deepseek-chat` 模型)
 - Spring AI 1.0.0-M6 + Spring Boot 3.4.0
+
+## 项目结构
+
+```
+src/main/java/com/example/demo/
+├── agent/
+│   ├── SkillRegistry.java      # 技能注册表
+│   ├── SkillTools.java         # @Tool 方法
+│   └── SkillsAdvisor.java      # System Prompt 构建
+├── config/
+│   └── SpringAiConfig.java     # OkHttp + 重试配置
+├── controller/
+│   ├── ChatController.java     # 聊天 API
+│   └── ProductController.java  # 商品 REST API
+├── petstore/                   # PetStore Mock 后端
+│   ├── PetController.java
+│   ├── StoreController.java
+│   ├── UserController.java
+│   ├── PetStoreService.java
+│   └── model/
+├── service/
+│   ├── AgentService.java
+│   └── ProductService.java
+└── model/
+
+src/main/resources/
+├── skills/
+│   ├── search-products/SKILL.md
+│   ├── get-product-detail/SKILL.md
+│   ├── add-to-cart/SKILL.md
+│   ├── checkout/SKILL.md
+│   └── swagger-petstore-openapi-3-0/   # 分层技能示例
+│       ├── SKILL.md
+│       └── references/
+│           ├── operations/
+│           ├── resources/
+│           └── schemas/
+├── petstore.yaml              # OpenAPI 3.0 规范
+└── application.yml
+```
