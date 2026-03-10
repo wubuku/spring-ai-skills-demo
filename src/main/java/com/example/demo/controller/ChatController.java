@@ -17,7 +17,10 @@ public class ChatController {
 
     @PostMapping
     public Map<String, String> chat(@RequestBody ChatMessage message) {
-        String response = agentService.chat(message.getContent());
+        // 使用 conversationId 区分不同会话，默认为 "default"
+        String conversationId = message.getConversationId() != null ?
+            message.getConversationId() : "default";
+        String response = agentService.chat(message.getContent(), conversationId);
         return Map.of("response", response);
     }
 }

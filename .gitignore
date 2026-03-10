@@ -15,3 +15,6 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+
+# H2 Database files
+data/

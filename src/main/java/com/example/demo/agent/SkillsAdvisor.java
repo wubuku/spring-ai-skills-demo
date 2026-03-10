@@ -1,14 +1,17 @@
 package com.example.demo.agent;
 
 import com.example.demo.model.Skill;
-import org.springframework.ai.chat.client.advisor.api.*;
+import org.springframework.ai.chat.client.ChatClientRequest;
+import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
 import java.util.stream.Collectors;
 
 @Component
-public class SkillsAdvisor implements CallAroundAdvisor {
+public class SkillsAdvisor implements CallAdvisor {
 
     private final SkillRegistry registry;
     private final SkillTools skillTools;
@@ -31,11 +34,12 @@ public class SkillsAdvisor implements CallAroundAdvisor {
     public int getOrder() { return Ordered.HIGHEST_PRECEDENCE; }
 
     @Override
-    public AdvisedResponse aroundCall(AdvisedRequest request, CallAroundAdvisorChain chain) {
-        AdvisedRequest augmented = AdvisedRequest.from(request)
-            .systemText(buildSystemPrompt())
+    public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
+        String systemPrompt = buildSystemPrompt();
+        ChatClientRequest augmented = request.mutate()
+            .prompt(request.prompt().augmentSystemMessage(systemPrompt))
             .build();
-        return chain.nextAroundCall(augmented);
+        return chain.nextCall(augmented);
     }
 
     private String buildSystemPrompt() {

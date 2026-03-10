@@ -12,9 +12,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -38,13 +40,13 @@ public class SpringAiConfig {
 
     @Bean
     @Primary
-    public RestClient.Builder restClientBuilder() {
-        OkHttpClient okHttpClient = new OkHttpClient.Builder()
+    public OkHttpClient okHttpClient() {
+        return new OkHttpClient.Builder()
                 .retryOnConnectionFailure(true)
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
-                .protocols(java.util.Collections.singletonList(okhttp3.Protocol.HTTP_1_1))
+                .protocols(Collections.singletonList(okhttp3.Protocol.HTTP_1_1))
                 .addInterceptor(chain -> {
                     Request request = chain.request();
                     // 这条日志出现就证明请求走的是 OkHttp
@@ -100,16 +102,31 @@ public class SpringAiConfig {
                     throw new RuntimeException("OkHttp retry exhausted", lastException);
                 })
                 .build();
+    }
 
+    @Bean
+    @Primary
+    @SuppressWarnings("deprecation")
+    public ClientHttpRequestFactory clientHttpRequestFactory(OkHttpClient okHttpClient) {
+        return new org.springframework.http.client.OkHttp3ClientHttpRequestFactory(okHttpClient);
+    }
+
+    @Bean
+    @Primary
+    public RestClient.Builder restClientBuilder(ClientHttpRequestFactory clientHttpRequestFactory) {
         return RestClient.builder()
-                .requestFactory(new org.springframework.http.client.OkHttp3ClientHttpRequestFactory(okHttpClient));
+                .requestFactory(clientHttpRequestFactory);
     }
 
     @Bean
     @Primary
     public OpenAiApi openAiApi(RestClient.Builder restClientBuilder) {
-        WebClient.Builder webClientBuilder = WebClient.builder();
-        return new OpenAiApi(baseUrl, apiKey, restClientBuilder, webClientBuilder);
+        return OpenAiApi.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .restClientBuilder(restClientBuilder)
+                .webClientBuilder(WebClient.builder())
+                .build();
     }
 
     @Bean
@@ -120,6 +137,9 @@ public class SpringAiConfig {
                 .temperature(temperature)
                 .build();
 
-        return new OpenAiChatModel(openAiApi, options);
+        return OpenAiChatModel.builder()
+                .openAiApi(openAiApi)
+                .defaultOptions(options)
+                .build();
     }
 }

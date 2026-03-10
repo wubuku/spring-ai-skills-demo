@@ -9,6 +9,7 @@
 - **渐进式披露 Skills** - 三级加载机制：目录 → 技能文档 → 参考文件
 - **分层 Skill 结构** - 支持 OpenAPI 规范生成的复杂技能
 - **PetStore Mock 后端** - 完整的 Swagger PetStore API 示例实现
+- **会话记忆系统** - 基于 H2 数据库的持久化对话记忆，支持多会话隔离
 - **确认模式** - 变更操作需用户手动确认后才执行
 - **OkHttp 重试机制** - 处理 LLM API 的间歇性网络问题
 
@@ -16,11 +17,12 @@
 
 | 组件 | 版本 |
 |------|------|
-| Spring Boot | 3.4.0 |
-| Spring AI | 1.0.0-M6 |
+| Spring Boot | 3.4.2 |
+| Spring AI | 1.1.0 |
 | Java | 17+ |
-| springdoc-openapi | 2.8.6 |
+| springdoc-openapi | 2.6.0 |
 | OkHttp | 4.12.0 |
+| H2 Database | 2.3.232 |
 | Maven | 3.8+ |
 
 兼容任何 OpenAI API 兼容的 LLM 服务（OpenAI、DeepSeek 等）。
@@ -40,7 +42,11 @@ AgentService.chat()
   ├── 重置已加载技能（无状态）
   │
   ▼
-SkillsAdvisor (CallAroundAdvisor, HIGHEST_PRECEDENCE)
+MessageChatMemoryAdvisor
+  ├── 从 H2 数据库加载历史消息
+  │
+  ▼
+SkillsAdvisor (CallAdvisor, HIGHEST_PRECEDENCE)
   ├── 注入 System Prompt：
   │   ├── Level 1: 所有技能名称 + 描述（来自 SkillRegistry）
   │   └── Level 2: 当前对话已加载技能的完整指令
@@ -50,6 +56,10 @@ LLM 决策
   ├── 调用 SkillTools.loadSkill(name)       → 获取技能概述 + 参考文件索引
   ├── 调用 SkillTools.readSkillReference()  → 按需读取具体操作/资源/Schema 文档
   ├── 调用 SkillTools.httpRequest(...)      → 请求 REST API（或返回确认请求）
+  │
+  ▼
+MessageChatMemoryAdvisor
+  ├── 将对话保存到 H2 数据库
   │
   ▼
 返回结果给用户（确认模式下，变更操作返回确认请求由前端执行）
@@ -69,11 +79,35 @@ LLM 决策
 |------|------|
 | `agent/SkillRegistry` | 启动时读取 `resources/skills/*/SKILL.md`，解析 YAML frontmatter + Markdown body |
 | `agent/SkillTools` | `@Tool` 方法：`loadSkill`（加载技能）、`readSkillReference`（读取参考文件）、`httpRequest`（HTTP 调用） |
-| `agent/SkillsAdvisor` | `CallAroundAdvisor`，构建含 Level 1 目录 + Level 2 已加载内容的 System Prompt |
-| `service/AgentService` | 编排 `ChatClient` + Advisor + Tools，每次请求重置技能状态 |
+| `agent/SkillsAdvisor` | `CallAdvisor`，构建含 Level 1 目录 + Level 2 已加载内容的 System Prompt |
+| `service/AgentService` | 编排 `ChatClient` + Advisor + Tools + ChatMemory |
 | `service/ProductService` | 内存商品目录和购物车（无数据库），预置 5 条示例数据 |
 | `petstore/*` | PetStore Mock 后端（Controller + Service + Model） |
 | `config/SpringAiConfig` | OkHttp 配置，含响应体缓冲和 EOFException 重试机制 |
+
+### 会话记忆系统
+
+基于 Spring AI 的 `JdbcChatMemoryRepository` + H2 文件数据库实现：
+
+- **持久化存储**：对话历史保存在 `./data/chat-memory.mv.db`
+- **消息窗口**：保留最近 20 条消息，防止上下文过长
+- **多会话隔离**：通过 `conversationId` 区分不同会话
+- **自动配置**：使用 `spring-ai-starter-model-chat-memory-repository-jdbc` 自动配置
+
+```java
+// AgentService.java
+ChatMemory chatMemory = MessageWindowChatMemory.builder()
+        .chatMemoryRepository(jdbcChatMemoryRepository)
+        .maxMessages(20)
+        .build();
+
+this.chatClient = builder
+    .defaultAdvisors(
+        skillsAdvisor,
+        MessageChatMemoryAdvisor.builder(chatMemory).build()
+    )
+    .build();
+```
 
 ### Skills 格式
 
@@ -167,6 +201,12 @@ mvn spring-boot:run -DskipTests '-Dspring-boot.run.arguments=--app.confirm-befor
 | 聊天界面 | http://localhost:8080 |
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 | OpenAPI JSON | http://localhost:8080/v3/api-docs |
+| H2 控制台 | http://localhost:8080/h2-console |
+
+H2 控制台连接信息：
+- JDBC URL: `jdbc:h2:file:./data/chat-memory`
+- 用户名: `sa`
+- 密码: (空)
 
 ## 测试验证
 
@@ -235,7 +275,48 @@ curl -s -X POST http://localhost:8080/api/chat \
 
 预期行为：Agent 会依次加载 `add-to-cart` 和 `checkout` 技能，完成加购和结算。
 
-### 3. 确认模式测试
+### 3. 会话记忆测试
+
+测试 Agent 是否能记住上下文信息：
+
+```bash
+# 第一次对话：告诉 Agent 你的名字
+curl -s -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"content":"你好，我叫张三", "conversationId": "memory-test-001"}' \
+  --max-time 60
+```
+
+```bash
+# 第二次对话：询问 Agent 是否记得你的名字
+curl -s -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"content":"你记得我叫什么名字吗？", "conversationId": "memory-test-001"}' \
+  --max-time 60
+```
+
+预期行为：Agent 应该回复记得你叫"张三"。
+
+验证数据库持久化：
+```bash
+# 检查 H2 数据库文件
+ls -la ./data/chat-memory.mv.db
+```
+
+预期结果：数据库文件存在且有内容（约 40KB+）。
+
+多会话隔离测试：
+```bash
+# 使用不同的 conversationId，Agent 不会记住之前的信息
+curl -s -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"content":"你记得我叫什么名字吗？", "conversationId": "memory-test-002"}' \
+  --max-time 60
+```
+
+预期行为：Agent 会表示不记得（因为这是新会话）。
+
+### 4. 确认模式测试
 
 以 `confirm-before-mutate=true` 启动应用后，Agent 对变更操作（POST/PUT/DELETE）不会直接执行，而是返回包含 `` ```http-request `` 代码块的确认请求：
 
@@ -256,7 +337,7 @@ curl -s -X POST http://localhost:8080/api/chat \
 3. 前端展示说明文本和「确定」/「取消」按钮
 4. 用户点击「确定」后，前端根据元数据构造 HTTP 请求并发送到后端 API
 
-### 4. Web 界面测试
+### 5. Web 界面测试
 
 在浏览器打开 http://localhost:8080 ，在聊天框中输入自然语言，如：
 
@@ -285,7 +366,7 @@ curl -s -X POST http://localhost:8080/api/chat \
 
 - macOS + JDK 17+ + Maven 3.9
 - DeepSeek API (`deepseek-chat` 模型)
-- Spring AI 1.0.0-M6 + Spring Boot 3.4.0
+- Spring AI 1.1.0 + Spring Boot 3.4.2
 
 ## 项目结构
 
@@ -307,7 +388,7 @@ src/main/java/com/example/demo/
 │   ├── PetStoreService.java
 │   └── model/
 ├── service/
-│   ├── AgentService.java
+│   ├── AgentService.java       # 集成 ChatMemory
 │   └── ProductService.java
 └── model/
 
@@ -325,4 +406,20 @@ src/main/resources/
 │           └── schemas/
 ├── petstore.yaml              # OpenAPI 3.0 规范
 └── application.yml
+
+data/                          # H2 数据库文件（自动创建）
+├── chat-memory.mv.db          # 对话记忆数据库
+└── chat-memory.trace.db       # 数据库跟踪日志
 ```
+
+## 升级说明
+
+从 Spring AI 1.0.0-M6 升级到 1.1.0 的主要变更：
+
+| 变更类型 | M6 | 1.1.0 |
+|---------|-----|-------|
+| Artifact 命名 | `spring-ai-openai-spring-boot-starter` | `spring-ai-starter-model-openai` |
+| Advisor API | `CallAroundAdvisor` | `CallAdvisor` |
+| Request/Response | `AdvisedRequest`/`AdvisedResponse` | `ChatClientRequest`/`ChatClientResponse` |
+| Chat Memory 包名 | `org.springframework.ai.chat.memory.jdbc` | `org.springframework.ai.chat.memory.repository.jdbc` |
+| Chat Memory Starter | 无 | `spring-ai-starter-model-chat-memory-repository-jdbc` |

@@ -1,6 +1,21 @@
 spring:
   application:
     name: spring-ai-skills-demo
+
+  # H2 文件型数据库（数据持久化到 ./data/chat-memory.mv.db）
+  datasource:
+    url: jdbc:h2:file:./data/chat-memory;DB_CLOSE_ON_EXIT=FALSE;DB_CLOSE_DELAY=-1;AUTO_RECONNECT=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  # H2 控制台（调试用）
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  # Spring AI 配置
   ai:
     openai:
       api-key: ${OPENAI_API_KEY}
@@ -10,6 +25,13 @@ spring:
         options:
           model: ${OPENAI_MODEL:gpt-4o}
           temperature: 0.7
+    # Chat Memory JDBC 配置
+    chat:
+      memory:
+        repository:
+          jdbc:
+            initialize-schema: always
+            platform: h2
     retry:
       max-attempts: 5
       initial-interval: 3000
