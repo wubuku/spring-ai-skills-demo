@@ -47,32 +47,53 @@ public class SkillTools {
         return registry.get(skillName)
             .map(skill -> {
                 loadedSkills.add(skillName);
-                String linksHint = skill.getMeta().getLinks() == null || 
+                String linksHint = skill.getMeta().getLinks() == null ||
                     skill.getMeta().getLinks().isEmpty() ? "" :
-                    "\n\n**相关技能（按需加载）：**\n" + 
+                    "\n\n**相关技能（按需加载）：**\n" +
                     skill.getMeta().getLinks().stream()
                         .map(l -> "- `" + l.getName() + "`：" + l.getDescription())
                         .collect(Collectors.joining("\n"));
-                return "✓ 技能 `" + skillName + "` 已加载" + linksHint + 
+                return "✓ 技能 `" + skillName + "` 已加载" + linksHint +
                        "\n\n---\n" + skill.getBody();
             })
             .orElse("✗ 错误：技能 `" + skillName + "` 不存在");
     }
 
-    @Tool(description = "发送 HTTP 请求调用 REST API")
+    /**
+     * 发送 HTTP 请求调用 REST API
+     *
+     * 支持的参数位置（对应 OpenAPI 的 "in" 字段）：
+     * - path: 路径参数，用于替换 URL 中的占位符，如 /pet/{petId}
+     * - query: 查询参数，拼接到 URL 的 ? 之后
+     * - header: 请求头，用于认证等
+     * - body: 请求体，用于 POST/PUT 等方法
+     */
+    @Tool(description = "发送 HTTP 请求调用 REST API。支持路径参数、查询参数、请求头和请求体。")
     public String httpRequest(
         @ToolParam(description = "HTTP 方法：GET/POST/PUT/DELETE") String method,
-        @ToolParam(description = "API 路径，例如 /api/products（相对路径会自动拼接 base URL）") String url,
-        @ToolParam(description = "Query 参数（JSON 对象）") Map<String, String> params,
-        @ToolParam(description = "请求体（JSON 对象）") Map<String, Object> body
+        @ToolParam(description = "API 路径，可包含占位符如 /pet/{petId}（相对路径会自动拼接 base URL）") String url,
+        @ToolParam(description = "路径参数，用于替换 URL 中的占位符，如 {\"petId\": \"123\"}") Map<String, String> pathParams,
+        @ToolParam(description = "查询参数（URL 中 ? 之后的部分）") Map<String, String> queryParams,
+        @ToolParam(description = "请求头（如认证信息）") Map<String, String> headers,
+        @ToolParam(description = "请求体（JSON 对象，用于 POST/PUT）") Map<String, Object> body
     ) {
         try {
+            // Step 1: 替换路径参数（如 /pet/{petId} -> /pet/123）
+            String resolvedUrl = url;
+            if (pathParams != null && !pathParams.isEmpty()) {
+                for (Map.Entry<String, String> entry : pathParams.entrySet()) {
+                    resolvedUrl = resolvedUrl.replace("{" + entry.getKey() + "}", entry.getValue());
+                }
+            }
+
             // 确认模式：非 GET 请求不在后端执行，返回元数据让前端确认
             if (confirmBeforeMutate && !"GET".equalsIgnoreCase(method)) {
                 Map<String, Object> meta = new LinkedHashMap<>();
                 meta.put("method", method.toUpperCase());
-                meta.put("url", url);
-                if (params != null && !params.isEmpty()) meta.put("params", params);
+                meta.put("url", resolvedUrl);
+                if (pathParams != null && !pathParams.isEmpty()) meta.put("pathParams", pathParams);
+                if (queryParams != null && !queryParams.isEmpty()) meta.put("queryParams", queryParams);
+                if (headers != null && !headers.isEmpty()) meta.put("headers", headers);
                 if (body != null && !body.isEmpty()) meta.put("body", body);
                 String json = objectMapper.writeValueAsString(meta);
                 return "[CONFIRM_REQUIRED]\n此操作需要用户确认后才能执行。" +
@@ -81,21 +102,29 @@ public class SkillTools {
                        "```http-request\n" + json + "\n```";
             }
 
-            String fullUrl = url.startsWith("http") ? url : apiBaseUrl + url;
+            // Step 2: 构建完整 URL（拼接 base URL + 查询参数）
+            String fullUrl = resolvedUrl.startsWith("http") ? resolvedUrl : apiBaseUrl + resolvedUrl;
             var uriBuilder = UriComponentsBuilder.fromHttpUrl(fullUrl);
-            if (params != null) params.forEach(uriBuilder::queryParam);
+            if (queryParams != null && !queryParams.isEmpty()) {
+                queryParams.forEach(uriBuilder::queryParam);
+            }
 
-            var headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            var entity = new HttpEntity<>(body, headers);
-            
+            // Step 3: 构建请求头
+            var httpHeaders = new HttpHeaders();
+            httpHeaders.setContentType(MediaType.APPLICATION_JSON);
+            if (headers != null && !headers.isEmpty()) {
+                headers.forEach(httpHeaders::set);
+            }
+            var entity = new HttpEntity<>(body, httpHeaders);
+
+            // Step 4: 发送请求
             var response = restTemplate.exchange(
                 uriBuilder.toUriString(),
                 HttpMethod.valueOf(method.toUpperCase()),
                 entity,
                 String.class
             );
-            
+
             String responseBody = response.getBody();
             return responseBody != null && responseBody.length() > 3000
                 ? responseBody.substring(0, 3000) + "\n...[响应过长已截断]"
