@@ -1,0 +1,4 @@
+[submodule "ag-ui-4j"]
+	path = ag-ui-4j
+	url = https://github.com/Work-m8/ag-ui-4j.git
+	branch = main
