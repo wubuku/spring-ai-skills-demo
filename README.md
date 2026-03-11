@@ -12,6 +12,7 @@
 - **会话记忆系统** - 基于 H2 数据库的持久化对话记忆，支持多会话隔离
 - **确认模式** - 变更操作需用户手动确认后才执行
 - **OkHttp 重试机制** - 处理 LLM API 的间歇性网络问题
+- **🆕 CopilotKit 前端集成** - 现代化的 Next.js 15 + React 19 前端，支持 AG-UI 协议
 
 ## 技术栈
 
@@ -29,7 +30,36 @@
 
 ## 架构
 
-### 请求流程
+### 双前端架构
+
+项目现在支持两种前端方式：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  方式 1: 传统 Web 界面（原有）                                 │
+│  http://localhost:8080                                       │
+│  └── Thymeleaf 模板 + 静态资源                                │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  方式 2: CopilotKit 现代前端（新增）🆕                         │
+│  http://localhost:3001                                       │
+│  ├── Next.js 15 + React 19                                   │
+│  ├── CopilotPopup 聊天组件                                    │
+│  ├── CopilotRuntime BFF 层                                   │
+│  └── HttpAgent 连接到 Java 后端                               │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│  Java 后端 (Spring AI)                                       │
+│  ├── /api/chat      - 传统聊天端点（旧前端）                   │
+│  ├── /api/agui      - AG-UI 协议端点（新前端）🆕               │
+│  ├── /api/products  - 商品 REST API                          │
+│  └── /api/v3/*      - PetStore Mock API                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 请求流程（传统前端）
 
 ```
 用户消息
@@ -198,7 +228,8 @@ mvn spring-boot:run -DskipTests '-Dspring-boot.run.arguments=--app.confirm-befor
 
 | 功能 | URL |
 |------|-----|
-| 聊天界面 | http://localhost:8080 |
+| 聊天界面（传统）| http://localhost:8080 |
+| **CopilotKit 前端** 🆕 | http://localhost:3001 |
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 | OpenAPI JSON | http://localhost:8080/v3/api-docs |
 | H2 控制台 | http://localhost:8080/h2-console |
@@ -207,6 +238,43 @@ H2 控制台连接信息：
 - JDBC URL: `jdbc:h2:file:./data/chat-memory`
 - 用户名: `sa`
 - 密码: (空)
+
+### 运行 CopilotKit 前端 🆕
+
+前端项目位于 `frontend/` 目录：
+
+```bash
+# 安装依赖
+cd frontend
+npm install
+
+# 运行开发服务器
+npm run dev
+
+# 构建生产版本
+npm run build
+npm start
+```
+
+前端环境变量配置（`frontend/.env.local`）：
+```bash
+JAVA_BACKEND_URL=http://localhost:8080
+```
+
+**关键特性**：
+- ✅ 实时流式响应（SSE）
+- ✅ 会话记忆（与 Java 后端共享）
+- ✅ 工具调用（loadSkill + httpRequest）
+- ✅ OpenAPI 技能解析（宠物商店功能已验证）
+- ✅ 现代化 UI（Tailwind CSS）
+- ✅ 深色模式支持
+
+**技术栈**：
+- Next.js 15.1.6
+- React 19
+- CopilotKit 1.3.14
+- @ag-ui/client 0.0.47
+- Tailwind CSS 3.4.1
 
 ## 测试验证
 
@@ -371,45 +439,81 @@ curl -s -X POST http://localhost:8080/api/chat \
 ## 项目结构
 
 ```
-src/main/java/com/example/demo/
-├── agent/
-│   ├── SkillRegistry.java      # 技能注册表
-│   ├── SkillTools.java         # @Tool 方法
-│   └── SkillsAdvisor.java      # System Prompt 构建
-├── config/
-│   └── SpringAiConfig.java     # OkHttp + 重试配置
-├── controller/
-│   ├── ChatController.java     # 聊天 API
-│   └── ProductController.java  # 商品 REST API
-├── petstore/                   # PetStore Mock 后端
-│   ├── PetController.java
-│   ├── StoreController.java
-│   ├── UserController.java
-│   ├── PetStoreService.java
+spring-ai-skills-demo/
+├── src/main/java/com/example/demo/
+│   ├── agent/
+│   │   ├── SkillRegistry.java      # 技能注册表
+│   │   ├── SkillTools.java         # @Tool 方法
+│   │   └── SkillsAdvisor.java      # System Prompt 构建
+│   ├── config/
+│   │   ├── SpringAiConfig.java     # OkHttp + 重试配置
+│   │   ├── AgUiConfig.java         # AG-UI 配置 🆕
+│   │   └── CorsConfig.java         # 跨域配置 🆕
+│   ├── controller/
+│   │   ├── ChatController.java     # 聊天 API
+│   │   ├── ProductController.java  # 商品 REST API
+│   │   └── AgUiController.java     # AG-UI 端点 🆕
+│   ├── petstore/                   # PetStore Mock 后端
+│   │   ├── PetController.java
+│   │   ├── StoreController.java
+│   │   ├── UserController.java
+│   │   ├── PetStoreService.java
+│   │   └── model/
+│   ├── service/
+│   │   ├── AgentService.java       # 集成 ChatMemory
+│   │   └── ProductService.java
 │   └── model/
-├── service/
-│   ├── AgentService.java       # 集成 ChatMemory
-│   └── ProductService.java
-└── model/
-
-src/main/resources/
-├── skills/
-│   ├── search-products/SKILL.md
-│   ├── get-product-detail/SKILL.md
-│   ├── add-to-cart/SKILL.md
-│   ├── checkout/SKILL.md
-│   └── swagger-petstore-openapi-3-0/   # 分层技能示例
-│       ├── SKILL.md
-│       └── references/
-│           ├── operations/
-│           ├── resources/
-│           └── schemas/
-├── petstore.yaml              # OpenAPI 3.0 规范
-└── application.yml
-
-data/                          # H2 数据库文件（自动创建）
-├── chat-memory.mv.db          # 对话记忆数据库
-└── chat-memory.trace.db       # 数据库跟踪日志
+│
+├── src/main/java/com/agui/         # AG-UI SDK 实现 🆕
+│   ├── core/                       # 核心接口和事件
+│   │   ├── agent/                  # Agent 接口
+│   │   ├── event/                  # 事件类型（19个）
+│   │   ├── message/                # 消息类型（6种）
+│   │   ├── tool/                   # 工具定义
+│   │   └── stream/                 # 事件流
+│   ├── server/                     # 服务端实现
+│   │   ├── spring/                 # Spring 集成
+│   │   └── streamer/               # SSE 流输出
+│   └── spring/ai/                  # Spring AI 集成
+│       └── SpringAIAgent.java      # Agent 实现
+│
+├── frontend/                       # CopilotKit 前端 🆕
+│   ├── app/
+│   │   ├── api/copilotkit/
+│   │   │   └── route.ts            # BFF 层（HttpAgent）
+│   │   ├── layout.tsx              # CopilotKit Provider
+│   │   ├── page.tsx                # 主页面
+│   │   └── globals.css             # 样式
+│   ├── package.json                # 依赖管理
+│   ├── next.config.js              # Next.js 配置
+│   ├── tailwind.config.js          # Tailwind CSS
+│   └── README.md                   # 前端文档
+│
+├── src/main/resources/
+│   ├── skills/
+│   │   ├── search-products/SKILL.md
+│   │   ├── get-product-detail/SKILL.md
+│   │   ├── add-to-cart/SKILL.md
+│   │   ├── checkout/SKILL.md
+│   │   └── swagger-petstore-openapi-3-0/   # 分层技能示例
+│   │       ├── SKILL.md
+│   │       └── references/
+│   │           ├── operations/
+│   │           ├── resources/
+│   │           └── schemas/
+│   ├── petstore.yaml              # OpenAPI 3.0 规范
+│   └── application.yml
+│
+├── data/                          # H2 数据库文件（自动创建）
+│   ├── chat-memory.mv.db          # 对话记忆数据库
+│   └── chat-memory.trace.db       # 数据库跟踪日志
+│
+├── docs/drafts/                   # 文档草稿 🆕
+│   ├── enterprise-agent-frontend-guide-v4.md  # 前端集成指南
+│   └── spring-ai-agui-guide.md    # AG-UI 集成指南
+│
+├── COPILOTKIT_INTEGRATION.md      # CopilotKit 集成文档 🆕
+└── TEST_REPORT.md                 # 测试报告 🆕
 ```
 
 ## 升级说明
