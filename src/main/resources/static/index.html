@@ -222,6 +222,8 @@
         /** 前端版 httpRequest —— 根据元数据构造并发送 HTTP 请求 */
         async function executeHttpRequest(meta) {
             let url = meta.url;
+            let queryParams = meta.params || {};
+
             if (meta.params) {
                 const sp = new URLSearchParams(meta.params);
                 url += '?' + sp.toString();
@@ -234,7 +236,30 @@
                 opts.body = JSON.stringify(meta.body);
             }
             const resp = await fetch(url, opts);
-            return await resp.text();
+            const responseText = await resp.text();
+
+            // 调用解释 API
+            try {
+                const explainResp = await fetch('/api/explain-result', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        method: meta.method,
+                        url: meta.url,  // 原始 URL（不带查询参数）
+                        queryParams: queryParams,
+                        statusCode: resp.status,
+                        responseBody: responseText
+                    })
+                });
+                if (explainResp.ok) {
+                    return await explainResp.text();
+                }
+            } catch (e) {
+                console.error('解释结果失败:', e);
+            }
+
+            // 降级：返回原始响应
+            return responseText;
         }
 
         /** 展示确认操作：说明文本 + 确定/取消按钮 */
