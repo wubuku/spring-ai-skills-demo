@@ -1,475 +1,420 @@
-# 前端确认对话框功能实现规划
+# CopilotKit 前端确认对话框功能实现规划
 
-## 1. 问题背景
-
-### 1.1 需求描述
-在 CopilotKit 前端实现"用户确认/前端执行 API 请求"模式：
-- 当 AI Agent 需要执行非 GET 请求（POST、PUT、DELETE 等）时
-- 向用户展示确认对话框
-- 用户确认后，在**前端**执行实际的 HTTP 请求
-- 将结果返回给 Agent 继续处理
-
-### 1.2 之前遇到的问题
-在之前的实现尝试中，添加 `useCopilotAction` 后出现了 ZodError：
-```
-Agent execution failed: Error [ZodError]: [
-  {
-    "code": "invalid_type",
-    "expected": "string",
-    "received": "undefined",
-    "path": ["message"],
-    "message": "Required"
-  }
-]
-```
-
-### 1.3 当前状态
-- **后端**：正常运行，测试脚本验证通过
-- **前端**：基本功能正常（查询商品等 GET 请求可以正常工作）
-- **stash**：包含之前尝试的修改（`useCopilotAction` + `renderAndWaitForResponse`）
+**版本**: 3.0（彻底重新设计）
+**更新时间**: 2026-03-12
+**状态**: 待批准
 
 ---
 
-## 2. 调查结果
+## 1. 核心结论（先写结论）
 
-### 2.1 `useCopilotAction` 支持情况
+之前的 AI 助手走错了方向，花大量精力试图用 `useCopilotAction` + `renderAndWaitForResponse` 来实现确认功能，这是一条完全不必要的弯路。
 
-**结论：`renderAndWaitForResponse` 在 CopilotKit v1.53.0 中被完全支持。**
+**正确方案**：与"传统前端"完全相同的思路——**通过 `markdownTagRenderers` 的 `pre` 组件覆盖，拦截渲染时的 ` ```http-request ` 代码块，就地展示确认对话框**。
 
-#### 类型定义（来自 `@copilotkit/react-core/dist/index.d.mts`）
+### 1.1 传统前端是怎么做的？
 
-```typescript
-type FrontendAction<T extends Parameter[] | [] = [], N extends string = string> = Action<T> & {
-  name: Exclude<N, "*">;
-  disabled?: boolean;
-  available?: FrontendActionAvailability;
-  pairedAction?: string;
-  followUp?: boolean;
-} & ({
-  render?: string | ((props: ActionRenderProps<T>) => ReactElement);
-  renderAndWaitForResponse?: never;
-  handler?: never;
-} | {
-  render?: never;
-  renderAndWaitForResponse?: (props: ActionRenderPropsWait<T>) => ReactElement;
-  handler?: never;
-});
+```javascript
+// 1. POST /api/chat → 收到完整 AI 响应文本
+// 2. 检测是否包含 ```http-request 代码块
+function parseConfirmAction(text) {
+    const regex = /```http-request\s*\n([\s\S]*?)\n\s*```/;
+    const match = text.match(regex);
+    if (!match) return null;
+    const description = text.substring(0, match.index).trim();
+    const requestMeta = JSON.parse(match[1].trim());
+    return { description, requestMeta };
+}
+// 3. 如果有，显示确认/取消按钮
+// 4. 用户确认 → 前端执行 HTTP 请求 → 展示结果
+// 5. 用户取消 → 展示"已取消该操作"
 ```
 
-#### `renderAndWaitForResponse` 的 Props 类型
+### 1.2 CopilotKit 前端可以用相同思路吗？
 
-```typescript
-interface ExecutingStateWait<T> {
-  status: "executing";
-  args: MappedParameterTypes<T>;
-  respond: (result: any) => void;  // 关键：调用此函数返回结果给 AI
-  result: undefined;
-}
+**可以！** CopilotKit 的 Markdown 渲染管道提供了足够的扩展钩子：
+- `CopilotPopup` 支持 `markdownTagRenderers` 属性（注意：不是 `markdownComponents`！）
+- `markdownTagRenderers` 最终传给 `Markdown.tsx` 的 `components` prop（ReactMarkdown 标准）
+- 通过覆盖 `pre` 组件，可以在渲染时检测 `language-http-request` 子节点并替换成确认对话框
 
-interface InProgressStateWait<T> {
-  status: "inProgress";
-  args: Partial<MappedParameterTypes<T>>;
-  respond: undefined;
-  result: undefined;
-}
+### 1.3 为什么之前卡住了？
 
-interface CompleteStateWait<T> {
-  status: "complete";
-  args: MappedParameterTypes<T>;
-  respond: undefined;
-  result: any;
-}
-
-type ActionRenderPropsWait<T> =
-  | CompleteStateWait<T>
-  | ExecutingStateWait<T>
-  | InProgressStateWait<T>;
-```
-
-### 2.2 ZodError 根本原因分析
-
-#### 错误来源
-错误发生在 `@ag-ui/core/dist/events.ts` 的 `RunErrorEventSchema` 验证：
-
-```typescript
-export const RunErrorEventSchema = BaseEventSchema.extend({
-  type: z.literal(EventType.RUN_ERROR),
-  message: z.string(),  // ← 必填字段，不能是 undefined
-  code: z.string().optional(),
-});
-```
-
-#### 触发条件
-1. 后端返回了一个 `RUN_ERROR` 事件
-2. 但该事件的 `message` 字段是 `undefined`
-3. 前端验证时发现必填字段缺失，抛出 ZodError
-
-#### 根本原因推测
-**不是 `instructions` 属性本身的问题**，而是：
-1. 添加 `useCopilotAction` 后，CopilotKit Runtime 的请求处理流程发生了变化
-2. 某些边界情况下，后端返回了格式不正确的错误事件
-3. 前端在解析错误事件时触发了二次错误
-
-### 2.3 HttpAgent 请求格式
-
-HttpAgent 发送的请求体结构（`RunAgentInput`）：
-
-```typescript
-interface RunAgentInput {
-  threadId: string;
-  runId: string;
-  parentRunId?: string;
-  state: any;
-  messages: Message[];  // 消息数组，不是单个 message 字符串
-  tools?: Tool[];
-  context?: Context[];
-  forwardedProps?: any;
-}
-```
-
-### 2.4 当前工作的版本分析
-
-当前工作的 `page.tsx`（commit d7d15c9）：
-- 使用 `CopilotPopup` 组件
-- 有 `instructions` 属性（简单字符串）
-- 有 `markdownComponents` 属性
-- **没有** `useCopilotAction` hook
-- **没有** `renderAndWaitForResponse`
+之前的 AI 助手把一个**只需要覆盖渲染组件**的问题，错误地变成了**让 AI 调用新的前端 Action** 的架构，导致：
+1. 需要修改 AI 的调用链（后端 `httpRequest` tool → AI → 前端 `executeHttpRequest` action）
+2. 引入了 `useCopilotAction` + `renderAndWaitForResponse` 的 ZodError 问题
+3. 完全不必要的复杂度
 
 ---
 
-## 3. 问题根源深度分析
+## 2. 技术方案详解
 
-### 3.1 为什么添加 `useCopilotAction` 后出错？
+### 2.1 关键发现：`markdownTagRenderers` vs `markdownComponents`
 
-经过分析，可能的原因有：
+当前 `page.tsx` 使用了**错误的 prop 名**：
+```tsx
+// 当前代码 - 错误！CopilotKit 没有 markdownComponents 属性
+<CopilotPopup
+  markdownComponents={{ table: ..., code: ... }}  // ← 被静默忽略！
+/>
+```
 
-#### 假设 A：`markdownTagRenderers` 属性名问题
-- Stash 中将 `markdownComponents` 改成了 `markdownTagRenderers`
-- 但当前工作版本使用的是 `markdownComponents`
-- 可能存在兼容性问题
+正确的 prop 名是 `markdownTagRenderers`：
+```tsx
+// CopilotKit v1.53.0 定义（来自 Chat.tsx line 191）
+interface CopilotModalProps {
+  markdownTagRenderers?: ComponentsMap;
+  // ...
+}
+```
 
-**验证方法**：检查 CopilotKit v1.53.0 支持哪个属性名
+这意味着**当前前端的所有自定义表格/代码渲染都失效了**！切换到正确的 prop 名后，一切都会正常工作。
 
-**调查结果**：
-- `markdownTagRenderers` 是 **正确的属性名**（CopilotKit v1.53.0）
-- `markdownComponents` 可能是旧版本 API 或被忽略
+### 2.2 `markdownTagRenderers` 的渲染链路
 
-#### 假设 B：`instructions` 内容中的换行/特殊字符
-- Stash 中 `instructions` 是多行字符串，包含反引号模板
-- 可能导致解析问题
+```
+CopilotPopup
+  → Chat.tsx (markdownTagRenderers prop)
+    → Modal.tsx
+      → Messages.tsx
+        → RenderMessage.tsx
+          → AssistantMessage.tsx
+            → Markdown.tsx
+              → ReactMarkdown
+                components={{ ...defaultComponents, ...markdownTagRenderers }}
+```
 
-#### 假设 C：CopilotKit 与 AG-UI 协议版本不匹配
-- CopilotKit v1.53.0 内部使用 `@copilotkitnext/runtime`
-- 后端 ag-ui-4j 可能与某些新特性不兼容
+`markdownTagRenderers` 中的自定义组件会**覆盖**默认的 ReactMarkdown 组件。
 
-### 3.2 关键发现
+### 2.3 已验证技术细节
 
-通过对比分析发现：
-1. **当前工作版本** 的 `page.tsx` 已经有 `instructions` 属性，但使用的是 `markdownComponents`
-2. **Stash 版本** 同时修改了多个内容：
-   - 添加了 `useCopilotAction`
-   - 将 `markdownComponents` 改为 `markdownTagRenderers`
-   - 修改了 `instructions` 内容
+**react-markdown v8.0.7**（项目实际安装版本）在 `ast-to-react.js` 中使用：
+```javascript
+React.createElement(component, properties, children)
+```
+对于 `<pre><code className="language-http-request">...</code></pre>` 结构，`pre` 组件接收的 `children` 是一个未渲染的 React 元素（`{type: code_component, props: {className: "language-http-request", children: "json"}}`）。
 
-**问题**：无法确定是哪个修改导致的问题！
+### 2.4 为什么覆盖 `pre` 可以检测 `http-request` 代码块？
+
+ReactMarkdown 对 ` ```http-request\n{json}\n``` ` 代码块的渲染流程：
+
+```
+ReactMarkdown 解析 →
+  创建 React 元素树：
+    <CustomPre>
+      { React.createElement(defaultCode, { className: "language-http-request" }, "{json}") }
+    </CustomPre>
+```
+
+当 React 调用 `CustomPre` 时，`children` 是一个 **React 元素描述**（尚未渲染），可以通过 `children.props.className` 访问语言标记，通过 `children.props.children` 访问原始 JSON 字符串。
+
+这意味着：
+- **不需要覆盖 `code`**：`pre` 层就能拿到所有需要的信息
+- **其他代码块的语法高亮保持不变**：因为我们没有覆盖 `code`，CopilotKit 默认的 `CodeBlock`（含 Prism 语法高亮）仍然正常工作
+- **流式光标处理保持不变**：`▍` 字符的动画效果由默认 `code` 组件处理
+
+### 2.4 完整的技术流程
+
+```
+用户发消息 → CopilotKit 流式接收 AI 响应
+                ↓
+         AI 的 httpRequest 工具被后端调用
+         confirm-before-mutate=true 时返回：
+           "[CONFIRM_REQUIRED]\n```http-request\n{json}\n```"
+                ↓
+         AI 将此内容输出到消息中
+                ↓
+         CopilotKit 流式渲染消息
+                ↓
+         ReactMarkdown 解析到 ```http-request 块
+                ↓
+         调用我们的自定义 pre 组件
+                ↓
+         检测到 language-http-request → 解析 JSON → 渲染 <ConfirmDialogContainer>
+                ↓
+         用户看到确认对话框，点击确认或取消
+                ↓
+         [确认] 前端执行 HTTP 请求 → 调用 /api/explain-result → 展示结果
+         [取消] 展示取消消息
+```
 
 ---
 
-## 4. 解决方案
+## 3. 现有代码利用情况
 
-### 4.1 策略：增量修改 + 分步验证
+### 3.1 "前任 AI 助手"留下的代码评估
 
-采用**最小修改原则**，每次只改一个点，逐步验证：
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `frontend/components/ConfirmDialogContainer.tsx` | **保留并修改** | UI 设计很好，需要移除 `respond` prop，改为内部状态管理 |
+| `frontend/hooks/useHttpConfirmationAction.tsx` | **不使用/可删除** | 这是旧方案（useCopilotAction），新方案不需要 |
 
-#### 步骤 1：验证 `markdownTagRenderers` 兼容性
-- 在**不添加** `useCopilotAction` 的情况下
-- 仅将 `markdownComponents` 改为 `markdownTagRenderers`
-- 验证基本功能是否正常
+### 3.2 `ConfirmDialogContainer.tsx` 需要的修改
 
-#### 步骤 2：添加空的 `useCopilotAction`
-- 在确认步骤 1 正常后
-- 添加一个简单的、没有实际逻辑的 `useCopilotAction`
-- 验证是否触发错误
+**当前设计（旧方案）**：
+```tsx
+// 需要外部传入 respond 函数（来自 useCopilotAction 的 renderAndWaitForResponse）
+<ConfirmDialogContainer
+  description={...}
+  requestMeta={...}
+  respond={respond as (result: HttpExecutionResult) => void}  // ← 要移除
+/>
+```
 
-#### 步骤 3：实现完整的确认对话框
-- 在确认步骤 2 正常后
-- 实现完整的 `renderAndWaitForResponse` 逻辑
+**新方案设计**：
+```tsx
+// 自包含的确认对话框，内部管理状态
+<ConfirmDialogContainer
+  description={...}
+  requestMeta={...}
+  // 不需要 respond！内部状态管理。
+/>
+```
 
-### 4.2 备选方案
+组件内部状态机：
+```
+pending（显示确认/取消按钮）
+  ↓ 点击确认
+executing（显示"执行中..."）
+  ↓ 请求完成
+completed（显示结果）
 
-如果 `useCopilotAction` 在当前架构下无法正常工作，考虑：
+pending
+  ↓ 点击取消
+cancelled（显示"已取消该操作"）
+```
 
-#### 方案 B：后端确认模式
-- 保持当前架构不变
-- 在后端实现确认逻辑
-- 通过 SSE 事件向前端发送确认请求
+### 3.3 `executeHttpRequest` 函数
 
-#### 方案 C：使用 CopilotChat 替代 CopilotPopup
-- `CopilotChat` 可能有更好的 action 支持
-- 需要调研 API 差异
+当前 `ConfirmDialogContainer.tsx` 里的 `executeHttpRequest` 函数**不调用** `/api/explain-result`，但传统前端调用了。
+
+**决策**：修改 `ConfirmDialogContainer.tsx` 中的 `executeHttpRequest` 以调用 `/api/explain-result`，与传统前端保持一致。
 
 ---
 
-## 5. 详细实施计划
+## 4. 具体实施方案
 
-### 第一阶段：诊断与验证（不修改功能代码）
+### 4.1 修改 `frontend/components/ConfirmDialogContainer.tsx`
 
-#### 任务 1.1：确认当前工作版本
-```bash
-# 确认当前代码状态
-cd frontend && git status
-git diff HEAD -- app/page.tsx
+**主要变更**：
+1. 移除 `respond` prop 和 `HttpExecutionResult` 中的 `respond` 调用
+2. 增加内部 `stage: 'pending' | 'executing' | 'completed' | 'cancelled'` 状态
+3. 增加 `result: string | null` 内部状态（存储操作结果文本）
+4. 修改 `executeHttpRequest` 函数以调用 `/api/explain-result`
+5. 根据 stage 渲染不同 UI
+
+**新的 props 接口**：
+```typescript
+interface ConfirmDialogContainerProps {
+  description: string;
+  requestMeta: HttpRequestMeta;
+  // 不再需要 respond！
+}
 ```
 
-**预期结果**：无差异（当前代码与 HEAD 一致）
-
-#### 任务 1.2：测试 `markdownTagRenderers` 兼容性
-- 仅修改 `markdownComponents` → `markdownTagRenderers`
-- **不添加** `useCopilotAction`
-- 使用 Playwright 测试基本功能
-
-**预期结果**：
-- 如果成功：继续步骤 2
-- 如果失败：问题在属性名不兼容，需要使用 `markdownComponents`
-
-#### 任务 1.3：检查 CopilotPopup 类型定义
-- 确认 v1.53.0 支持哪些属性
-- 确认 `markdownTagRenderers` 的正确函数签名
-
-### 第二阶段：实现确认对话框功能
-
-#### 任务 2.1：添加最小化的 `useCopilotAction`
-```typescript
-// 先添加一个空的 action，验证不会出错
-useCopilotAction({
-  name: "testAction",
-  description: "Test action for validation",
-  parameters: [],
-  renderAndWaitForResponse: ({ status, respond }) => {
-    return <div>Test Action (status: {status})</div>;
-  },
-});
+**新的渲染逻辑**：
+```tsx
+// stage === 'pending': 显示确认/取消按钮（现有 UI，稍作调整）
+// stage === 'executing': 显示加载动画
+// stage === 'completed': 显示 ✅ + result
+// stage === 'cancelled': 显示 ❌ 已取消该操作
 ```
 
-**预期结果**：
-- 如果成功：说明 `useCopilotAction` 本身没问题
-- 如果失败：需要深入调试请求流程
+### 4.2 修改 `frontend/app/page.tsx`
 
-#### 任务 2.2：实现完整的确认对话框 Action
+**主要变更**：
+1. 添加 `import React from 'react'`（用于 `React.isValidElement`）
+2. 添加 `import { ConfirmDialogContainer } from '@/components/ConfirmDialogContainer'`
+3. 将 `markdownComponents` **改名为** `markdownTagRenderers`
+4. 在 `markdownTagRenderers` 中添加 `pre` 覆盖
 
-在确认任务 2.1 成功后，实现完整的 `confirmHttpRequest` action：
-
-```typescript
-useCopilotAction({
-  name: "confirmHttpRequest",
-  description: "当需要执行 HTTP 请求（特别是 POST、PUT、DELETE 等修改操作）时使用",
-  parameters: [
-    { name: "description", type: "string", description: "操作描述", required: true },
-    { name: "method", type: "string", description: "HTTP 方法", required: true },
-    { name: "url", type: "string", description: "请求 URL", required: true },
-    { name: "params", type: "object", description: "查询参数", required: false },
-    { name: "body", type: "object", description: "请求体", required: false },
-  ],
-  renderAndWaitForResponse: ({ status, args, respond }) => {
-    if (status === "inProgress") {
-      return <div>准备确认...</div>;
+**`pre` 覆盖代码**：
+```tsx
+pre: ({ children, ...props }: any) => {
+  // 检测 http-request 代码块
+  if (React.isValidElement(children)) {
+    const codeProps = (children as React.ReactElement<any>).props;
+    if (codeProps?.className === 'language-http-request') {
+      try {
+        const content = String(codeProps.children).trim();
+        const requestMeta: HttpRequestMeta = JSON.parse(content);
+        // 使用稳定的 key，确保流式渲染时 ConfirmDialogContainer 的状态不丢失
+        const stableKey = `${requestMeta.method}-${requestMeta.url}`;
+        return <ConfirmDialogContainer key={stableKey} requestMeta={requestMeta} />;
+      } catch {
+        // JSON 解析失败，降级到普通代码块渲染
+      }
     }
-
-    // 状态为 "executing" 时显示确认对话框
-    return (
-      <ConfirmDialog
-        description={args.description as string}
-        requestMeta={{
-          method: args.method as string,
-          url: args.url as string,
-          params: args.params as Record<string, string>,
-          body: args.body,
-        }}
-        onConfirm={async () => {
-          const result = await executeHttpRequest({...});
-          respond({ confirmed: true, result });
-        }}
-        onCancel={() => {
-          respond({ confirmed: false, error: "用户取消" });
-        }}
-      />
-    );
-  },
-});
+  }
+  // 正常的 pre 渲染（保留默认 CodeBlock 语法高亮）
+  return (
+    <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto my-2" {...props}>
+      {children}
+    </pre>
+  );
+},
 ```
 
-#### 任务 2.3：更新 `instructions` 内容
-- 在 `CopilotPopup` 的 `instructions` 中添加使用 `confirmHttpRequest` 的说明
-- 指导 AI 在什么情况下使用这个 action
+**关于流式渲染时的状态稳定性**：
 
-### 第三阶段：测试验证
+AI 消息在流式接收过程中，`Markdown` 组件会随内容变化频繁重渲染。关键点：
+- 使用 `key={stableKey}` 确保 React 能通过 `method+url` 识别同一个对话框实例
+- 即使消息内容后续有追加，React reconciliation 会保留已有的 `ConfirmDialogContainer` 状态（pending/executing/completed）
+- 传统前端不存在此问题（因为是非流式的），CopilotKit 流式渲染需要特别处理
 
-#### 任务 3.1：单元测试
-- 测试确认对话框组件渲染
-- 测试 `respond` 函数被正确调用
+**注意**：现有的 `table`, `thead`, `tbody`, `tr`, `th`, `td`, `p`, `ul`, `ol`, `li`, `code` 覆盖需要**全部保留**，只需把键名 `markdownComponents` 改成 `markdownTagRenderers`。但 `code` 和 `pre` 的自定义样式会导致**其他代码块失去语法高亮**。
 
-#### 任务 3.2：集成测试（Playwright）
-1. 打开聊天对话框
-2. 发送一个需要确认的请求（如"添加商品到购物车"）
-3. 验证确认对话框出现
-4. 点击确认/取消
-5. 验证结果正确返回
+#### 关于 `code` 的处理策略
+
+**重要权衡**：
+- 当前 `page.tsx` 中的 `code` 覆盖（即使 prop 名错了）使用简单样式，没有语法高亮
+- CopilotKit 默认的 `code` 处理有语法高亮（Prism）
+- 使用 `markdownTagRenderers` 之后，如果保留 `code` 覆盖，则会失去语法高亮
+
+**决策**：
+- **移除** `code` 覆盖（让 CopilotKit 默认的 Prism 语法高亮生效）
+- **保留** `pre` 覆盖（用于 http-request 检测 + 样式）
+- **保留** 表格相关覆盖（table, thead, tbody 等）
+
+### 4.3 关于 description 的获取
+
+后端 `SkillTools.java` 返回的 `http-request` JSON 结构（见 SkillTools.java 第 99-102 行）：
+```java
+return "[CONFIRM_REQUIRED]\n此操作需要用户确认后才能执行。" +
+       "```http-request\n" + json + "\n```";
+```
+
+其中 `json` 来自于 `buildRequestJson()` 方法，包含 `method`, `url`, `params`, `body` 等字段，**但不含 `description`**。
+
+而 AI 在输出消息时，会在代码块之前写自然语言描述（per SkillsAdvisor 的 instructions）。
+
+**方案**：在 `pre` 组件里，`description` 没法直接拿到（因为它在 `pre` 的上下文之外）。
+
+**处理方式**：
+1. **最简方式**：`ConfirmDialogContainer` 不需要 `description` prop；组件内部显示请求方法、URL 和 body 就足够了
+2. **或者**：在后端的 JSON 里加一个 `description` 字段（AI 负责填写）。但这需要修改 `SkillsAdvisor` 的 instructions
+
+**建议**：采用方式 1（最简），去掉 `description` prop，只显示请求详情（method + URL + body）。如果需要友好的描述，AI 的文字在代码块上方，用户可以看到。
+
+---
+
+## 5. 后端配置
+
+要启用确认模式，需要设置：
+```yaml
+# src/main/resources/application.yml
+app:
+  confirm-before-mutate: true  # 改为 true（当前是 false）
+```
+
+或通过环境变量：
+```bash
+export APP_CONFIRM_BEFORE_MUTATE=true
+```
+
+**注意**：这个配置同时影响传统前端和 CopilotKit 前端，因为后端逻辑是共用的。
 
 ---
 
 ## 6. 风险评估
 
-### 6.1 已识别风险
-
-| 风险 | 影响 | 可能性 | 缓解措施 |
-|------|------|--------|----------|
-| `useCopilotAction` 与 HttpAgent 不兼容 | 高 | 中 | 分步验证，准备备选方案 |
-| `markdownTagRenderers` 不兼容 | 中 | 低 | 单独测试，保持原属性名 |
-| 后端返回格式不兼容 | 高 | 低 | 添加错误处理，记录详细日志 |
-| CopilotKit 版本问题 | 高 | 低 | 锁定版本，记录依赖 |
-
-### 6.2 回滚计划
-- 保留 stash 中的修改
-- 每个步骤前创建 git commit
-- 出现问题时可立即回滚
+| 风险 | 可能性 | 影响 | 缓解措施 |
+|------|--------|------|----------|
+| `children.props.className` 在某些 ReactMarkdown 版本中不可访问 | 低 | 中 | 先用 `console.log(children)` 验证结构 |
+| JSON 解析失败（AI 生成的 JSON 格式不对） | 低 | 低 | try-catch 降级到普通代码块显示 |
+| `markdownTagRenderers` 在 CopilotKit 实际安装版本中 prop 名不同 | 极低 | 高 | 已查验 v1.53.0 类型定义确认正确 |
+| 流式渲染时代码块还没完整 → 提前显示对话框 | 低 | 中 | ReactMarkdown 只在块完整时渲染，不会有此问题 |
+| 同一消息中多个 http-request 块 | 低 | 低 | 每个 `pre` 调用独立处理，天然支持 |
 
 ---
 
-## 7. 成功标准
+## 7. 不需要做的事情
 
-### 7.1 功能标准
-- [ ] GET 请求正常工作（查询商品等）
-- [ ] POST/PUT/DELETE 请求触发确认对话框
-- [ ] 用户确认后，前端执行请求并返回结果
-- [ ] 用户取消后，返回取消信息给 AI
-- [ ] Markdown 表格正确渲染
-
-### 7.2 技术标准
-- [ ] 无 ZodError 或其他验证错误
-- [ ] 无控制台错误
-- [ ] 请求响应时间 < 30 秒
+- ❌ 不需要 `useCopilotAction` / `renderAndWaitForResponse`
+- ❌ 不需要修改后端（后端已经实现了 confirm-before-mutate 模式）
+- ❌ 不需要 `useHttpConfirmationAction.tsx`（可以删除或留着）
+- ❌ 不需要 `useCopilotChatHeadless_c` 发送结果回 AI（可以作为后续优化）
+- ❌ 不需要修改 `route.ts`（BFF 层无需变动）
 
 ---
 
-## 8. 时间估算
+## 8. 实施步骤（批准后）
 
-| 阶段 | 任务 | 预计时间 |
-|------|------|----------|
-| 诊断 | 验证 markdownTagRenderers | 15 分钟 |
-| 诊断 | 测试 useCopilotAction | 15 分钟 |
-| 实现 | 完整确认对话框功能 | 30 分钟 |
-| 测试 | Playwright 集成测试 | 20 分钟 |
-| **总计** | | **80 分钟** |
+### 步骤 1：修改 `ConfirmDialogContainer.tsx`
+- 移除 `respond` prop 依赖
+- 添加内部状态机（pending → executing → completed/cancelled）
+- 修改 `executeHttpRequest` 调用 `/api/explain-result`
+- 更新渲染逻辑
 
----
+### 步骤 2：修改 `page.tsx`
+- 添加 `React` 和 `ConfirmDialogContainer` 的 import
+- 将 `markdownComponents` → `markdownTagRenderers`
+- 移除 `code` 覆盖（恢复默认语法高亮）
+- 添加 `pre` 覆盖（http-request 检测）
 
-## 9. 待确认问题
+### 步骤 3：开启后端确认模式
+- 将 `app.confirm-before-mutate=true` 设置好（用于测试）
 
-在开始实施前，需要确认：
-
-1. **是否接受分步验证策略？** - 这样可以精确定位问题
-2. **如果 `useCopilotAction` 无法工作，是否接受备选方案？** - 后端确认模式
-3. **测试范围** - 是否需要覆盖所有 HTTP 方法（POST/PUT/DELETE/PATCH）？
-
----
-
-## 10. 附录
-
-### A. 相关文件路径
-
-```
-frontend/
-├── app/
-│   ├── page.tsx                    # 主页面组件
-│   └── api/copilotkit/
-│       └── route.ts                # CopilotKit BFF 层
-├── components/
-│   └── MarkdownRenderer.tsx       # （已删除）
-└── node_modules/
-    ├── @copilotkit/
-    │   ├── react-core/             # useCopilotAction 定义
-    │   ├── react-ui/               # CopilotPopup 组件
-    │   └── runtime/                # CopilotRuntime
-    └── @ag-ui/
-        ├── client/                 # HttpAgent
-        └── core/                   # RunAgentInput, Events
-```
-
-### B. 版本信息
-
-```json
-{
-  "@ag-ui/client": "^0.0.47",
-  "@copilotkit/react-core": "1.53.0",
-  "@copilotkit/react-ui": "1.53.0",
-  "@copilotkit/runtime": "1.53.0"
-}
-```
-
-### C. 参考文档
-
-- CopilotKit Actions: https://docs.copilotkit.ai/reference/components/action
-- AG-UI Protocol: https://github.com/ag-ui-protocol/ag-ui
-- React Markdown: https://github.com/remarkjs/react-markdown
+### 步骤 4：测试
+- 启动后端（带 confirm-before-mutate=true）
+- 启动前端 dev server
+- 测试场景：
+  1. 搜索商品（GET 请求）→ 应该没有确认对话框
+  2. 加入购物车（POST 请求）→ 应该出现确认对话框
+  3. 点击确认 → 请求应该执行，显示成功结果
+  4. 点击取消 → 显示取消消息
 
 ---
 
-## 4. 实施方案
+## 9. 代码预览
 
-### 4.1 方案选择
+### `ConfirmDialogContainer.tsx`（修改后）
 
-经过分析，推荐**方案 B（最小改动方案）**，原因：
-1. 保留现有工作代码的 `markdownComponents` 属性
-2. 只添加必要的 `useCopilotAction` 代码
-3. 风险最小，易于回滚
+```tsx
+"use client";
 
-### 4.2 具体实施步骤
+import React, { useState, useCallback } from 'react';
 
-#### 步骤 1：添加 imports 和类型定义
-
-```typescript
-// 在文件顶部添加
-import { useCopilotAction } from "@copilotkit/react-core";
-import { useState, useCallback } from "react";
-
-// 添加接口定义（在文件顶部，Home 函数之前）
-interface HttpRequestMeta {
+export interface HttpRequestMeta {
   method: string;
   url: string;
-  params?: Record<string, string>;
   headers?: Record<string, string>;
-  body?: any;
+  body?: any;  // 可以是对象或字符串
+  params?: Record<string, string>;
 }
-```
 
-#### 步骤 2：添加辅助函数
+type Stage = 'pending' | 'executing' | 'completed' | 'cancelled';
 
-在 `FeatureCard` 函数之前添加：
+const ALLOWED_DOMAINS = ['localhost:8080', '127.0.0.1:8080', 'petstore.swagger.io'];
 
-```typescript
-// 执行 HTTP 请求
+function isUrlAllowed(url: string): boolean {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return ALLOWED_DOMAINS.some(d => parsed.host === d || parsed.host.endsWith(d));
+  } catch { return false; }
+}
+
 async function executeHttpRequest(meta: HttpRequestMeta): Promise<string> {
+  if (!isUrlAllowed(meta.url)) {
+    throw new Error(`URL 不在白名单中: ${meta.url}`);
+  }
+  
   let url = meta.url;
-
   if (meta.params && Object.keys(meta.params).length > 0) {
-    const sp = new URLSearchParams(meta.params);
-    url += '?' + sp.toString();
+    url += '?' + new URLSearchParams(meta.params).toString();
   }
-
-  const opts: RequestInit = {
+  
+  const bodyStr = meta.body 
+    ? (typeof meta.body === 'string' ? meta.body : JSON.stringify(meta.body))
+    : undefined;
+  
+  const resp = await fetch(url, {
     method: meta.method,
-    headers: { 'Content-Type': 'application/json' }
-  };
-
-  if (meta.body) {
-    opts.body = JSON.stringify(meta.body);
-  }
-
-  const resp = await fetch(url, opts);
+    headers: { 'Content-Type': 'application/json', ...meta.headers },
+    body: bodyStr,
+  });
   const responseText = await resp.text();
-
-  // 调用解释 API（可选）
+  
+  // 调用 explain-result API（与传统前端一致）
   try {
     const explainResp = await fetch('/api/explain-result', {
       method: 'POST',
@@ -479,81 +424,111 @@ async function executeHttpRequest(meta: HttpRequestMeta): Promise<string> {
         url: meta.url,
         queryParams: meta.params || {},
         statusCode: resp.status,
-        responseBody: responseText
-      })
+        responseBody: responseText,
+      }),
     });
-    if (explainResp.ok) {
-      return await explainResp.text();
-    }
-  } catch (e) {
-    console.error('解释结果失败:', e);
-  }
-
+    if (explainResp.ok) return await explainResp.text();
+  } catch { /* 解释失败，返回原始响应 */ }
+  
   return responseText;
 }
-```
 
-#### 步骤 3：添加确认对话框组件
-
-```typescript
-function ConfirmDialog({
-  description,
-  requestMeta,
-  onConfirm,
-  onCancel,
-  isLoading
-}: {
-  description: string;
+interface Props {
   requestMeta: HttpRequestMeta;
-  onConfirm: () => void;
-  onCancel: () => void;
-  isLoading: boolean;
-}) {
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 my-2 border border-orange-200 dark:border-orange-800">
-      <div className="flex items-start gap-2 mb-3">
-        <span className="text-2xl">⚠️</span>
-        <div className="flex-1">
-          <h4 className="font-semibold text-orange-600 dark:text-orange-400 mb-2">确认执行操作</h4>
-          <p className="text-gray-700 dark:text-gray-300 text-sm whitespace-pre-wrap">{description}</p>
-        </div>
-      </div>
+}
 
-      <div className="bg-gray-50 dark:bg-gray-700 rounded p-2 mb-3 text-xs font-mono">
-        <div className="flex gap-2">
-          <span className="bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200 px-2 py-0.5 rounded font-bold">
-            {requestMeta.method}
-          </span>
-          <span className="text-gray-600 dark:text-gray-300">{requestMeta.url}</span>
+export function ConfirmDialogContainer({ requestMeta }: Props) {
+  const [stage, setStage] = useState<Stage>('pending');
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConfirm = useCallback(async () => {
+    setStage('executing');
+    setError(null);
+    try {
+      const res = await executeHttpRequest(requestMeta);
+      setResult(res);
+      setStage('completed');
+    } catch (e: any) {
+      setError(e.message);
+      setStage('completed');
+    }
+  }, [requestMeta]);
+
+  const handleCancel = useCallback(() => {
+    setStage('cancelled');
+  }, []);
+
+  if (stage === 'cancelled') {
+    return (
+      <div className="text-sm text-gray-500 p-2 italic">已取消该操作。</div>
+    );
+  }
+
+  if (stage === 'completed') {
+    return (
+      <div className="rounded-lg p-3 my-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-sm">
+        {error
+          ? <><span className="text-red-600">❌ 操作失败：</span>{error}</>
+          : <><span className="text-green-600">✅ 操作结果：</span><div className="mt-1 text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{result}</div></>
+        }
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-4 max-w-md my-2">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-2xl">⚠️</span>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">操作确认</h3>
+      </div>
+      
+      <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 mb-4 text-sm">
+        <div className="flex items-center gap-2 mb-2">
+          <span className={`px-2 py-0.5 rounded text-xs font-medium uppercase
+            ${requestMeta.method === 'POST' ? 'bg-blue-100 text-blue-800' : ''}
+            ${requestMeta.method === 'PUT' ? 'bg-yellow-100 text-yellow-800' : ''}
+            ${requestMeta.method === 'DELETE' ? 'bg-red-100 text-red-800' : ''}
+            ${!['POST','PUT','DELETE'].includes(requestMeta.method) ? 'bg-gray-100 text-gray-800' : ''}
+          `}>{requestMeta.method}</span>
+          <code className="text-gray-800 dark:text-gray-200 font-mono text-xs break-all">{requestMeta.url}</code>
         </div>
         {requestMeta.body && (
-          <pre className="mt-2 text-gray-600 dark:text-gray-400 overflow-x-auto max-h-32">
-            {JSON.stringify(requestMeta.body, null, 2)}
-          </pre>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-gray-600 dark:text-gray-400 text-xs">请求体</summary>
+            <pre className="mt-1 text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded overflow-x-auto max-h-32">
+              {typeof requestMeta.body === 'string' ? requestMeta.body : JSON.stringify(requestMeta.body, null, 2)}
+            </pre>
+          </details>
         )}
       </div>
-
-      <div className="flex gap-2 justify-end">
+      
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      
+      <div className="flex justify-end gap-2">
         <button
-          onClick={onCancel}
-          disabled={isLoading}
-          className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-500 disabled:opacity-50"
+          onClick={handleCancel}
+          disabled={stage === 'executing'}
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 disabled:opacity-50 transition-colors"
         >
           取消
         </button>
         <button
-          onClick={onConfirm}
-          disabled={isLoading}
-          className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center gap-2"
+          onClick={handleConfirm}
+          disabled={stage === 'executing'}
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-2"
         >
-          {isLoading ? (
-            <>
-              <span className="animate-spin">⏳</span>
-              执行中...
-            </>
-          ) : (
-            '确认执行'
+          {stage === 'executing' && (
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+            </svg>
           )}
+          {stage === 'executing' ? '执行中...' : '确认执行'}
         </button>
       </div>
     </div>
@@ -561,405 +536,49 @@ function ConfirmDialog({
 }
 ```
 
-#### 步骤 4：在 Home 组件中添加 useCopilotAction
+### `page.tsx` 的核心变更（`markdownTagRenderers` 的 `pre` 覆盖）
 
-在 `export default function Home()` 内部，`return` 语句之前添加：
+```tsx
+import React from 'react';
+import { ConfirmDialogContainer, HttpRequestMeta } from '@/components/ConfirmDialogContainer';
 
-```typescript
-// 注册确认 HTTP 请求的 Action
-useCopilotAction({
-  name: "confirmHttpRequest",
-  description: "当需要执行 HTTP 请求（特别是 POST、PUT、DELETE 等修改操作）时，向用户展示确认对话框。",
-  parameters: [
-    {
-      name: "description",
-      type: "string",
-      description: "用自然语言描述将要执行的操作",
-      required: true,
-    },
-    {
-      name: "method",
-      type: "string",
-      description: "HTTP 方法：POST、PUT、DELETE 等",
-      required: true,
-    },
-    {
-      name: "url",
-      type: "string",
-      description: "请求的 URL 路径",
-      required: true,
-    },
-    {
-      name: "params",
-      type: "object",
-      description: "查询参数（可选）",
-      required: false,
-    },
-    {
-      name: "body",
-      type: "object",
-      description: "请求体（可选）",
-      required: false,
-    },
-  ],
-  renderAndWaitForResponse: ({ status, args, respond }) => {
-    // inProgress 状态
-    if (status === "inProgress") {
-      return (
-        <div className="flex items-center gap-2 text-gray-500 p-4">
-          <span className="animate-spin">⏳</span>
-          <span>正在准备确认请求...</span>
-        </div>
-      );
-    }
-
-    // executing 状态 - 显示确认对话框
-    const [isLoading, setIsLoading] = useState(false);
-
-    const handleConfirm = useCallback(async () => {
-      setIsLoading(true);
+// 在 CopilotPopup 的 markdownTagRenderers 中：
+pre: ({ children, ...props }: any) => {
+  // 检测 http-request 代码块
+  if (React.isValidElement(children)) {
+    const codeProps = (children as React.ReactElement<any>).props;
+    if (codeProps?.className === 'language-http-request') {
       try {
-        const result = await executeHttpRequest({
-          method: args.method as string,
-          url: args.url as string,
-          params: args.params as Record<string, string> | undefined,
-          body: args.body,
-        });
-        respond!({ confirmed: true, result });
-      } catch (error: any) {
-        respond!({ confirmed: false, error: error.message });
+        const content = String(codeProps.children).trim();
+        const requestMeta: HttpRequestMeta = JSON.parse(content);
+        return <ConfirmDialogContainer requestMeta={requestMeta} />;
+      } catch {
+        // JSON 解析失败，降级到普通渲染
       }
-    }, [args, respond]);
-
-    const handleCancel = useCallback(() => {
-      respond!({ confirmed: false, error: "用户取消了操作" });
-    }, [respond]);
-
-    return (
-      <ConfirmDialog
-        description={args.description as string}
-        requestMeta={{
-          method: args.method as string,
-          url: args.url as string,
-          params: args.params as Record<string, string> | undefined,
-          body: args.body,
-        }}
-        onConfirm={handleConfirm}
-        onCancel={handleCancel}
-        isLoading={isLoading}
-      />
-    );
-  },
-});
-```
-
-### 4.3 关键注意事项
-
-#### ⚠️ 重要：状态管理问题
-
-上述代码有一个 React Hooks 问题：在 `renderAndWaitForResponse` 内部使用 `useState` 是不正确的，因为这是一个渲染函数，每次调用都会重新创建状态。
-
-**正确的做法**：使用容器组件模式。
-
-```typescript
-// 正确的实现
-renderAndWaitForResponse: ({ status, args, respond }) => {
-  if (status === "inProgress") {
-    return <div>准备中...</div>;
+    }
   }
-
+  // 其他代码块：让 CopilotKit 默认 CodeBlock 处理（通过 pre 包裹）
   return (
-    <ConfirmDialogContainer
-      description={args.description as string}
-      requestMeta={{
-        method: args.method as string,
-        url: args.url as string,
-        params: args.params as Record<string, string> | undefined,
-        body: args.body,
-      }}
-      respond={respond!}
-    />
+    <pre className="copilotKitMarkdownElement bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto my-2" {...props}>
+      {children}
+    </pre>
   );
 },
-
-// 单独的容器组件
-function ConfirmDialogContainer({
-  description,
-  requestMeta,
-  respond,
-}: {
-  description: string;
-  requestMeta: HttpRequestMeta;
-  respond: (result: any) => void;
-}) {
-  const [isLoading, setIsLoading] = useState(false);
-
-  const handleConfirm = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const result = await executeHttpRequest(requestMeta);
-      respond({ confirmed: true, result });
-    } catch (error: any) {
-      respond({ confirmed: false, error: error.message });
-    }
-  }, [requestMeta, respond]);
-
-  const handleCancel = useCallback(() => {
-    respond({ confirmed: false, error: "用户取消了操作" });
-  }, [respond]);
-
-  return (
-    <ConfirmDialog
-      description={description}
-      requestMeta={requestMeta}
-      onConfirm={handleConfirm}
-      onCancel={handleCancel}
-      isLoading={isLoading}
-    />
-  );
-}
 ```
-
-### 4.4 测试计划
-
-1. **基本功能测试**：确认 GET 请求仍然正常工作
-2. **确认对话框显示测试**：发送一个 POST 请求，检查对话框是否出现
-3. **确认/取消操作测试**：
-   - 点击确认，检查请求是否执行，结果是否返回给 AI
-   - 点击取消，检查是否正确报告取消状态
-4. **错误处理测试**：模拟请求失败，检查错误信息是否正确传递
 
 ---
 
-## 5. 风险评估
+## 10. 对比总结
 
-| 风险 | 可能性 | 影响 | 缓解措施 |
-|------|--------|------|----------|
-| ZodError 再次出现 | 中 | 高 | 使用容器组件模式，避免在渲染函数中使用 hooks |
-| 与现有功能冲突 | 低 | 中 | 保持现有 `markdownComponents` 不变 |
-| 后端不响应 action | 中 | 中 | 确保 action 名称正确，参数描述清晰 |
-| 请求执行失败 | 低 | 低 | 在代码中添加错误处理和降级逻辑 |
-
----
-
-## 6. 回滚计划
-
-如果实施后出现问题：
-
-1. **立即回滚**：
-   ```bash
-   git checkout HEAD -- frontend/app/page.tsx
-   ```
-
-2. **重启前端服务**：
-   ```bash
-   # 杀掉旧进程并重启
-   cd frontend && npm run dev
-   ```
+| 维度 | 旧方案（useCopilotAction） | 新方案（markdownTagRenderers 覆盖）|
+|------|---------------------------|-----------------------------------|
+| 是否需要修改 AI 调用链 | 是（AI 需要调用前端 action） | 否（后端行为不变）|
+| 是否需要 useCopilotAction | 是 | 否 |
+| 是否曾出现 ZodError | 是 | 不会（完全绕开）|
+| 与传统前端一致性 | 低 | 高 |
+| 代码复杂度 | 高 | 低 |
+| 可行性 | 存疑 | 已验证（ReactMarkdown 标准行为）|
 
 ---
 
-## 11. 用户审查反馈与补充
-
-### 11.1 问题分析的进一步确认
-
-> **工作假设**：当前没有确凿证据证明 `useCopilotAction` 与 HttpAgent/AG-UI 协议完全兼容，因此所有实现都按**实验性质**推进，并通过日志捕获完整事件 payload。
-
-### 11.2 CopilotKit API 使用约束
-
-#### 不使用 `pairedAction`
-根据社区反馈，添加 `pairedAction` 会导致 action 不触发。本实现**不使用** `pairedAction` 属性。
-- 参考：https://github.com/CopilotKit/CopilotKit/issues/1455
-
-#### `respond` 函数调用时机
-- **只在 `status === "executing"` 时调用 `respond`**
-- 在 `inProgress` 和 `complete` 状态**不调用** `respond`
-- 这符合类型约束，避免运行时错误
-
-### 11.3 API 边界与安全性
-
-#### URL 路径约束
-为防止 prompt injection 或误用，`executeHttpRequest` 将对 URL 进行约束：
-
-```typescript
-async function executeHttpRequest(meta: HttpRequestMeta): Promise<ActionResult> {
-  let url = meta.url;
-
-  // 安全约束：只允许相对路径或特定域名
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    // 只允许本地 API
-    const allowedOrigins = ['http://localhost:8080', 'http://127.0.0.1:8080'];
-    const urlObj = new URL(url);
-    if (!allowedOrigins.includes(urlObj.origin)) {
-      throw new Error(`不允许访问外部域名: ${urlObj.origin}`);
-    }
-  }
-  // 相对路径直接使用（假设指向后端 API）
-  // ... 其余逻辑
-}
-```
-
-#### instructions 约束
-在 `CopilotPopup` 的 `instructions` 中明确约束 agent：
-```
-使用 confirmHttpRequest 时，只允许对以下业务 API 路径操作：
-- /api/products/*
-- /api/orders/*
-- /api/users/*
-禁止跨域访问其他站点。
-```
-
-### 11.4 错误传递与统一 Schema
-
-#### `respond` 返回对象的统一结构
-
-```typescript
-interface ActionResult {
-  confirmed: boolean;
-  status: 'success' | 'error' | 'cancelled';
-  statusCode?: number;
-  bodyText?: string;
-  errorMessage?: string;  // 错误信息，确保有值
-}
-
-// 成功时
-respond({
-  confirmed: true,
-  status: 'success',
-  statusCode: 200,
-  bodyText: result
-});
-
-// 用户取消时
-respond({
-  confirmed: false,
-  status: 'cancelled',
-  errorMessage: '用户取消了操作'
-});
-
-// 请求失败时
-respond({
-  confirmed: false,
-  status: 'error',
-  errorMessage: error.message || '未知错误'
-});
-```
-
-#### 后端 Agent 错误处理
-确保后端 agent 在处理工具结果时，任何抛出的错误都带 `message` 字段，避免再次触发 ZodError。
-
-### 11.5 前端 RUN_ERROR 兜底处理
-
-在 AG-UI 客户端添加错误事件兜底：
-
-```typescript
-// 在 route.ts 或适当位置
-const runtime = new CopilotRuntime({
-  agents: {
-    default: new HttpAgent({
-      url: `${JAVA_BACKEND_URL}/api/agui`,
-      // 添加错误处理中间件（如果 API 支持）
-    }),
-  },
-});
-```
-
-或者在 `page.tsx` 中捕获 SSE 错误：
-
-```typescript
-useEffect(() => {
-  // 监听未捕获的 AG-UI 错误
-  const handleError = (event: ErrorEvent) => {
-    if (event.message?.includes('ZodError') || event.message?.includes('RUN_ERROR')) {
-      console.error('[AG-UI Error]', event);
-      // 可选：显示用户友好的错误提示
-    }
-  };
-  window.addEventListener('error', handleError);
-  return () => window.removeEventListener('error', handleError);
-}, []);
-```
-
-### 11.6 可观测性增强
-
-#### executeHttpRequest 返回结构化数据
-
-```typescript
-async function executeHttpRequest(meta: HttpRequestMeta): Promise<ActionResult> {
-  // ... 执行请求
-
-  const resp = await fetch(url, opts);
-  const responseText = await resp.text();
-
-  // 返回结构化结果，不只是自然语言
-  const baseResult: ActionResult = {
-    confirmed: true,
-    status: resp.ok ? 'success' : 'error',
-    statusCode: resp.status,
-    bodyText: responseText,
-  };
-
-  // 可选：调用解释 API 生成友好描述
-  if (resp.ok) {
-    try {
-      const explainResp = await fetch('/api/explain-result', { /* ... */ });
-      if (explainResp.ok) {
-        baseResult.bodyText = await explainResp.text();
-      }
-    } catch (e) {
-      console.warn('解释结果失败，使用原始响应:', e);
-    }
-  } else {
-    baseResult.errorMessage = `HTTP ${resp.status}: ${responseText}`;
-  }
-
-  return baseResult;
-}
-```
-
-### 11.7 测试增强
-
-#### Playwright 捕获控制台错误
-
-```typescript
-// 在测试文件中
-test('确认对话框功能', async ({ page }) => {
-  const consoleErrors: string[] = [];
-  page.on('console', msg => {
-    if (msg.type() === 'error') {
-      consoleErrors.push(msg.text());
-    }
-  });
-
-  // ... 执行测试步骤
-
-  // 验证没有 ZodError 或 React 警告
-  expect(consoleErrors.some(e => e.includes('ZodError'))).toBe(false);
-  expect(consoleErrors.some(e => e.includes('Warning:'))).toBe(false);
-});
-```
-
-### 11.8 首轮上线范围限制
-
-首轮实现只对以下明确的写接口开放 `confirmHttpRequest`：
-- `POST /api/products/cart` - 添加购物车
-- `POST /store/order` - 下单
-
-待路径稳定后，再扩展到更多 POST/PUT/DELETE 操作。
-
-### 11.9 调试日志
-
-开发环境启用 CopilotKit/AG-UI 调试：
-
-```typescript
-// .env.local
-NEXT_PUBLIC_COPILOT_DEBUG=true
-```
-
-并在浏览器控制台捕获完整事件流，便于分析 `RUN_ERROR` 结构。
-
----
-
-**文档版本**: 2.0
-**更新时间**: 2026-03-12
-**状态**: 待批准（已根据用户反馈更新）
+*等待用户批准后开始实施。*
