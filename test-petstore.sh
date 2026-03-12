@@ -118,10 +118,59 @@ assert_contains "POST /store/order 下单" "$resp" "placed"
 
 echo ""
 # ══════════════════════════════════════════════════════════
-#  TEST 2: Agent 聊天 - 完整 Skills 流程
+#  TEST 2: API 结果解释 (explain-result)
+# ══════════════════════════════════════════════════════════
+bold "[TEST 2] API 结果解释 - PetStore 场景"
+
+# 2a: 测试查找宠物（带路径参数）
+echo "  (测试路径参数匹配 - findByStatus，可能需要 10-30 秒...)"
+resp=$(curl -s -X POST "$BASE_URL/api/explain-result" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "method": "GET",
+        "url": "/api/v3/pet/findByStatus",
+        "queryParams": {"status": "available"},
+        "statusCode": 200,
+        "responseBody": "[{\"id\":1,\"name\":\"Dog\",\"status\":\"available\"}]"
+    }' \
+    --max-time 60)
+assert_not_empty "findByStatus 解释有响应" "$resp"
+assert_contains "解释结果包含宠物信息" "$resp" "宠物\|pet\|available"
+
+# 2b: 测试带 ID 的路径参数匹配（关键功能）
+echo "  (测试路径参数匹配 - /pet/{petId}，可能需要 10-30 秒...)"
+resp=$(curl -s -X POST "$BASE_URL/api/explain-result" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "method": "GET",
+        "url": "/api/v3/pet/12345",
+        "statusCode": 200,
+        "responseBody": "{\"id\":12345,\"name\":\"Buddy\",\"status\":\"available\"}"
+    }' \
+    --max-time 60)
+assert_not_empty "路径参数 /pet/{petId} 匹配有响应" "$resp"
+# 应该能够匹配到分层 Skill 中定义的 GET /api/v3/pet/{petId}
+
+# 2c: 测试下单操作（POST 请求）
+echo "  (测试下单操作解释，可能需要 10-30 秒...)"
+resp=$(curl -s -X POST "$BASE_URL/api/explain-result" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "method": "POST",
+        "url": "/api/v3/store/order",
+        "statusCode": 200,
+        "responseBody": "{\"id\":1,\"petId\":2,\"quantity\":1,\"status\":\"placed\",\"complete\":false}"
+    }' \
+    --max-time 60)
+assert_not_empty "下单操作解释有响应" "$resp"
+assert_contains "解释包含订单信息" "$resp" "订单\|order\|placed\|✅"
+
+echo ""
+# ══════════════════════════════════════════════════════════
+#  TEST 3: Agent 聊天 - 完整 Skills 流程
 #  验证: loadSkill → readSkillReference → httpRequest
 # ══════════════════════════════════════════════════════════
-bold "[TEST 2] Agent 聊天 - PetStore Skills 完整流程"
+bold "[TEST 3] Agent 聊天 - PetStore Skills 完整流程"
 echo "  (调用 LLM API，可能需要 30-90 秒...)"
 
 resp=$(curl -s -X POST "$BASE_URL/api/chat" \

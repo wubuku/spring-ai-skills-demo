@@ -187,10 +187,59 @@ assert_contains "返回包含 response 字段" "$resp" '"response"'
 assert_contains "推荐了耳机相关商品" "$resp" "Sony\|耳机\|2499\|WH-1000XM5"
 
 # ══════════════════════════════════════════════════════════
-#  TEST 6: 确认模式 (confirm-before-mutate)
+#  TEST 6: API 结果解释 (explain-result)
 # ══════════════════════════════════════════════════════════
 echo ""
-bold "[TEST 6] 确认模式 - 前端执行场景"
+bold "[TEST 6] API 结果解释 - explain-result 端点"
+
+# 6a: 测试成功响应的解释
+echo "  (调用 LLM API，可能需要 10-30 秒...)"
+resp=$(curl -s -X POST "$BASE_URL/api/explain-result" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "method": "GET",
+        "url": "/api/products",
+        "statusCode": 200,
+        "responseBody": "[{\"id\":1,\"name\":\"iPhone 15\",\"price\":6999}]"
+    }' \
+    --max-time 60)
+assert_not_empty "explain-result 端点有响应" "$resp"
+assert_contains "解释结果包含 Markdown 格式" "$resp" "✅\|❌\|操作"
+
+# 6b: 测试路径参数匹配（关键功能）
+echo "  (测试路径参数匹配，可能需要 10-30 秒...)"
+resp=$(curl -s -X POST "$BASE_URL/api/explain-result" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "method": "GET",
+        "url": "/api/products/123",
+        "statusCode": 200,
+        "responseBody": "{\"id\":123,\"name\":\"Test Product\",\"price\":999}"
+    }' \
+    --max-time 60)
+assert_not_empty "路径参数匹配有响应" "$resp"
+# 应该能够匹配到 Skill 中定义的 /api/products/{id}
+
+# 6c: 测试错误响应的解释
+echo "  (测试错误响应解释，可能需要 10-30 秒...)"
+resp=$(curl -s -X POST "$BASE_URL/api/explain-result" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "method": "POST",
+        "url": "/api/products/checkout",
+        "queryParams": {"userId": "999"},
+        "statusCode": 400,
+        "responseBody": "{\"success\":false,\"message\":\"购物车为空\"}"
+    }' \
+    --max-time 60)
+assert_not_empty "错误响应解释有响应" "$resp"
+assert_contains "错误解释包含失败标识" "$resp" "❌\|失败\|错误"
+
+# ══════════════════════════════════════════════════════════
+#  TEST 7: 确认模式 (confirm-before-mutate)
+# ══════════════════════════════════════════════════════════
+echo ""
+bold "[TEST 7] 确认模式 - 前端执行场景"
 
 if ! command -v jq &>/dev/null; then
     red "  ⚠ 跳过 TEST 6: 需要安装 jq"
