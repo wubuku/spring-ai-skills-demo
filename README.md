@@ -212,7 +212,13 @@ OPENAI_MODEL=deepseek-chat                  # 或 gpt-4o
 
 ```bash
 # 加载环境变量
-set -a && source .env && set +a
+set -a && source .env && set +a 
+# set -a 用于开启allexport模式后加载.env，确保变量导出给子进程（Spring Boot应用）
+# source .env 加载环境变量
+# set +a 关闭allexport模式
+#
+# 另一种常见写法：
+# export $(cat .env | grep -v '^#' | xargs) 
 
 # 构建
 mvn clean package -DskipTests

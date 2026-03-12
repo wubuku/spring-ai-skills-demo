@@ -4,10 +4,13 @@
 
 ## 技术栈
 
-- **Next.js 15** - React 框架
-- **CopilotKit** - AI 聊天组件库
+- **Next.js 15.1.6** - React 框架
+- **React 19** - UI 库
+- **CopilotKit 1.53.0** - AI 聊天组件库
 - **Tailwind CSS** - 样式框架
 - **TypeScript** - 类型安全
+- **remark-gfm 4.0.0** - GitHub Flavored Markdown 支持
+- **rehype-highlight 7.0.0** - 代码语法高亮
 
 ## 架构说明
 
@@ -130,3 +133,171 @@ export async function POST(req: NextRequest) {
          ↓ SSE 流式响应
          前端实时显示
 ```
+
+## Markdown 渲染增强
+
+### 自定义 Markdown 组件
+
+项目为 CopilotPopup 配置了自定义 Markdown 渲染器，确保所有 Markdown 格式都能正确显示：
+
+```tsx
+// app/page.tsx
+<CopilotPopup
+  markdownComponents={{
+    // 自定义表格渲染
+    table: (props) => (
+      <div className="overflow-x-auto my-4">
+        <table className="min-w-full border-collapse border" {...props} />
+      </div>
+    ),
+    thead: (props) => <thead className="bg-gray-100" {...props} />,
+    tbody: (props) => <tbody className="divide-y" {...props} />,
+    th: (props) => <th className="border px-4 py-2 font-semibold" {...props} />,
+    td: (props) => <td className="border px-4 py-2" {...props} />,
+    // ... 更多自定义组件
+  }}
+/>
+```
+
+**支持的 Markdown 元素**：
+- ✅ 表格（GFM tables）- 带边框、悬停效果、深色模式
+- ✅ 列表（有序、无序）
+- ✅ 代码块（行内、块级）
+- ✅ 加粗、斜体
+- ✅ 引用
+- ✅ 链接
+- ✅ 标题（h1-h6）
+
+### 可复用的 Markdown 组件
+
+项目还包含一个独立的 MarkdownRenderer 组件（`components/MarkdownRenderer.tsx`），可在其他地方复用：
+
+```tsx
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+
+<MarkdownRenderer content={markdownContent} />
+```
+
+## 项目状态与改进建议
+
+### ✅ 已完成的功能
+
+1. **CopilotKit 集成**
+   - ✅ 正确配置 Agent 连接
+   - ✅ SSE 流式响应
+   - ✅ 会话记忆
+
+2. **Markdown 渲染**
+   - ✅ 自定义表格样式
+   - ✅ 深色模式支持
+   - ✅ GFM 支持（表格、删除线、任务列表）
+
+3. **UI/UX**
+   - ✅ 响应式设计
+   - ✅ 美观的表格和列表样式
+   - ✅ 代码高亮支持
+
+### ⚠️ 可改进的地方
+
+#### 1. MarkdownRenderer 组件未被使用
+
+**现状**：
+- 创建了 `components/MarkdownRenderer.tsx` 组件
+- 当前 `app/page.tsx` 没有导入和使用它
+- CopilotPopup 的 `markdownComponents` 已经足够
+
+**建议**：
+- **选项 1（推荐）**：保留作为备用，未来可能用于其他页面
+- **选项 2**：删除该组件，减少维护负担
+
+#### 2. TypeScript 类型可以更严格
+
+**现状**：
+```tsx
+table: (props: any) => (...)
+```
+
+**改进建议**：
+```tsx
+import { ComponentPropsWithoutRef } from 'react';
+
+table: (props: ComponentPropsWithoutRef<'table'>) => (...)
+```
+
+**影响**：不影响功能，只是类型安全性可以提升
+
+#### 3. 依赖版本锁定
+
+**现状**：
+```json
+"@copilotkit/react-core": "1.53.0"  // 锁定版本
+```
+
+**建议**：
+- 继续关注 CopilotKit 更新
+- 测试新版本后再升级
+- 当前版本稳定可用
+
+### 🎯 未来可能的增强
+
+1. **代码复制按钮**
+   - 为代码块添加一键复制功能
+
+2. **表格功能增强**
+   - 表格排序
+   - 表格筛选
+   - 导出为 CSV
+
+3. **性能优化**
+   - 使用 React.memo 优化表格组件
+   - 虚拟滚动（如果表格数据很大）
+
+## 依赖说明
+
+### 核心依赖
+
+| 依赖 | 版本 | 用途 |
+|------|------|------|
+| `@copilotkit/react-core` | 1.53.0 | CopilotKit 核心功能 |
+| `@copilotkit/react-ui` | 1.53.0 | CopilotKit UI 组件 |
+| `@copilotkit/runtime` | 1.53.0 | CopilotKit 运行时 |
+| `@ag-ui/client` | ^0.0.47 | AG-UI 协议客户端 |
+| `remark-gfm` | ^4.0.0 | GFM Markdown 支持 |
+| `rehype-highlight` | ^7.0.0 | 代码语法高亮 |
+
+### 为什么需要 remark-gfm 和 rehype-highlight？
+
+- **CopilotKit 内部使用**：`@copilotkit/react-ui` 内部导入并使用 `remark-gfm`
+- **MarkdownRenderer 使用**：可复用组件需要这两个依赖
+- **支持 GFM 功能**：表格、删除线、任务列表等
+
+## 故障排查
+
+### 常见问题
+
+**Q: Agent 'default' not found 错误？**
+- 检查 `app/api/copilotkit/route.ts` 中 agent 注册格式
+- 确保使用对象格式：`agents: { default: ... }`
+- 不要使用数组格式
+
+**Q: Markdown 表格不显示？**
+- 检查 `markdownComponents` 配置是否正确
+- 确保后端返回的是纯 Markdown 文本
+- 查看浏览器控制台是否有错误
+
+**Q: 深色模式不生效？**
+- 确保自定义组件包含 `dark:` 前缀的样式
+- 检查 Tailwind CSS 配置
+
+## 贡献指南
+
+提交代码前请确保：
+1. ✅ 运行 `npm run lint` 检查代码风格
+2. ✅ 测试 Markdown 渲染功能
+3. ✅ 测试深色模式
+4. ✅ 检查响应式设计
+
+## 许可证
+
+MIT License
+

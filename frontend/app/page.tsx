@@ -83,6 +83,48 @@ export default function Home() {
             initial: "你好！我是企业智能助手，有什么可以帮助你的吗？",
             placeholder: "输入你的问题...",
           }}
+          markdownComponents={{
+            // 自定义表格渲染，确保 Markdown 表格正确显示
+            table: (props: any) => (
+              <div className="overflow-x-auto my-4">
+                <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600" {...props} />
+              </div>
+            ),
+            thead: (props: any) => (
+              <thead className="bg-gray-100 dark:bg-gray-700" {...props} />
+            ),
+            tbody: (props: any) => (
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-700" {...props} />
+            ),
+            tr: (props: any) => (
+              <tr className="hover:bg-gray-50 dark:hover:bg-gray-800" {...props} />
+            ),
+            th: (props: any) => (
+              <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100" {...props} />
+            ),
+            td: (props: any) => (
+              <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-gray-700 dark:text-gray-300" {...props} />
+            ),
+            // 增强其他 Markdown 元素
+            p: (props: any) => (
+              <p className="my-2 leading-relaxed" {...props} />
+            ),
+            ul: (props: any) => (
+              <ul className="list-disc list-inside my-2 space-y-1" {...props} />
+            ),
+            ol: (props: any) => (
+              <ol className="list-decimal list-inside my-2 space-y-1" {...props} />
+            ),
+            li: (props: any) => (
+              <li className="text-gray-700 dark:text-gray-300" {...props} />
+            ),
+            code: (props: any) => (
+              <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-sm font-mono" {...props} />
+            ),
+            pre: (props: any) => (
+              <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto my-2" {...props} />
+            ),
+          }}
         />
       </main>
     </div>
