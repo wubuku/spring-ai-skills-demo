@@ -1,6 +1,8 @@
 "use client";
 
+import React from "react";
 import { CopilotPopup } from "@copilotkit/react-ui";
+import { ConfirmDialogContainer, HttpRequestMeta } from "@/components/ConfirmDialogContainer";
 
 export default function Home() {
   return (
@@ -83,47 +85,82 @@ export default function Home() {
             initial: "你好！我是企业智能助手，有什么可以帮助你的吗？",
             placeholder: "输入你的问题...",
           }}
-          markdownComponents={{
-            // 自定义表格渲染，确保 Markdown 表格正确显示
-            table: (props: any) => (
+          AssistantMessage={undefined}
+          markdownTagRenderers={{
+            // 表格渲染，确保 Markdown 表格正确显示
+            table: ({ children, ...props }: any) => (
               <div className="overflow-x-auto my-4">
-                <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600" {...props} />
+                <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600" {...props}>
+                  {children}
+                </table>
               </div>
             ),
-            thead: (props: any) => (
-              <thead className="bg-gray-100 dark:bg-gray-700" {...props} />
+            thead: ({ children, ...props }: any) => (
+              <thead className="bg-gray-100 dark:bg-gray-700" {...props}>
+                {children}
+              </thead>
             ),
-            tbody: (props: any) => (
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700" {...props} />
+            tbody: ({ children, ...props }: any) => (
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-700" {...props}>
+                {children}
+              </tbody>
             ),
-            tr: (props: any) => (
-              <tr className="hover:bg-gray-50 dark:hover:bg-gray-800" {...props} />
+            tr: ({ children, ...props }: any) => (
+              <tr className="hover:bg-gray-50 dark:hover:bg-gray-800" {...props}>
+                {children}
+              </tr>
             ),
-            th: (props: any) => (
-              <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100" {...props} />
+            th: ({ children, ...props }: any) => (
+              <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100" {...props}>
+                {children}
+              </th>
             ),
-            td: (props: any) => (
-              <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-gray-700 dark:text-gray-300" {...props} />
+            td: ({ children, ...props }: any) => (
+              <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-gray-700 dark:text-gray-300" {...props}>
+                {children}
+              </td>
             ),
-            // 增强其他 Markdown 元素
-            p: (props: any) => (
-              <p className="my-2 leading-relaxed" {...props} />
-            ),
-            ul: (props: any) => (
-              <ul className="list-disc list-inside my-2 space-y-1" {...props} />
-            ),
-            ol: (props: any) => (
-              <ol className="list-decimal list-inside my-2 space-y-1" {...props} />
-            ),
-            li: (props: any) => (
-              <li className="text-gray-700 dark:text-gray-300" {...props} />
-            ),
-            code: (props: any) => (
-              <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-sm font-mono" {...props} />
-            ),
-            pre: (props: any) => (
-              <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto my-2" {...props} />
-            ),
+            // pre 组件：拦截 http-request 代码块，渲染确认对话框
+            pre: ({ children, ...props }: any) => {
+              // 检测 http-request 代码块
+              if (React.isValidElement(children)) {
+                const codeProps = (children as React.ReactElement<any>).props;
+                const className = codeProps?.className || '';
+
+                // 处理两种格式：
+                // 1. 正确格式：language-http-request（然后换行有 JSON）
+                // 2. AI 错误格式：language-http-request{...}（JSON 直接拼接无换行）
+                if (className === 'language-http-request' ||
+                    className.startsWith('language-http-request')) {
+                  try {
+                    let content = String(codeProps.children).trim();
+                    let requestMeta: HttpRequestMeta;
+
+                    if (className.startsWith('language-http-request{')) {
+                      // 错误格式：JSON 在 className 中
+                      // className 类似 "language-http-request{"method":"POST",...}"
+                      const jsonStr = className.replace('language-http-request', '');
+                      requestMeta = JSON.parse(jsonStr);
+                    } else {
+                      // 正确格式：JSON 在 children 中
+                      requestMeta = JSON.parse(content);
+                    }
+
+                    // 使用稳定的 key，确保流式渲染时状态不丢失
+                    const stableKey = `${requestMeta.method}-${requestMeta.url}`;
+                    return <ConfirmDialogContainer key={stableKey} requestMeta={requestMeta} />;
+                  } catch {
+                    // JSON 解析失败，降级到普通代码块渲染
+                  }
+                }
+              }
+              // 正常的 pre 渲染（保留默认 CodeBlock 语法高亮）
+              return (
+                <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto my-2" {...props}>
+                  {children}
+                </pre>
+              );
+            },
           }}
         />
       </main>

@@ -1,17 +1,20 @@
 package com.example.demo.agent;
 
-import com.example.demo.model.Skill;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
-import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
-import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
+import org.springframework.ai.chat.client.advisor.api.AdvisorChain;
+import org.springframework.ai.chat.client.advisor.api.BaseAdvisor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.stream.Collectors;
 
 @Component
-public class SkillsAdvisor implements CallAdvisor {
+public class SkillsAdvisor implements BaseAdvisor {
+
+    private static final Logger log = LoggerFactory.getLogger(SkillsAdvisor.class);
 
     private final SkillRegistry registry;
     private final SkillTools skillTools;
@@ -34,12 +37,19 @@ public class SkillsAdvisor implements CallAdvisor {
     public int getOrder() { return Ordered.HIGHEST_PRECEDENCE; }
 
     @Override
-    public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
+    public ChatClientRequest before(ChatClientRequest request, AdvisorChain chain) {
         String systemPrompt = buildSystemPrompt();
-        ChatClientRequest augmented = request.mutate()
+        log.info("[SkillsAdvisor] 注入系统提示，长度={}字符，技能数量={}",
+                systemPrompt.length(), registry.all().size());
+        log.debug("[SkillsAdvisor] 系统提示前300字：{}", systemPrompt.substring(0, Math.min(300, systemPrompt.length())));
+        return request.mutate()
             .prompt(request.prompt().augmentSystemMessage(systemPrompt))
             .build();
-        return chain.nextCall(augmented);
+    }
+
+    @Override
+    public ChatClientResponse after(ChatClientResponse response, AdvisorChain chain) {
+        return response;
     }
 
     private String buildSystemPrompt() {
@@ -80,6 +90,15 @@ public class SkillsAdvisor implements CallAdvisor {
                b) 在消息末尾原样保留工具返回的 ```http-request 代码块（不要修改其中的 JSON 内容）
                c) 绝不要省略代码块，也不要尝试自行执行该操作
                d) 不要在代码块外重复展示请求参数的技术细节
+
+            **【关键格式要求】**：
+            - http-request 代码块的格式必须是：
+              ```http-request
+              {"method":"POST","url":"/api/xxx",...}
+              ```
+            - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
+            - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
+            - 禁止在语言标识符后添加任何字符或空格后直接跟 JSON
             """;
     }
 }

@@ -3,6 +3,7 @@ package com.example.demo.controller;
 import com.agui.server.spring.AgUiParameters;
 import com.agui.server.spring.AgUiService;
 import com.agui.spring.ai.SpringAIAgent;
+import com.example.demo.agent.SkillTools;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.CacheControl;
@@ -24,10 +25,12 @@ public class AgUiController {
 
     private final AgUiService agUiService;
     private final SpringAIAgent enterpriseAgent;
+    private final SkillTools skillTools;
 
-    public AgUiController(AgUiService agUiService, SpringAIAgent enterpriseAgent) {
+    public AgUiController(AgUiService agUiService, SpringAIAgent enterpriseAgent, SkillTools skillTools) {
         this.agUiService = agUiService;
         this.enterpriseAgent = enterpriseAgent;
+        this.skillTools = skillTools;
     }
 
     /**
@@ -51,8 +54,7 @@ public class AgUiController {
         // 生产环境：在此验证 JWT
         // jwtService.validate(authHeader);
 
-        // 重置工具状态（如 loadedSkills）
-        // 注意：这里通过 advisor 机制处理，无需手动重置
+        skillTools.reset();
 
         SseEmitter emitter = agUiService.runAgent(enterpriseAgent, agUiParameters);
 

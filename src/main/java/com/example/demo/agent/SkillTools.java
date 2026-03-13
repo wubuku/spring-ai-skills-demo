@@ -88,9 +88,11 @@ public class SkillTools {
 
             // 确认模式：非 GET 请求不在后端执行，返回元数据让前端确认
             if (confirmBeforeMutate && !"GET".equalsIgnoreCase(method)) {
+                // 使用完整 URL，确保前端（运行在不同端口）能直接访问后端
+                String confirmUrl = resolvedUrl.startsWith("http") ? resolvedUrl : apiBaseUrl + resolvedUrl;
                 Map<String, Object> meta = new LinkedHashMap<>();
                 meta.put("method", method.toUpperCase());
-                meta.put("url", resolvedUrl);
+                meta.put("url", confirmUrl);
                 if (pathParams != null && !pathParams.isEmpty()) meta.put("pathParams", pathParams);
                 if (queryParams != null && !queryParams.isEmpty()) meta.put("queryParams", queryParams);
                 if (headers != null && !headers.isEmpty()) meta.put("headers", headers);
