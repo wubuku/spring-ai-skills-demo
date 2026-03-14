@@ -19,19 +19,9 @@ export interface HttpExecutionResult {
   cancelled?: boolean;
 }
 
-const ALLOWED_DOMAINS = [
-  'localhost:8080',
-  '127.0.0.1:8080',
-  'petstore.swagger.io',
-];
-
-function isUrlAllowed(url: string): boolean {
-  try {
-    const parsed = new URL(url, window.location.origin);
-    return ALLOWED_DOMAINS.some(d => parsed.host === d || parsed.host.endsWith('.' + d));
-  } catch {
-    return false;
-  }
+// Demo 应用：允许所有 URL（不再限制白名单）
+function isUrlAllowed(_url: string): boolean {
+  return true;
 }
 
 const BACKEND_BASE = 'http://localhost:8080';
@@ -41,20 +31,32 @@ async function executeHttpRequest(meta: HttpRequestMeta): Promise<string> {
     throw new Error(`URL 不在允许的域名白名单中: ${meta.url}`);
   }
 
+  // 如果是相对路径，需要加上后端 base URL
   let url = meta.url;
+  if (url.startsWith('/')) {
+    url = BACKEND_BASE + url;
+  }
   // 支持 queryParams 和 params 两种字段名
   const queryParams = meta.params || meta.queryParams || {};
   if (Object.keys(queryParams).length > 0) {
     url += '?' + new URLSearchParams(queryParams).toString();
   }
 
-  const bodyStr = meta.body
+  // GET/HEAD 请求不能有 body
+  const isGetOrHead = meta.method === 'GET' || meta.method === 'HEAD';
+  const bodyStr = (!isGetOrHead && meta.body)
     ? (typeof meta.body === 'string' ? meta.body : JSON.stringify(meta.body))
     : undefined;
 
   // 获取当前用户的认证 Token
   const token = localStorage.getItem('auth_token');
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...meta.headers };
+  const headers: Record<string, string> = {};
+  if (!isGetOrHead) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (meta.headers) {
+    Object.assign(headers, meta.headers);
+  }
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
