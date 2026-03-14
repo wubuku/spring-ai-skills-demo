@@ -73,6 +73,13 @@ assert_not_empty() {
     fi
 }
 
+# 生成认证 Token（base64(username:password)）
+generate_token() {
+    local username="$1"
+    local password="$2"
+    echo "$(echo -n "$username:$password" | base64)"
+}
+
 # ── 解析参数 ──────────────────────────────────────────────
 for arg in "$@"; do
     case $arg in
@@ -127,6 +134,25 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════
+#  认证设置
+# ══════════════════════════════════════════════════════════
+bold "[AUTH] 获取测试用户 Token"
+
+# 使用 user1 用户进行测试
+TEST_TOKEN=$(generate_token "user1" "password1")
+
+# 验证 Token
+resp=$(curl -s -X GET "$BASE_URL/api/auth/verify" \
+    -H "Authorization: Bearer $TEST_TOKEN")
+if echo "$resp" | grep -q "valid"; then
+    green "  ✓ 获取 Token 成功: user1"
+else
+    red "  ✗ Token 验证失败: $resp"
+    FAIL=$((FAIL + 1))
+fi
+echo ""
+
+# ══════════════════════════════════════════════════════════
 #  TEST 1: REST API
 # ══════════════════════════════════════════════════════════
 bold "[TEST 1] REST API - 商品搜索"
@@ -147,18 +173,27 @@ assert_contains "GET /api/products/3 返回 Sony" "$resp" "Sony WH-1000XM5"
 assert_contains "包含价格字段" "$resp" "2499"
 
 echo ""
-bold "[TEST 3] REST API - 购物车 & 结算"
+bold "[TEST 3] REST API - 购物车 & 结算（需要认证）"
 
-resp=$(curl -s -X POST "$BASE_URL/api/products/cart?userId=1&productId=3")
+# 使用认证后的 API 调用（不再需要 userId 参数）
+resp=$(curl -s -X POST "$BASE_URL/api/products/cart?productId=3" \
+    -H "Authorization: Bearer $TEST_TOKEN")
 assert_contains "加入购物车成功" "$resp" '"success":true'
 assert_contains "包含 cartSize" "$resp" "cartSize"
 
-resp=$(curl -s -X POST "$BASE_URL/api/products/checkout?userId=1")
+resp=$(curl -s -X POST "$BASE_URL/api/products/checkout" \
+    -H "Authorization: Bearer $TEST_TOKEN")
 assert_contains "结算成功" "$resp" '"success":true'
 assert_contains "包含 totalAmount" "$resp" "totalAmount"
 
-resp=$(curl -s -X POST "$BASE_URL/api/products/checkout?userId=1")
+# 再次结算应该失败（购物车已清空）
+resp=$(curl -s -X POST "$BASE_URL/api/products/checkout" \
+    -H "Authorization: Bearer $TEST_TOKEN")
 assert_contains "空购物车结算失败" "$resp" '"success":false'
+
+# 测试未认证访问应该失败（返回 403）
+resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$BASE_URL/api/products/cart?productId=3")
+assert_contains "未认证访问应失败" "$resp" "403"
 
 echo ""
 bold "[TEST 4] REST API - Swagger & OpenAPI"
@@ -278,17 +313,23 @@ else
     else
         green "  Application restarted in confirm mode (${WAITED}s)"
 
+        # 重新获取 Token（因为应用重启了）
+        TEST_TOKEN=$(generate_token "user1" "password1")
+
         # 6a: REST API 仍然正常工作（确认模式不影响直接 API 调用）
-        resp=$(curl -s -X POST "$BASE_URL/api/products/cart?userId=1&productId=3")
+        resp=$(curl -s -X POST "$BASE_URL/api/products/cart?productId=3" \
+            -H "Authorization: Bearer $TEST_TOKEN")
         assert_contains "确认模式下 REST API 仍可用" "$resp" '"success":true'
         # 清空购物车
-        curl -s -X POST "$BASE_URL/api/products/checkout?userId=1" > /dev/null
+        curl -s -X POST "$BASE_URL/api/products/checkout" \
+            -H "Authorization: Bearer $TEST_TOKEN" > /dev/null
 
         # 6b: Agent 聊天 - 变更操作应返回 http-request 代码块
         echo "  (调用 LLM API，可能需要 30-90 秒...)"
         resp=$(curl -s -X POST "$BASE_URL/api/chat" \
             -H "Content-Type: application/json" \
-            -d '{"content":"请把商品ID为3的商品加入购物车（用户ID=1）"}' \
+            -H "Authorization: Bearer $TEST_TOKEN" \
+            -d '{"content":"帮我使用 add-to-cart 技能把商品ID=3加入购物车"}' \
             --max-time 120)
 
         assert_not_empty "确认模式聊天端点有响应" "$resp"
@@ -305,23 +346,36 @@ else
             # 解析 JSON 并构造 curl 请求（模拟前端执行）
             req_method=$(echo "$request_json" | jq -r '.method')
             req_url=$(echo "$request_json" | jq -r '.url')
-            req_params=$(echo "$request_json" | jq -r '.params // {} | to_entries | map("\(.key)=\(.value)") | join("&")')
+            # 优先使用 queryParams，其次使用 params
+            req_params=$(echo "$request_json" | jq -r '.queryParams // .params // {} | to_entries | map("\(.key)=\(.value)") | join("&")')
             req_body=$(echo "$request_json" | jq -r '.body // empty')
 
-            full_url="$BASE_URL$req_url"
+            # 调试：显示原始 URL 和参数
+            echo "    DEBUG: req_url=$req_url req_params=$req_params"
+
+            # 如果 URL 已经是完整路径，则不再拼接 BASE_URL
+            if [[ "$req_url" == http://* ]] || [[ "$req_url" == https://* ]]; then
+                full_url="$req_url"
+            else
+                full_url="$BASE_URL$req_url"
+            fi
             if [ -n "$req_params" ]; then
                 full_url="${full_url}?${req_params}"
             fi
+            echo "    DEBUG: full_url=$full_url"
 
-            # 执行请求
+            # 执行请求（模拟前端执行，需要携带认证头）
             if [ -n "$req_body" ] && [ "$req_body" != "null" ]; then
                 exec_resp=$(curl -s -X "$req_method" "$full_url" \
                     -H "Content-Type: application/json" \
+                    -H "Authorization: Bearer $TEST_TOKEN" \
                     -d "$req_body")
             else
                 exec_resp=$(curl -s -X "$req_method" "$full_url" \
-                    -H "Content-Type: application/json")
+                    -H "Content-Type: application/json" \
+                    -H "Authorization: Bearer $TEST_TOKEN")
             fi
+            echo "    DEBUG: exec_resp=$exec_resp"
 
             assert_contains "前端执行请求成功" "$exec_resp" '"success":true'
         else

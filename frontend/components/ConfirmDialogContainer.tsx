@@ -52,9 +52,16 @@ async function executeHttpRequest(meta: HttpRequestMeta): Promise<string> {
     ? (typeof meta.body === 'string' ? meta.body : JSON.stringify(meta.body))
     : undefined;
 
+  // 获取当前用户的认证 Token
+  const token = localStorage.getItem('auth_token');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...meta.headers };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const resp = await fetch(url, {
     method: meta.method,
-    headers: { 'Content-Type': 'application/json', ...meta.headers },
+    headers,
     body: bodyStr,
   });
   const responseText = await resp.text();

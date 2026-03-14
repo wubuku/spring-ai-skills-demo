@@ -16,16 +16,29 @@ function extractHttpRequestMeta(content: string): {
   cleanedContent: string;
   requestMeta?: HttpRequestMeta;
 } {
-  const codeBlockPattern = /```http-request\s*([\s\S]*?)```/i;
-  const match = content.match(codeBlockPattern);
+  // 直接搜索 ```http-request 代码块开始标记
+  const marker = "```http-request";
+  const startIdx = content.indexOf(marker);
 
-  if (!match) {
+  if (startIdx === -1) {
     return {
       cleanedContent: content.replace(/\[CONFIRM_REQUIRED\]\s*/g, "").trim(),
     };
   }
 
-  const jsonContent = match[1]?.trim();
+  // 找到结束标记 ```
+  const codeStart = startIdx + marker.length;
+  const endIdx = content.indexOf("```", codeStart);
+
+  let jsonContent = "";
+  let cleanedContent = content;
+
+  if (endIdx !== -1) {
+    jsonContent = content.substring(codeStart, endIdx).trim();
+    // 移除整个代码块
+    cleanedContent = content.substring(0, startIdx) + content.substring(endIdx + 3);
+  }
+
   let requestMeta: HttpRequestMeta | undefined;
 
   if (jsonContent) {
@@ -36,12 +49,11 @@ function extractHttpRequestMeta(content: string): {
         params: raw.params ?? raw.queryParams,
       };
     } catch {
-      // 流式阶段 JSON 可能暂时不完整，先按普通文本继续渲染
+      // JSON 解析失败，忽略
     }
   }
 
-  const cleanedContent = content
-    .replace(codeBlockPattern, "")
+  cleanedContent = cleanedContent
     .replace(/\[CONFIRM_REQUIRED\]\s*/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

@@ -1,10 +1,13 @@
 package com.example.demo.agent;
 
 import com.example.demo.model.Skill;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -16,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Component
 public class SkillTools {
 
@@ -60,25 +64,84 @@ public class SkillTools {
     }
 
     /**
-     * 发送 HTTP 请求调用 REST API
+     * 工具1（模式1）：直接发送 HTTP 请求并返回结果
+     * 用于 confirmBeforeMutate = false 时
      *
-     * 支持的参数位置（对应 OpenAPI 的 "in" 字段）：
-     * - path: 路径参数，用于替换 URL 中的占位符，如 /pet/{petId}
-     * - query: 查询参数，拼接到 URL 的 ? 之后
-     * - header: 请求头，用于认证等
-     * - body: 请求体，用于 POST/PUT 等方法
+     * 支持认证透传机制：如果当前请求带有用户认证信息（通过 AuthFilter 设置），
+     * 会自动将认证 Token 注入到请求头中。
      */
-    @Tool(description = "发送 HTTP 请求调用 REST API。支持路径参数、查询参数、请求头和请求体。")
+    @Tool(description = "发送 HTTP 请求调用 REST API，并直接返回执行结果。支持 GET/POST/PUT/DELETE 所有方法。")
     public String httpRequest(
         @ToolParam(description = "HTTP 方法：GET/POST/PUT/DELETE") String method,
-        @ToolParam(description = "API 路径，可包含占位符如 /pet/{petId}（相对路径会自动拼接 base URL）") String url,
-        @ToolParam(description = "路径参数，用于替换 URL 中的占位符，如 {\"petId\": \"123\"}") Map<String, String> pathParams,
-        @ToolParam(description = "查询参数（URL 中 ? 之后的部分）") Map<String, String> queryParams,
-        @ToolParam(description = "请求头（如认证信息）") Map<String, String> headers,
-        @ToolParam(description = "请求体（JSON 对象，用于 POST/PUT）") Map<String, Object> body
+        @ToolParam(description = "API 路径（相对路径会自动拼接 base URL）") String url,
+        @ToolParam(description = "路径参数，用于替换 URL 中的占位符") Map<String, String> pathParams,
+        @ToolParam(description = "查询参数") Map<String, String> queryParams,
+        @ToolParam(description = "请求头") Map<String, String> headers,
+        @ToolParam(description = "请求体（仅用于 POST/PUT）") Map<String, Object> body
     ) {
+        return executeHttpRequest(method, url, pathParams, queryParams, headers, body);
+    }
+
+    /**
+     * 工具2（模式2）：HTTP 请求工具（确认模式）
+     * 用于 confirmBeforeMutate = true 时
+     *
+     * 此工具根据请求类型决定：
+     * - GET 请求：直接执行并返回结果
+     * - POST/PUT/DELETE：返回请求元数据，供前端显示确认按钮
+     */
+    @Tool(description = "发送 HTTP 请求。GET 查询会直接执行并返回结果；POST/PUT/DELETE 等修改操作会返回元数据供用户确认。")
+    public String buildHttpRequest(
+        @ToolParam(description = "HTTP 方法：GET/POST/PUT/DELETE") String method,
+        @ToolParam(description = "API 路径（相对路径）") String url,
+        @ToolParam(description = "路径参数") Map<String, String> pathParams,
+        @ToolParam(description = "查询参数") Map<String, String> queryParams,
+        @ToolParam(description = "请求体（JSON 对象，仅用于 POST/PUT）") Map<String, Object> body
+    ) {
+        log.info("[buildHttpRequest] 被调用! method={}, url={}", method, url);
+
+        // 替换路径参数
+        String resolvedUrl = url;
+        if (pathParams != null && !pathParams.isEmpty()) {
+            for (Map.Entry<String, String> entry : pathParams.entrySet()) {
+                resolvedUrl = resolvedUrl.replace("{" + entry.getKey() + "}", entry.getValue());
+            }
+        }
+
+        // GET 请求直接执行
+        if ("GET".equalsIgnoreCase(method)) {
+            log.info("[buildHttpRequest] GET 请求，直接执行");
+            String result = executeHttpRequest(method, resolvedUrl, pathParams, queryParams, null, body);
+            log.info("[buildHttpRequest] GET 返回: {}", result.substring(0, Math.min(100, result.length())));
+            return result;
+        }
+
+        // 非 GET 请求返回元数据供前端确认
+        log.info("[buildHttpRequest] {} 请求，返回确认元数据", method);
+        String confirmUrl = resolvedUrl.startsWith("http") ? resolvedUrl : apiBaseUrl + resolvedUrl;
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("method", method.toUpperCase());
+        meta.put("url", confirmUrl);
+        if (pathParams != null && !pathParams.isEmpty()) meta.put("pathParams", pathParams);
+        if (queryParams != null && !queryParams.isEmpty()) meta.put("queryParams", queryParams);
+        if (body != null && !body.isEmpty()) meta.put("body", body);
+
         try {
-            // Step 1: 替换路径参数（如 /pet/{petId} -> /pet/123）
+            String json = objectMapper.writeValueAsString(meta);
+            return "[CONFIRM_REQUIRED]\n" + json;
+        } catch (Exception e) {
+            return "构建请求失败：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 实际执行 HTTP 请求的内部方法
+     */
+    private String executeHttpRequest(String method, String url, Map<String, String> pathParams,
+                                     Map<String, String> queryParams, Map<String, String> headers,
+                                     Map<String, Object> body) {
+        try {
+            // Step 1: 替换路径参数
             String resolvedUrl = url;
             if (pathParams != null && !pathParams.isEmpty()) {
                 for (Map.Entry<String, String> entry : pathParams.entrySet()) {
@@ -86,25 +149,7 @@ public class SkillTools {
                 }
             }
 
-            // 确认模式：非 GET 请求不在后端执行，返回元数据让前端确认
-            if (confirmBeforeMutate && !"GET".equalsIgnoreCase(method)) {
-                // 使用完整 URL，确保前端（运行在不同端口）能直接访问后端
-                String confirmUrl = resolvedUrl.startsWith("http") ? resolvedUrl : apiBaseUrl + resolvedUrl;
-                Map<String, Object> meta = new LinkedHashMap<>();
-                meta.put("method", method.toUpperCase());
-                meta.put("url", confirmUrl);
-                if (pathParams != null && !pathParams.isEmpty()) meta.put("pathParams", pathParams);
-                if (queryParams != null && !queryParams.isEmpty()) meta.put("queryParams", queryParams);
-                if (headers != null && !headers.isEmpty()) meta.put("headers", headers);
-                if (body != null && !body.isEmpty()) meta.put("body", body);
-                String json = objectMapper.writeValueAsString(meta);
-                return "[CONFIRM_REQUIRED]\n此操作需要用户确认后才能执行。" +
-                       "请用自然语言向用户说明将要执行什么操作及其影响，" +
-                       "然后在消息末尾原样附上以下代码块：\n\n" +
-                       "```http-request\n" + json + "\n```";
-            }
-
-            // Step 2: 构建完整 URL（拼接 base URL + 查询参数）
+            // Step 2: 构建完整 URL
             String fullUrl = resolvedUrl.startsWith("http") ? resolvedUrl : apiBaseUrl + resolvedUrl;
             var uriBuilder = UriComponentsBuilder.fromHttpUrl(fullUrl);
             if (queryParams != null && !queryParams.isEmpty()) {
@@ -117,6 +162,13 @@ public class SkillTools {
             if (headers != null && !headers.isEmpty()) {
                 headers.forEach(httpHeaders::set);
             }
+
+            // 认证透传
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication != null && authentication.isAuthenticated() && authentication.getName() != null) {
+                httpHeaders.set("X-Authenticated-User", authentication.getName());
+            }
+
             var entity = new HttpEntity<>(body, httpHeaders);
 
             // Step 4: 发送请求
@@ -134,6 +186,15 @@ public class SkillTools {
         } catch (Exception e) {
             return "HTTP 请求失败：" + e.getMessage();
         }
+    }
+
+    /**
+     * 统一执行 HTTP 请求的方法（供两种模式使用）
+     */
+    private String doHttpRequest(String method, String url, Map<String, String> pathParams,
+                                Map<String, String> queryParams, Map<String, String> headers,
+                                Map<String, Object> body) {
+        return executeHttpRequest(method, url, pathParams, queryParams, headers, body);
     }
 
     @Tool(description = "读取技能的参考文件（适用于具有分层结构的技能，如 OpenAPI 生成的技能）")

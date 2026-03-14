@@ -73,4 +73,60 @@ public class ProductService {
             "itemCount", cart.size()
         );
     }
+
+    // ========== 基于用户名的操作（用于认证透传）==========
+    // 使用 username 作为 key 而不是 userId，这样可以从 Token 中获取用户身份
+
+    private final Map<String, List<Long>> userCarts = new ConcurrentHashMap<>();
+
+    public Map<String, Object> addToCartByUsername(String username, Long productId) {
+        if (!products.containsKey(productId)) {
+            return Map.of("success", false, "message", "商品不存在");
+        }
+        userCarts.computeIfAbsent(username, k -> new ArrayList<>()).add(productId);
+        return Map.of(
+            "success", true,
+            "message", "已添加到购物车",
+            "cartSize", userCarts.get(username).size(),
+            "username", username
+        );
+    }
+
+    public Map<String, Object> checkoutByUsername(String username) {
+        List<Long> cart = userCarts.getOrDefault(username, new ArrayList<>());
+        if (cart.isEmpty()) {
+            return Map.of("success", false, "message", "购物车为空");
+        }
+        double total = cart.stream()
+            .map(products::get)
+            .filter(Objects::nonNull)
+            .mapToDouble(Product::getPrice)
+            .sum();
+        userCarts.remove(username);
+        return Map.of(
+            "success", true,
+            "message", "订单已提交",
+            "totalAmount", total,
+            "itemCount", cart.size(),
+            "username", username
+        );
+    }
+
+    public Map<String, Object> getCartByUsername(String username) {
+        List<Long> cart = userCarts.getOrDefault(username, new ArrayList<>());
+        if (cart.isEmpty()) {
+            return Map.of("success", true, "message", "购物车为空", "items", List.of());
+        }
+        List<Product> products = cart.stream()
+            .map(this.products::get)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toList());
+        double total = products.stream().mapToDouble(Product::getPrice).sum();
+        return Map.of(
+            "success", true,
+            "items", products,
+            "totalAmount", total,
+            "itemCount", cart.size()
+        );
+    }
 }
