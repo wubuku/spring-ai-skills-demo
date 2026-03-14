@@ -7,6 +7,7 @@ import com.example.demo.agent.SkillTools;
 import com.example.demo.agent.SkillsAdvisor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
@@ -83,7 +84,7 @@ public class AgUiConfig {
                     """)
                 .tool(skillTools)
                 .advisor(skillsAdvisor)
-                .chatMemory(chatMemory)
+                .advisor(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
     }
 }

@@ -4,14 +4,18 @@ import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.annotation.Order;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.Collections;
 
 /**
- * 认证过滤器 - 从请求头提取 Token 并设置 AuthContext
+ * 认证过滤器 - 从请求头提取 Token 并设置 Spring Security Context
  *
- * 注意：这是 Demo 代码，生产环境请使用 Spring Security 的过滤器
+ * 使用 SecurityContextHolder 存储认证信息，这是 Spring Security 标准
  */
 @Component
 @Order(1)
@@ -40,16 +44,22 @@ public class AuthFilter implements Filter {
                 // 验证 Token
                 AuthService.AuthUser user = authService.validateToken(token);
                 if (user != null) {
-                    // 设置到 ThreadLocal
-                    AuthContext.setCurrentUser(user);
+                    // 设置到 Spring Security ContextHolder
+                    // 这样 SecurityContextHolder + INHERITABLETHREADLOCAL 机制就能工作
+                    UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(
+                            user.getUsername(),  // principal
+                            token,              // credentials - 存储原始 JWT
+                            Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
+                        );
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
                 }
             }
 
             chain.doFilter(request, response);
 
         } finally {
-            // 清理 ThreadLocal
-            AuthContext.clear();
+            // Spring Security 会在请求结束时自动清理 SecurityContext
         }
     }
 }

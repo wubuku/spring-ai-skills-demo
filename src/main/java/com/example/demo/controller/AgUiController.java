@@ -9,12 +9,22 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * AG-UI 协议控制器
  * 提供 SSE (Server-Sent Events) 端点，供 CopilotKit Runtime 调用
+ *
+ * JWT 透传：依赖 SecurityConfig 的 MODE_INHERITABLETHREADLOCAL 机制
+ * 自动将 SecurityContext 传递到子线程（Spring AI 工具执行）
  */
 @RestController
 @RequestMapping("/api/agui")
@@ -39,6 +49,7 @@ public class AgUiController {
      * 返回 SSE 事件流
      *
      * @param agUiParameters AG-UI 请求参数（包含消息、工具、线程ID等）
+     * @param authHeader Authorization 请求头（Bearer token）
      * @return SSE Emitter
      */
     @PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -46,13 +57,35 @@ public class AgUiController {
             @RequestBody AgUiParameters agUiParameters,
             @RequestHeader(value = "Authorization", required = false) String authHeader
     ) {
-        log.info("收到 AG-UI 请求: threadId={}, runId={}, messages={}",
+        log.info("收到 AG-UI 请求: threadId={}, runId={}, messages={}, authHeader={}",
                 agUiParameters.getThreadId(),
                 agUiParameters.getRunId(),
-                agUiParameters.getMessages() != null ? agUiParameters.getMessages().size() : 0);
+                agUiParameters.getMessages() != null ? agUiParameters.getMessages().size() : 0,
+                authHeader != null ? (authHeader.substring(0, Math.min(20, authHeader.length())) + "...") : "null");
 
-        // 生产环境：在此验证 JWT
-        // jwtService.validate(authHeader);
+        // 提取 JWT Token 并设置到 SecurityContext（依赖 INHERITABLETHREADLOCAL 自动传递到子线程）
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String jwt = authHeader.substring(7);
+
+            // 设置到 SecurityContextHolder，INHERITABLETHREADLOCAL 会自动传递到子线程
+            UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(
+                    "user",  // principal
+                    jwt,     // credentials - 存储原始 JWT
+                    Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
+                );
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+            log.debug("已设置 JWT 到 SecurityContext，依赖 INHERITABLETHREADLOCAL 机制传递到子线程");
+        } else {
+            log.warn("未收到 Authorization header! authHeader={}", authHeader);
+        }
+
+        // 通过 forwardedProps 传递 JWT（备用方案）
+        Map<String, Object> toolContext = new HashMap<>();
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            toolContext.put("jwt", authHeader.substring(7));
+        }
+        agUiParameters.setForwardedProps(toolContext);
 
         skillTools.reset();
 

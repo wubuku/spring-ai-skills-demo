@@ -6,7 +6,6 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -67,8 +66,7 @@ public class SkillTools {
      * 工具1（模式1）：直接发送 HTTP 请求并返回结果
      * 用于 confirmBeforeMutate = false 时
      *
-     * 支持认证透传机制：如果当前请求带有用户认证信息（通过 AuthFilter 设置），
-     * 会自动将认证 Token 注入到请求头中。
+     * 支持认证透传机制：通过 SecurityContextHolder 获取 JWT
      */
     @Tool(description = "发送 HTTP 请求调用 REST API，并直接返回执行结果。支持 GET/POST/PUT/DELETE 所有方法。")
     public String httpRequest(
@@ -136,11 +134,15 @@ public class SkillTools {
 
     /**
      * 实际执行 HTTP 请求的内部方法
+     * 从 SecurityContextHolder 获取 JWT（通过 AuthFilter 设置）
      */
     private String executeHttpRequest(String method, String url, Map<String, String> pathParams,
                                      Map<String, String> queryParams, Map<String, String> headers,
                                      Map<String, Object> body) {
         try {
+            // 从 SecurityContextHolder 获取 JWT（AuthFilter 已设置）
+            String jwt = extractJwt();
+
             // Step 1: 替换路径参数
             String resolvedUrl = url;
             if (pathParams != null && !pathParams.isEmpty()) {
@@ -163,10 +165,10 @@ public class SkillTools {
                 headers.forEach(httpHeaders::set);
             }
 
-            // 认证透传
-            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            if (authentication != null && authentication.isAuthenticated() && authentication.getName() != null) {
-                httpHeaders.set("X-Authenticated-User", authentication.getName());
+            // 认证透传：自动添加用户认证头
+            if (jwt != null && !httpHeaders.containsKey(HttpHeaders.AUTHORIZATION)) {
+                httpHeaders.setBearerAuth(jwt);
+                log.debug("自动注入用户认证头到请求");
             }
 
             var entity = new HttpEntity<>(body, httpHeaders);
@@ -189,12 +191,27 @@ public class SkillTools {
     }
 
     /**
-     * 统一执行 HTTP 请求的方法（供两种模式使用）
+     * 提取 JWT Token
+     * 从 SecurityContextHolder 获取（依赖 INHERITABLETHREADLOCAL 自动传递到子线程）
      */
-    private String doHttpRequest(String method, String url, Map<String, String> pathParams,
-                                Map<String, String> queryParams, Map<String, String> headers,
-                                Map<String, Object> body) {
-        return executeHttpRequest(method, url, pathParams, queryParams, headers, body);
+    private String extractJwt() {
+        // 从 SecurityContextHolder 获取（依赖 INHERITABLETHREADLOCAL 机制）
+        try {
+            var auth = SecurityContextHolder.getContext().getAuthentication();
+            log.debug("从 SecurityContext 提取 JWT, authentication={}, authenticated={}",
+                auth != null ? auth.getClass().getSimpleName() : "null",
+                auth != null ? auth.isAuthenticated() : false);
+            if (auth != null && auth.isAuthenticated()) {
+                Object credentials = auth.getCredentials();
+                log.debug("credentials 类型: {}", credentials != null ? credentials.getClass().getSimpleName() : "null");
+                if (credentials instanceof String) {
+                    return (String) credentials;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("从 SecurityContext 提取 JWT 失败: {}", e.getMessage());
+        }
+        return null;
     }
 
     @Tool(description = "读取技能的参考文件（适用于具有分层结构的技能，如 OpenAPI 生成的技能）")
