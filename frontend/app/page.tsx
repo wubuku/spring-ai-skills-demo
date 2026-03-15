@@ -16,20 +16,40 @@ const confirmedRequests = new Set<string>();
 
 /**
  * 从消息内容中提取 http-request 代码块
+ * 支持两种格式：
+ * 1. 标准格式：```http-request\n{...}\n```
+ * 2. 不完整格式（LLM 可能生成）：```http-request{...}（缺少结束 ```）
  */
 function extractHttpRequestMeta(content: string): {
   cleanedContent: string;
   requestMeta?: HttpRequestMeta;
 } {
-  const pattern = /```http-request\s*\n?([\s\S]*?)```/g;
-  const matches = [...content.matchAll(pattern)];
+  // 优先尝试标准格式（有闭合的 ```）
+  let pattern = /```http-request\s*\n?([\s\S]*?)```/g;
+  let matches = [...content.matchAll(pattern)];
+
+  // 如果没有匹配到，尝试不完整格式（没有闭合的 ```）
+  // 匹配 ```http-request 后面跟着 JSON 内容，直到行尾
+  if (matches.length === 0) {
+    pattern = /```http-request\s*\n?(\{[\s\S]*)/g;
+    matches = [...content.matchAll(pattern)];
+  }
 
   if (matches.length === 0) {
     return { cleanedContent: content };
   }
 
   const lastMatch = matches[matches.length - 1];
-  const jsonContent = (lastMatch[1] || '').trim();
+  let jsonContent = (lastMatch[1] || '').trim();
+
+  // 尝试修复不完整的 JSON（如果没有闭合的 }）
+  if (jsonContent && !jsonContent.endsWith('}')) {
+    // 找到最后一个 } 并截断
+    const lastBraceIndex = jsonContent.lastIndexOf('}');
+    if (lastBraceIndex > 0) {
+      jsonContent = jsonContent.substring(0, lastBraceIndex + 1);
+    }
+  }
 
   let requestMeta: HttpRequestMeta | undefined;
 
@@ -48,8 +68,11 @@ function extractHttpRequestMeta(content: string): {
     }
   }
 
-  // 移除 http-request 代码块
-  const cleanedContent = content.replace(pattern, '').trim();
+  // 移除 http-request 代码块（支持完整和不完整格式）
+  let cleanedContent = content
+    .replace(/```http-request[\s\S]*?```/g, '')  // 完整格式
+    .replace(/```http-request[\s\S]*/g, '')      // 不完整格式（没有闭合 ```）
+    .trim();
 
   return { cleanedContent, requestMeta };
 }
@@ -76,17 +99,14 @@ function CustomAssistantMessage(props: any) {
   // 提取 requestMeta
   const { cleanedContent, requestMeta } = extractHttpRequestMeta(content);
 
-  // 生成唯一的 request key（消息ID + 请求详情）
-  // 这样：同一消息的相同请求不重复确认，不同消息的相同请求会分别确认
-  const requestKey = messageId && requestMeta
-    ? `${messageId}-${getRequestKey(requestMeta)}`
-    : getRequestKey(requestMeta);
+  // 始终显示确认对话框
+  // 每次用户发送新消息时，如果有 http-request，都会显示确认对话框
+  // 这是更安全的做法，避免用户错过确认重要操作
+  const requestKey = requestMeta ? getRequestKey(requestMeta) : null;
 
-  // 检查是否已经确认过
-  const isConfirmed = requestKey ? confirmedRequests.has(requestKey) : false;
-
-  // 只有在流完成后、有 requestMeta、且未确认时才显示确认对话框
-  const showConfirm = !isLoading && requestMeta && !isConfirmed;
+  // 只有在流完成后、有 requestMeta 时才显示确认对话框
+  // 不缓存确认状态，确保每次都让用户确认（安全优先）
+  const showConfirm = !isLoading && requestMeta;
 
   // 创建标准化消息
   const normalizedMessage = props.message
