@@ -21,15 +21,6 @@ import org.springframework.security.web.SecurityFilterChain;
 @EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
 
-    /**
-     * 配置 SecurityContextHolder 为 INHERITABLETHREADLOCAL 模式
-     * 这样 SecurityContext 会自动传递到子线程（Spring AI 工具执行使用的线程）
-     */
-    @PostConstruct
-    public void setSecurityContextHolderStrategy() {
-        SecurityContextHolder.setStrategyName(SecurityContextHolder.MODE_INHERITABLETHREADLOCAL);
-    }
-
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
