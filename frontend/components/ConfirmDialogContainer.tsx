@@ -8,6 +8,7 @@ export interface HttpRequestMeta {
   headers?: Record<string, string>;
   body?: any;
   params?: Record<string, string>;
+  queryParams?: Record<string, string>;
   description?: string;
 }
 
