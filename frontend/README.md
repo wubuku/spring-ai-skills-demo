@@ -332,9 +332,21 @@ MIT License
    ```
 
 3. **请求 Key 必须包含参数**
+   - 什么是请求 Key？它是用于唯一标识一个 HTTP 请求的字符串
+   - 作用：避免同一个请求重复显示确认对话框
    - 初始实现只使用 `method + URL` 作为 Key
    - 导致 "添加商品 ID=3" 和 "添加商品 ID=5" 被视为相同请求
    - 正确做法：`method + URL + JSON.stringify(params)`
+   ```typescript
+   // 例如：
+   // 请求1: POST /api/products, {productId: 3}
+   // 请求 Key: "POST-/api/products-{\"productId\":3}"
+   //
+   // 请求2: POST /api/products, {productId: 7}
+   // 请求 Key: "POST-/api/products-{\"productId\":7}"
+   //
+   // 两个请求的 Key 不同，所以会分别显示确认对话框
+   ```
 
 4. **模块级状态缓存**
    - 使用模块级 Map 缓存请求状态
