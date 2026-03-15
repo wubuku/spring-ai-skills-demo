@@ -349,7 +349,10 @@ MIT License
    ```
 
    **⚠️ 设计权衡**：
-   - 当前设计：确认过的请求在当前会话中不会再次显示确认对话框
+   - 当前设计：确认过的请求在**同一消息卡片**中不会再次显示确认对话框
+   - 关键改进：请求 Key 包含消息 ID（messageId），确保不同消息卡片的相同请求会分别确认
+     - 消息A + 请求X：确认后不会在消息A中重复显示
+     - 消息B + 请求X：会单独显示确认对话框（因为是不同消息卡片）
    - 潜在问题：用户可能想重复添加同一个商品，但不会收到确认提示
    - 改进建议：
      - 添加超时机制（如 5 分钟后重新显示确认）
@@ -368,6 +371,7 @@ MIT License
 | 不同参数请求被跳过 | 请求 Key 缺少 params | Key 包含完整 params |
 | 组件卸载导致状态丢失 | 缺少持久化缓存 | 使用模块级 Map 缓存 |
 | subComponent 不生效 | CopilotPopup 的子组件渲染机制不同 | 作为独立组件渲染 |
+| 全局请求 Key 导致跨消息重复 | 初始实现用全局 Set 缓存确认状态 | Key 包含 messageId，按消息卡片隔离 |
 
 ### 代码示例
 
@@ -375,8 +379,15 @@ MIT License
 // 自定义 AssistantMessage 组件
 function CustomAssistantMessage(props: any) {
   const { isLoading } = useCopilotContext();
+  const messageId = props.message?.id;  // 获取消息ID
   const { cleanedContent, requestMeta } = extractHttpRequestMeta(content);
-  const requestKey = getRequestKey(requestMeta); // 包含 params
+
+  // 生成唯一的 request key（消息ID + 请求详情）
+  // 这样：同一消息的相同请求不重复确认，不同消息的相同请求会分别确认
+  const requestKey = messageId && requestMeta
+    ? `${messageId}-${getRequestKey(requestMeta)}`
+    : getRequestKey(requestMeta);
+
   const isConfirmed = requestKey ? confirmedRequests.has(requestKey) : false;
 
   // 只有 SSE 完成后才显示确认对话框
@@ -385,7 +396,12 @@ function CustomAssistantMessage(props: any) {
   return (
     <>
       <DefaultAssistantMessage {...props} message={normalizedMessage} />
-      {showConfirm && <ConfirmDialogContainer requestMeta={requestMeta} />}
+      {showConfirm && (
+        <ConfirmDialogContainer
+          key={requestKey}
+          requestMeta={requestMeta}
+        />
+      )}
     </>
   );
 }

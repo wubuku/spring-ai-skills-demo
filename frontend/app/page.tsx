@@ -76,8 +76,11 @@ function CustomAssistantMessage(props: any) {
   // 提取 requestMeta
   const { cleanedContent, requestMeta } = extractHttpRequestMeta(content);
 
-  // 生成唯一的 request key（包含参数）
-  const requestKey = getRequestKey(requestMeta);
+  // 生成唯一的 request key（消息ID + 请求详情）
+  // 这样：同一消息的相同请求不重复确认，不同消息的相同请求会分别确认
+  const requestKey = messageId && requestMeta
+    ? `${messageId}-${getRequestKey(requestMeta)}`
+    : getRequestKey(requestMeta);
 
   // 检查是否已经确认过
   const isConfirmed = requestKey ? confirmedRequests.has(requestKey) : false;
@@ -126,7 +129,7 @@ function CustomAssistantMessage(props: any) {
       {showConfirm && (
         <div className="mt-2">
           <ConfirmDialogContainer
-            key={`${messageId}-${requestKey}`}
+            key={requestKey}
             requestMeta={requestMeta}
           />
         </div>
