@@ -6,7 +6,7 @@
 
 - **Next.js 15.1.6** - React 框架
 - **React 19** - UI 库
-- **CopilotKit 1.53.0** - AI 聊天组件库
+- **CopilotKit 1.54.0** - AI 聊天组件库
 - **Tailwind CSS** - 样式框架
 - **TypeScript** - 类型安全
 - **remark-gfm 4.0.0** - GitHub Flavored Markdown 支持
@@ -258,9 +258,9 @@ table: (props: ComponentPropsWithoutRef<'table'>) => (...)
 
 | 依赖 | 版本 | 用途 |
 |------|------|------|
-| `@copilotkit/react-core` | 1.53.0 | CopilotKit 核心功能 |
-| `@copilotkit/react-ui` | 1.53.0 | CopilotKit UI 组件 |
-| `@copilotkit/runtime` | 1.53.0 | CopilotKit 运行时 |
+| `@copilotkit/react-core` | 1.54.0 | CopilotKit 核心功能 |
+| `@copilotkit/react-ui` | 1.54.0 | CopilotKit UI 组件 |
+| `@copilotkit/runtime` | 1.54.0 | CopilotKit 运行时 |
 | `@ag-ui/client` | ^0.0.47 | AG-UI 协议客户端 |
 | `remark-gfm` | ^4.0.0 | GFM Markdown 支持 |
 | `rehype-highlight` | ^7.0.0 | 代码语法高亮 |
@@ -300,4 +300,95 @@ table: (props: ComponentPropsWithoutRef<'table'>) => (...)
 ## 许可证
 
 MIT License
+
+---
+
+## 经验教训总结（2025年3月）
+
+### 问题背景
+
+在实现 CopilotKit 确认对话框功能时，遇到一个关键问题：SSE 流式输出过程中，如何正确检测和显示 `http-request` 代码块。
+
+### 核心发现
+
+**CopilotKit 的 SSE 处理机制**：
+- CopilotKit 会自动收集、转义、拼接 SSE 流内容
+- 消息内容在流式输出过程中会不断更新
+- 需要等待 SSE 完成后（即 `isLoading=false`）才能获取完整的消息内容
+
+### 关键解决方案
+
+1. **使用 `useCopilotContext` 获取 `isLoading` 状态**
+   ```typescript
+   const { isLoading } = useCopilotContext();
+   // isLoading = true 表示 SSE 正在传输
+   // isLoading = false 表示 SSE 已完成
+   ```
+
+2. **SSE 完成后提取代码块**
+   ```typescript
+   // 只有在流完成后才提取 http-request 代码块
+   const showConfirm = !isLoading && requestMeta && !isConfirmed;
+   ```
+
+3. **请求 Key 必须包含参数**
+   - 初始实现只使用 `method + URL` 作为 Key
+   - 导致 "添加商品 ID=3" 和 "添加商品 ID=5" 被视为相同请求
+   - 正确做法：`method + URL + JSON.stringify(params)`
+
+4. **模块级状态缓存**
+   - 使用模块级 Map 缓存请求状态
+   - 防止组件在请求过程中被卸载/重挂载导致状态丢失
+
+### 踩坑记录
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 代码块在流式输出时被忽略 | 流式过程中消息内容不完整 | 等待 `isLoading=false` 后再提取 |
+| 不同参数请求被跳过 | 请求 Key 缺少 params | Key 包含完整 params |
+| 组件卸载导致状态丢失 | 缺少持久化缓存 | 使用模块级 Map 缓存 |
+| subComponent 不生效 | CopilotPopup 的子组件渲染机制不同 | 作为独立组件渲染 |
+
+### 代码示例
+
+```typescript
+// 自定义 AssistantMessage 组件
+function CustomAssistantMessage(props: any) {
+  const { isLoading } = useCopilotContext();
+  const { cleanedContent, requestMeta } = extractHttpRequestMeta(content);
+  const requestKey = getRequestKey(requestMeta); // 包含 params
+  const isConfirmed = requestKey ? confirmedRequests.has(requestKey) : false;
+
+  // 只有 SSE 完成后才显示确认对话框
+  const showConfirm = !isLoading && requestMeta && !isConfirmed;
+
+  return (
+    <>
+      <DefaultAssistantMessage {...props} message={normalizedMessage} />
+      {showConfirm && <ConfirmDialogContainer requestMeta={requestMeta} />}
+    </>
+  );
+}
+```
+
+### 参考资料
+
+- [CopilotKit React Core API](https://docs.copilotkit.io/reference/react-core)
+- [SSE 流式响应机制](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
+
+### 探索 CopilotKit 源码的重要性
+
+这次功能实现过程中，官方文档信息有限，真正的答案在 CopilotKit 源码中：
+
+1. **源码位置**：`/Users/yangjiefeng/Documents/CopilotKit/CopilotKit`
+2. **关键探索点**：
+   - `@copilotkit/react-ui` 中的 `AssistantMessage` 组件实现
+   - `useCopilotContext` hook 提供的状态和方法
+   - `markdownTagRenderers` 的工作原理
+   - 消息渲染的生命周期
+
+3. **为什么需要读源码**：
+   - 文档不完整，很多 API 没有详细说明
+   - 某些行为只有源码才能解释（如 subComponent 的渲染时机）
+   - 理解内部机制才能正确定制 UI
 
