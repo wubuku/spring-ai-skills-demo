@@ -2,8 +2,138 @@
 
 import React from "react";
 import { CopilotPopup } from "@copilotkit/react-ui";
+import {
+  AssistantMessage as DefaultAssistantMessage,
+} from "@copilotkit/react-ui";
+import { useCopilotContext } from "@copilotkit/react-core";
 import { ConfirmDialogContainer, HttpRequestMeta } from "@/components/ConfirmDialogContainer";
 import { AuthProvider, useAuth } from "@/components/AuthProvider";
+
+/**
+ * 模块级状态缓存：存储已确认的 requestMeta，避免重复显示
+ */
+const confirmedRequests = new Set<string>();
+
+/**
+ * 从消息内容中提取 http-request 代码块
+ */
+function extractHttpRequestMeta(content: string): {
+  cleanedContent: string;
+  requestMeta?: HttpRequestMeta;
+} {
+  const pattern = /```http-request\s*\n?([\s\S]*?)```/g;
+  const matches = [...content.matchAll(pattern)];
+
+  if (matches.length === 0) {
+    return { cleanedContent: content };
+  }
+
+  const lastMatch = matches[matches.length - 1];
+  const jsonContent = (lastMatch[1] || '').trim();
+
+  let requestMeta: HttpRequestMeta | undefined;
+
+  if (jsonContent) {
+    try {
+      const raw = JSON.parse(jsonContent);
+      requestMeta = {
+        method: raw.method || 'POST',
+        url: raw.url || '',
+        params: raw.params || raw.queryParams || {},
+        body: raw.body,
+        headers: raw.headers,
+      };
+    } catch (e) {
+      console.log('[extractHttpRequestMeta] JSON parse error:', e);
+    }
+  }
+
+  // 移除 http-request 代码块
+  const cleanedContent = content.replace(pattern, '').trim();
+
+  return { cleanedContent, requestMeta };
+}
+
+/**
+ * 生成唯一的请求 key（包含参数）
+ */
+function getRequestKey(requestMeta: HttpRequestMeta | undefined): string | null {
+  if (!requestMeta) return null;
+  const paramsStr = requestMeta.params ? JSON.stringify(requestMeta.params) : '';
+  return `${requestMeta.method}-${requestMeta.url}-${paramsStr}`;
+}
+
+/**
+ * 自定义 AssistantMessage - 使用 DefaultAssistantMessage 渲染消息
+ * 通过 markdownTagRenderers 的 pre 标签拦截来显示确认对话框
+ */
+function CustomAssistantMessage(props: any) {
+  const { isLoading } = useCopilotContext();
+  const messageId = props.message?.id;
+
+  const content = props.message?.content || props.message?.text || '';
+
+  // 提取 requestMeta
+  const { cleanedContent, requestMeta } = extractHttpRequestMeta(content);
+
+  // 生成唯一的 request key（包含参数）
+  const requestKey = getRequestKey(requestMeta);
+
+  // 检查是否已经确认过
+  const isConfirmed = requestKey ? confirmedRequests.has(requestKey) : false;
+
+  // 只有在流完成后、有 requestMeta、且未确认时才显示确认对话框
+  const showConfirm = !isLoading && requestMeta && !isConfirmed;
+
+  // 创建标准化消息
+  const normalizedMessage = props.message
+    ? { ...props.message, content: cleanedContent }
+    : props.message;
+
+  // 创建一个 ref 来存储确认对话框的回调
+  const confirmRef = React.useRef<{
+    resolve: (confirmed: boolean) => void;
+  } | null>(null);
+
+  // 当用户点击确认时的处理
+  const handleConfirm = React.useCallback(() => {
+    if (requestKey) {
+      confirmedRequests.add(requestKey);
+    }
+    if (confirmRef.current) {
+      confirmRef.current.resolve(true);
+      confirmRef.current = null;
+    }
+  }, [requestKey]);
+
+  // 当用户点击取消时的处理
+  const handleCancel = React.useCallback(() => {
+    if (confirmRef.current) {
+      confirmRef.current.resolve(false);
+      confirmRef.current = null;
+    }
+  }, []);
+
+  // 创建一个 Promise 来等待用户确认
+  // 这里我们不使用阻塞，而是让 ConfirmDialogContainer 自己处理
+
+  return (
+    <>
+      <DefaultAssistantMessage
+        {...props}
+        message={normalizedMessage}
+      />
+      {showConfirm && (
+        <div className="mt-2">
+          <ConfirmDialogContainer
+            key={`${messageId}-${requestKey}`}
+            requestMeta={requestMeta}
+          />
+        </div>
+      )}
+    </>
+  );
+}
 
 function AuthBar() {
   const { token, username, login, logout } = useAuth();
@@ -195,7 +325,7 @@ function HomeContent() {
             initial: "你好！我是企业智能助手，有什么可以帮助你的吗？",
             placeholder: "输入你的问题...",
           }}
-          AssistantMessage={undefined}
+          AssistantMessage={CustomAssistantMessage}
           markdownTagRenderers={{
             // 表格渲染，确保 Markdown 表格正确显示
             table: ({ children, ...props }: any) => (
@@ -230,47 +360,6 @@ function HomeContent() {
                 {children}
               </td>
             ),
-            // pre 组件：拦截 http-request 代码块，渲染确认对话框
-            pre: ({ children, ...props }: any) => {
-              // 检测 http-request 代码块
-              if (React.isValidElement(children)) {
-                const codeProps = (children as React.ReactElement<any>).props;
-                const className = codeProps?.className || '';
-
-                // 处理两种格式：
-                // 1. 正确格式：language-http-request（然后换行有 JSON）
-                // 2. AI 错误格式：language-http-request{...}（JSON 直接拼接无换行）
-                if (className === 'language-http-request' ||
-                    className.startsWith('language-http-request')) {
-                  try {
-                    let content = String(codeProps.children).trim();
-                    let requestMeta: HttpRequestMeta;
-
-                    if (className.startsWith('language-http-request{')) {
-                      // 错误格式：JSON 在 className 中
-                      // className 类似 "language-http-request{"method":"POST",...}"
-                      const jsonStr = className.replace('language-http-request', '');
-                      requestMeta = JSON.parse(jsonStr);
-                    } else {
-                      // 正确格式：JSON 在 children 中
-                      requestMeta = JSON.parse(content);
-                    }
-
-                    // 使用稳定的 key，确保流式渲染时状态不丢失
-                    const stableKey = `${requestMeta.method}-${requestMeta.url}`;
-                    return <ConfirmDialogContainer key={stableKey} requestMeta={requestMeta} />;
-                  } catch {
-                    // JSON 解析失败，降级到普通代码块渲染
-                  }
-                }
-              }
-              // 正常的 pre 渲染（保留默认 CodeBlock 语法高亮）
-              return (
-                <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto my-2" {...props}>
-                  {children}
-                </pre>
-              );
-            },
           }}
         />
       </main>

@@ -110,6 +110,7 @@ interface ConfirmDialogContainerProps {
   requestMeta: HttpRequestMeta;
   description?: string;
   respond?: (result: HttpExecutionResult) => void;
+  onComplete?: () => void;
 }
 
 /**
@@ -122,8 +123,11 @@ export function ConfirmDialogContainer({
   requestMeta,
   description,
   respond,
+  onComplete,
 }: ConfirmDialogContainerProps) {
-  const stableKey = `${requestMeta.method}-${requestMeta.url}`;
+  // 生成包含参数的稳定 key
+  const paramsStr = requestMeta.params ? JSON.stringify(requestMeta.params) : '';
+  const stableKey = `${requestMeta.method}-${requestMeta.url}-${paramsStr}`;
   const cached = confirmStateCache.get(stableKey);
 
   const [stage, setStage] = useState<Stage>(cached?.stage ?? 'pending');
@@ -168,20 +172,23 @@ export function ConfirmDialogContainer({
       setStage('completed');
       confirmStateCache.set(stableKey, { stage: 'completed', result: res, error: null });
       respond?.({ success: true, message: '操作执行成功', result: res });
+      onComplete?.();
     } catch (e: any) {
       const msg = e.message || '请求失败';
       setError(msg);
       setStage('completed');
       confirmStateCache.set(stableKey, { stage: 'completed', result: null, error: msg });
       respond?.({ success: false, message: msg, error: msg });
+      onComplete?.();
     }
-  }, [requestMeta, respond, stableKey]);
+  }, [requestMeta, respond, stableKey, onComplete]);
 
   const handleCancel = useCallback(() => {
     setStage('cancelled');
     confirmStateCache.set(stableKey, { stage: 'cancelled', result: null, error: null });
     respond?.({ success: false, message: '已取消该操作', cancelled: true });
-  }, [respond, stableKey]);
+    onComplete?.();
+  }, [respond, stableKey, onComplete]);
 
   if (stage === 'cancelled') {
     return (
