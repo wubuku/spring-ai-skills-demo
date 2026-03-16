@@ -56,13 +56,14 @@
 4. **SkillTools.extractJwt()** (STEP4): 在 boundedElastic 线程上，从 UserContextHolder 获取 token 并设置到 HTTP 请求头
 
 关键点：
-- **不清理 UserContextHolder**: 在 Reactor hook 的 finally 块中不清理 UserContextHolder，这样 boundedElastic 线程复用时仍能获取到 token（被下一个请求的 token 覆盖）
+- **严格清理 UserContextHolder**: 在 Reactor hook 的 finally 块中清理 UserContextHolder，确保 boundedElastic 线程复用时不会残留上一个请求的 token
+- **安全优先原则**: 宁可功能不稳定（首次调用可能 403），也不能出现安全漏洞（用户 A 获取用户 B 的 token）
 
 ---
 
-### ⚠️ 已知问题：竞态条件与安全风险
+### ⚠️ 已修复：竞态条件与安全风险
 
-#### 问题描述
+#### 问题描述（已修复）
 
 在测试过程中发现一个值得关注的现象：
 - **第一次 httpRequest 调用**：返回 403 Forbidden
@@ -70,59 +71,35 @@
 
 这说明存在竞态条件。
 
-#### 根本原因分析
+#### 修复方案
 
-当前实现中，Reactor hook 在 boundedElastic 线程复用时**不清理 UserContextHolder**：
+**采用方案一：严格清理 UserContextHolder**
 
 ```java
 // ReactorBoundedElasticHookConfig.java
 finally {
-    // 不清理 UserContextHolder！
-    // 等待下一次请求时覆盖，这样 boundedElastic 线程复用时仍能获取到 token
-    log.debug("[{}] [Hook] Task completed, user context kept for thread reuse", Thread.currentThread().getName());
+    // 严格清理 UserContextHolder！
+    // 原则：宁可功能不稳定（有时拿不到 token），也不能出现安全漏洞（用户 A 获取用户 B 的 token）
+    // boundedElastic 线程复用时，必须清除前一个请求留下的上下文
+    UserContextHolder.clear();
+    log.debug("[{}] [Hook] Task completed, user context cleared for thread reuse", Thread.currentThread().getName());
 }
 ```
 
-**潜在的安全风险**：
+#### 安全原则
 
-1. **Token 混淆风险**：当 boundedElastic 线程被多个请求复用时：
-   - 请求 A 的 token 被设置到 UserContextHolder
-   - 请求 A 完成，但 UserContextHolder 未清理
-   - 请求 B 到来，如果 Reactor hook 捕获 token 失败
-   - 请求 B 可能获取到请求 A 的旧 token
-
-2. **测试验证**：当前测试显示：
-   - 首次调用可能失败（token 为空或为旧 token）
-   - 后续调用成功（被新 token 覆盖）
-
-#### 风险评估
-
-| 风险类型 | 风险等级 | 说明 |
-|---------|---------|------|
-| Token 混淆 | **中高** | 高并发场景下可能出现用户 A 获取用户 B 的数据 |
-| 首次请求失败 | 中 | 首次调用可能需要重试 |
-
-#### 建议的修复方案
-
-1. **方案一：清理 UserContextHolder**
-   - 在 Reactor hook 的 finally 块中清理 UserContextHolder
-   - 依赖每次请求的 token 覆盖机制
-   - 缺点：首次调用可能失败
-
-2. **方案二：强一致性方案**
-   - 使用请求级别的 Context 传递（更复杂）
-   - 考虑使用 Reactor Context 而非 ThreadLocal
-
-3. **方案三：改进捕获时机**
-   - 确保在正确时机捕获并设置 token
-   - 添加更多 hook 点覆盖更多异步场景
+| 原则 | 说明 |
+|------|------|
+| **安全优先** | 宁可功能不稳定（首次调用 403），也不能出现 Token 混淆 |
+| **严格清理** | 每次任务结束后必须清理 ThreadLocal，避免跨请求残留 |
+| **未来适用** | 无论使用 TTL、TaskDecorator 还是其他方案，原则一致 |
 
 #### 当前状态
 
-- **功能可用**：测试可以通过（多次重试或依赖覆盖机制）
-- **存在风险**：高并发生产环境需要进一步加固
+- **安全无风险**：boundedElastic 线程复用时不会残留上一个请求的 token
+- **功能可能不稳定**：首次调用可能需要重试（取决于 Reactor hook 能否正确捕获 token）
 
-> 本报告诚实记录此问题，以便后续改进。
+> 本报告诚实记录此修复，安全第一。
 
 ## 详细测试结果
 

@@ -103,11 +103,11 @@ public class ReactorBoundedElasticHookConfig {
 
                     runnable.run();
                 } finally {
-                    // 不清理 UserContextHolder！
-                    // 等待下一次请求时覆盖，这样 boundedElastic 线程复用时仍能获取到 token
-                    // 注意：这意味着同一个线程的多个请求之间可能有 token 残留风险，
-                    // 但由于每次都会用当前请求的 token 覆盖，风险可控
-                    log.debug("[{}] [Hook] Task completed, user context kept for thread reuse", Thread.currentThread().getName());
+                    // 严格清理 UserContextHolder！
+                    // 原则：宁可功能不稳定（有时拿不到 token），也不能出现安全漏洞（用户 A 获取用户 B 的 token）
+                    // boundedElastic 线程复用时，必须清除前一个请求留下的上下文
+                    UserContextHolder.clear();
+                    log.debug("[{}] [Hook] Task completed, user context cleared for thread reuse", Thread.currentThread().getName());
                 }
             };
         };
