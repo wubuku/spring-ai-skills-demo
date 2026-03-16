@@ -76,7 +76,12 @@ public class AgUiController {
                     Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
                 );
             SecurityContextHolder.getContext().setAuthentication(authentication);
-            log.debug("已设置 JWT 到 SecurityContext，依赖 INHERITABLETHREADLOCAL 机制传递到子线程");
+
+            // 关键修复：同时设置 UserContextHolder，确保异步 SSE 流中也能获取到 JWT
+            // 因为 SSE 是异步返回的，Reactor hook 可能无法在正确的时机捕获 SecurityContext
+            UserContextHolder.setToken(jwt);
+            UserContextHolder.setUsername("user");
+            log.debug("已设置 JWT 到 SecurityContext 和 UserContextHolder，确保异步 SSE 流中透传");
         } else {
             log.warn("未收到 Authorization header! authHeader={}", authHeader);
         }

@@ -1,9 +1,9 @@
 # 企业智能助手集成测试报告
 
-**测试日期**: 2026-03-11
+**测试日期**: 2026-03-16
 **测试人员**: Claude Code
 **测试环境**: macOS (Darwin 24.6.0), Java 23.0.1, Node.js
-**最后更新**: 2026-03-11 (综合手动测试完成)
+**最后更新**: 2026-03-16 (JWT 透传测试完成)
 
 ---
 
@@ -20,6 +20,43 @@
 | **CopilotKit 前端** | **✅ 运行正常** | **端口 3001，已全面测试** |
 | AG-UI API 端点 | ✅ 运行正常 | 已测试 |
 | **CopilotKit 聊天功能** | **✅ 完全正常** | **已测试 5 个核心场景** |
+| **JWT Token 透传** | **✅ 测试通过** | **test.sh 和 test-agui-jwt-full.sh 均通过** |
+
+---
+
+## JWT Token 透传测试 (2026-03-16)
+
+### 测试脚本
+
+| 脚本 | 端点 | 状态 |
+|------|------|------|
+| test.sh | /api/chat | ✅ PASS |
+| test-agui-jwt-full.sh | /api/agui | ✅ PASS |
+
+### 测试结果详情
+
+#### test.sh (非确认模式)
+- **测试端点**: /api/chat
+- **测试数量**: 24 tests
+- **结果**: ALL 24 TESTS PASSED
+- **JWT 透传验证**:
+  - Agent 通过 httpRequest 工具调用内部 API 时正确传递了用户认证
+  - Agent 返回内容包含购物车实际数据
+
+#### test-agui-jwt-full.sh (非确认模式)
+- **测试端点**: /api/agui (SSE)
+- **SSE 事件数**: 445
+- **结果**: 测试通过
+- **JWT 透传验证**:
+  - Agent 响应包含购物车信息 (Sony WH-1000XM5, iPhone 15 等)
+  - JWT 已正确传递到 boundedElastic 线程
+  - 工具可正常访问受保护 API
+
+### 关键技术实现
+
+1. **SecurityContextHolder 设置**: 在 AgUiController 中设置 JWT
+2. **Reactor BoundedElastic Hook**: 使用 `Schedulers.onScheduleHook` 拦截线程调度
+3. **UserContextHolder**: ThreadLocal 在线程间传递 JWT
 
 ## 详细测试结果
 

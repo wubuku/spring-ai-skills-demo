@@ -31,14 +31,15 @@ echo "购物车商品数量: $item_count"
 
 echo ""
 echo "=== 步骤3: 通过 /api/agui 端点查询购物车 (SSE) ==="
-AGUI_REQUEST='{"messages":[{"role":"user","content":"我的购物车已经有产品了，请直接使用 httpRequest 工具查询购物车，返回商品名称和价格"}]}'
+AGUI_REQUEST='{"messages":[{"role":"user","content":"我的购物车已经有产品了，请直接使用 httpRequest 工具查询购物车信息。你不需要另行获取登录凭证，调用时会透传访问令牌。"}]}'
 
 # 保存原始 SSE 响应
 SSE_RAW_FILE="/tmp/sse_response_$$.txt"
 SSE_PARSED_FILE="/tmp/sse_parsed_$$.txt"
 
 # 执行请求并保存原始响应和 HTTP 状态码
-HTTP_CODE=$(curl -s -o "$SSE_RAW_FILE" -w "%{http_code}" -X POST "${BASE_URL}/api/agui" \
+# 添加 --compressed 让 curl 自动处理 gzip 响应，避免 HTTP_CODE 包含乱码
+HTTP_CODE=$(curl -s --compressed -o "$SSE_RAW_FILE" -w "%{http_code}" -X POST "${BASE_URL}/api/agui" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
     -d "$AGUI_REQUEST" \
@@ -150,15 +151,40 @@ if [ $event_count -eq 0 ]; then
     error_msg="无 SSE 事件响应"
 fi
 
-# 检查2: 响应中是否包含购物车相关内容
-if [[ ! "$total_content" =~ "购物车" ]] && [[ ! "$total_content" =~ "iPhone" ]] && [[ ! "$total_content" =~ "cart" ]]; then
-    if [ "$success" = true ]; then
+# 检查2: 最重要 - 先检查是否有认证失败！
+# 这是最直接的证据，证明 JWT 没有正确透传
+if echo "$total_content" | grep -qE "(403|FForbidden|需要用户认证|需要认证|无法访问|需要登录|authorization|认证信息)"; then
+    success=false
+    error_msg="JWT 透传失败：Agent 响应显示无法访问受保护 API (403 Forbidden)"
+    echo "  检测到认证失败关键词！"
+elif echo "$total_content" | grep -qE "(购物车API返回403|返回403|收到403|访问.*需要认证)"; then
+    # Agent 明确提到 403 错误
+    success=false
+    error_msg="JWT 透传失败：Agent 明确提到购物车 API 返回 403 错误"
+    echo "  检测到 403 错误！"
+fi
+
+# 只有在未检测到认证失败的情况下，才检查是否有成功的购物车数据
+if [ "$success" = true ]; then
+    # 检查是否有购物车特有的完整数据结构
+    # 必须同时有 itemCount 和 totalAmount（购物车 API 特有）
+    if echo "$total_content" | grep -qE "itemCount" && echo "$total_content" | grep -qE "totalAmount"; then
+        success=true
+        error_msg=""
+        echo "  检测到购物车特有数据结构 (itemCount + totalAmount)"
+    # 检查是否有明确的购物车内容列表（items 数组）
+    elif echo "$total_content" | grep -qE "\"items\":\[.*\]"; then
+        success=true
+        error_msg=""
+        echo "  检测到购物车 items 数组"
+    else
+        # 没有认证失败，也没有购物车数据结构 - 可能有问题
         success=false
-        error_msg="Agent 响应中未包含购物车相关内容"
+        error_msg="JWT 透传可能失败：Agent 响应中未包含购物车实际数据"
     fi
 fi
 
-# 检查3: HTTP 状态码
+# 检查4: HTTP 状态码
 if [ "$HTTP_CODE" != "200" ]; then
     success=false
     error_msg="HTTP 状态码异常: $HTTP_CODE"

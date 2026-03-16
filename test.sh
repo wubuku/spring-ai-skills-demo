@@ -239,7 +239,7 @@ echo "  预先添加商品: $resp"
 resp=$(curl -s -X POST "$BASE_URL/api/chat" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TEST_TOKEN" \
-    -d '{"content":"我的购物车已经有产品了，请直接使用 httpRequest 工具查询购物车，返回商品名称和价格"}' \
+    -d '{"content":"我的购物车已经有产品了，请直接使用 httpRequest 工具查询购物车。你不需要另行获取登录凭证，调用时会透传访问令牌。"}' \
     --max-time 120)
 
 assert_not_empty "带 JWT 的聊天端点有响应" "$resp"
@@ -247,16 +247,40 @@ assert_not_empty "带 JWT 的聊天端点有响应" "$resp"
 # 从 Agent 响应中提取实际的回复内容
 agent_response=$(echo "$resp" | jq -r '.response // empty')
 
-# 验证 Agent 返回的购物车内容（通过 JWT 透传调用了内部 API）
-# Agent 响应中应该包含购物车商品信息，如 "Sony"、"WH-1000XM5"、"2499"、或 "购物车" 等关键词
-if echo "$agent_response" | grep -qE "(Sony|WH-1000XM5|购物车|itemCount|2499|商品)"; then
-    green "  ✓ JWT 透传成功！Agent 通过 httpRequest 工具调用内部 API 时正确传递了用户认证"
-    green "    Agent 返回内容: $(echo "$agent_response" | head -c 100)"
-    PASS=$((PASS + 1))
-else
-    red "  ✗ JWT 透传可能失败: Agent 响应中未包含购物车内容"
-    red "    Agent 响应: $(echo "$agent_response" | head -c 200)"
+# 验证 JWT 透传是否成功
+# 关键：必须检查购物车 API 是否成功返回数据，而不是商品搜索
+# 因为模型可能先用购物车查询（失败），再用商品搜索（成功），导致误判
+
+# 最重要 - 先检查是否有认证失败！
+# 这是最直接的证据，证明 JWT 没有正确透传
+if echo "$agent_response" | grep -qE "(403|FForbidden|需要用户认证|需要认证|无法访问|需要登录|authorization|认证信息)"; then
+    red "  ✗ JWT 透传失败：Agent 响应显示无法访问受保护 API (403 Forbidden)"
+    red "    Agent 响应: $(echo "$agent_response" | head -c 300)"
     FAIL=$((FAIL + 1))
+elif echo "$agent_response" | grep -qE "(购物车API返回403|返回403|收到403|访问.*需要认证)"; then
+    # Agent 明确提到 403 错误
+    red "  ✗ JWT 透传失败：Agent 明确提到购物车 API 返回 403 错误"
+    red "    Agent 响应: $(echo "$agent_response" | head -c 300)"
+    FAIL=$((FAIL + 1))
+# 只有在未检测到认证失败的情况下，才检查是否有成功的购物车数据
+else
+    # 检查是否有购物车特有的完整数据结构
+    # 必须同时有 itemCount 和 totalAmount（购物车 API 特有）
+    if echo "$agent_response" | grep -qE "itemCount" && echo "$agent_response" | grep -qE "totalAmount"; then
+        green "  ✓ JWT 透传成功！Agent 通过 httpRequest 工具调用内部 API 时正确传递了用户认证"
+        green "    Agent 返回内容: $(echo "$agent_response" | head -c 150)"
+        PASS=$((PASS + 1))
+    # 检查是否有明确的购物车内容列表（items 数组）
+    elif echo "$agent_response" | grep -qE "\"items\":\[|\"items\":\["; then
+        green "  ✓ JWT 透传成功！Agent 通过 httpRequest 工具查询到购物车内容"
+        green "    Agent 返回内容: $(echo "$agent_response" | head -c 150)"
+        PASS=$((PASS + 1))
+    else
+        # 没有认证失败，也没有购物车数据结构 - 可能有问题
+        red "  ✗ JWT 透传可能失败：Agent 响应中未包含购物车实际数据"
+        red "    Agent 响应: $(echo "$agent_response" | head -c 300)"
+        FAIL=$((FAIL + 1))
+    fi
 fi
 
 # ══════════════════════════════════════════════════════════

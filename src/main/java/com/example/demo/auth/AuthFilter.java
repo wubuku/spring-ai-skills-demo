@@ -74,9 +74,12 @@ public class AuthFilter implements Filter {
             chain.doFilter(request, response);
 
         } finally {
-            // 请求结束时清理 UserContextHolder
-            UserContextHolder.clear();
-            log.debug("[AuthFilter] UserContextHolder 已清理");
+            // 注意：不再在这里清理 UserContextHolder
+            // 因为 SSE 请求是异步的，AI 处理（boundedElastic 线程）在控制器返回后才执行
+            // Reactor hook (ReactorBoundedElasticHookConfig) 会在任务完成后自动清理
+            // 如果在这里清理，会导致boundedElastic线程无法获取到用户上下文
+            // UserContextHolder.clear();
+            // log.debug("[AuthFilter] UserContextHolder 已清理");
         }
     }
 }

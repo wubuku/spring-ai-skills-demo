@@ -30,28 +30,45 @@ public class ReactorBoundedElasticHookConfig {
 
         Function<Runnable, Runnable> decorator = runnable -> {
             // 在提交任务的线程里 capture 需要的上下文
-            // 从 SecurityContextHolder 提取 JWT 和用户名
+            // 优先从 UserContextHolder 获取（如果 AgUiController 已经设置了）
+            // 其次从 SecurityContextHolder 获取
             String token = null;
             String username = null;
 
-            try {
-                Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-                if (auth != null && auth.isAuthenticated()) {
-                    Object credentials = auth.getCredentials();
-                    if (credentials instanceof String) {
-                        token = (String) credentials;
+            // 首先尝试从 UserContextHolder 获取（AgUiController 设置的）
+            token = UserContextHolder.getToken();
+            username = UserContextHolder.getUsername();
+
+            // 如果 UserContextHolder 没有，再从 SecurityContextHolder 获取
+            if (token == null) {
+                try {
+                    Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+                    log.info("[ReactorBoundedElasticHookConfig] SecurityContext authentication: {}, authenticated: {}",
+                        auth != null ? auth.getClass().getSimpleName() : "null",
+                        auth != null ? auth.isAuthenticated() : false);
+
+                    if (auth != null && auth.isAuthenticated()) {
+                        Object credentials = auth.getCredentials();
+                        if (credentials instanceof String) {
+                            token = (String) credentials;
+                        }
+                        Object principal = auth.getPrincipal();
+                        if (principal != null) {
+                            username = principal.toString();
+                        }
                     }
-                    Object principal = auth.getPrincipal();
-                    if (principal != null) {
-                        username = principal.toString();
-                    }
+                } catch (Exception e) {
+                    log.warn("[ReactorBoundedElasticHookConfig] Failed to capture SecurityContext: {}", e.getMessage());
                 }
-            } catch (Exception e) {
-                log.warn("[ReactorBoundedElasticHookConfig] Failed to capture SecurityContext: {}", e.getMessage());
             }
 
             final String capturedToken = token;
             final String capturedUsername = username;
+
+            // 始终记录，以便调试
+            log.info("[ReactorBoundedElasticHookConfig] Captured token: {}, username: {}",
+                capturedToken != null ? "present" : "null",
+                capturedUsername);
 
             return () -> {
                 try {
@@ -60,7 +77,7 @@ public class ReactorBoundedElasticHookConfig {
                     // 因为同一个 boundedElastic 线程可能被多个请求复用，必须用当前请求的 token 覆盖
                     if (capturedToken != null) {
                         UserContextHolder.setToken(capturedToken);
-                        log.debug("[{}] [Hook] Set user context: username={}, hasToken={}",
+                        log.info("[{}] [Hook] Set user context: username={}, hasToken={}",
                                 Thread.currentThread().getName(),
                                 capturedUsername,
                                 capturedToken != null);
