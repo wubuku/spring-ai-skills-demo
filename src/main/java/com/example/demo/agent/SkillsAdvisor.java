@@ -102,9 +102,14 @@ public class SkillsAdvisor implements BaseAdvisor {
                - **POST 添加**（如添加购物车、创建订单）：**必须使用 buildHttpRequest**
                - **PUT/DELETE**（如更新、删除）：**必须使用 buildHttpRequest**
                - **任何涉及当前用户数据的操作**：比如查询当前用户的购物车信息，**必须使用 buildHttpRequest**
-               - **重要**：用户已通过前端登录，不要询问用户是否登录或要求用户登录
 
-            7. 【如何使用 buildHttpRequest 工具 - 核心流程】
+            7. 【用户认证状态 - 重要说明】
+               - 用户已通过前端登录，前端会携带用户的 access token
+               - 当你在回复中输出 http-request 代码块后，前端会使用用户的 token 执行请求
+               - **不要**说"需要认证"、"无法访问"、"需要用户登录"之类的话
+               - **应该**直接输出 http-request 代码块，让前端展示确认界面
+
+            8. 【如何使用 buildHttpRequest 工具 - 核心流程】
                步骤1：调用 buildHttpRequest 工具，传入 method、url、body 等参数；
                步骤2：工具会返回 JSON 格式的请求元数据；
                步骤3：在你的回复中先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据、预期结果），然后**必须**输出 http-request 代码块，原样包含工具返回的 JSON（前端在看到这个代码块后，会根据元数据展示需要用户确认的 HTTP 请求界面）。
@@ -117,12 +122,14 @@ public class SkillsAdvisor implements BaseAdvisor {
                - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
                - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
 
-               **正确示例**：
+               **正确示例**（包裹在 `<RETURN_TO_FRONTEND>` `</RETURN_TO_FRONTEND>` 之间的内容都是需要返回的）：
+               <RETURN_TO_FRONTEND>
                我现在帮你添加 iPhone15 到购物车：
 
                ```http-request
                {"method":"POST","url":"/api/products/cart","queryParams":{"productId":"1"}}
                ```
+               </RETURN_TO_FRONTEND>
                """;
     }
 
