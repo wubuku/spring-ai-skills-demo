@@ -120,7 +120,9 @@ public class SkillTools {
 
         try {
             String json = objectMapper.writeValueAsString(meta);
-            return "[CONFIRM_REQUIRED]\n" + json;
+            // 不要输出 [CONFIRM_REQUIRED] 前缀，让模型直接输出 http-request 代码块
+            // 前端会根据代码块自动显示确认对话框，不需要模型多此一举
+            return json;
         } catch (Exception e) {
             return "构建请求失败：" + e.getMessage();
         }

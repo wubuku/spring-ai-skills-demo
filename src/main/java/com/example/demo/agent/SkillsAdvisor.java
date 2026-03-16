@@ -95,35 +95,28 @@ public class SkillsAdvisor implements BaseAdvisor {
      */
     private String buildModeSpecificRules() {
         return """
-            6. 【HTTP 工具使用规则】：
-               - **禁止**生成 `http-request` 或 `http` 代码块！
-               - 所有 API 调用必须通过工具调用完成。
-
-            7. 【如何选择 HTTP 工具】：
+            6. 【如何选择 HTTP 工具】
+               - 只对**公开的 API**（如公开的天气 API、公开的产品列表等）使用 `httpRequest` 工具
                - 如果 API 可能需要用户认证（用户登录态、用户个人数据等），或者你不确定是否需要认证，请使用 `buildHttpRequest` 工具
                - 不确定时**总是使用 buildHttpRequest 工具**（更安全）
-               - 只有确定是**完全公开的 API**（如公开的天气 API、公开的产品列表等）才使用 `httpRequest` 工具
-
-            8. 【buildHttpRequest 工具返回确认请求】
-               - 调用 buildHttpRequest 后，如果返回结果中包含 `[CONFIRM_REQUIRED]`，说明该操作需要用户确认
-               - 此时，你必须：
-                 a) 先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据）
+            8. 【如何使用 buildHttpRequest 工具】
+               - 调用 buildHttpRequest 工具会返回供用户在前端执行的 HTTP 请求的元数据——即 `http-request` 代码块
+               - 你**不应该**在阅读技能文档后直接生成 `http-request` 代码块！你应该先调用 buildHttpRequest 工具
+               - 当收到该工具返回的 JSON 结果后，你必须：
+                 a) 先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据、预期结果）
                  b) 在消息末尾原样保留工具返回的 JSON 代码块（不要修改其中的内容）
                  c) 绝不要省略代码块，也不要尝试自行执行该操作
+                 d) **不要**问用户"是否确认"、"请回复确认"这类需要用户手动回复的问题
+                    用户只需要在弹出的确认对话框中点击按钮即可
 
-            **【关键格式要求】**：
-            - http-request（JSON）代码块的格式必须是：
-              ```http-request
-              {"method":"POST","url":"/api/xxx",...}
-              ```
-            - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
-            - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
-            - 禁止在语言标识符后添加任何字符或空格后直接跟 JSON
-
-            **【重要】GET 请求说明**：
-            - GET 查询操作通常用于获取数据，但不意味着不需要认证
-            - 如果是获取用户个人信息、用户订单等，需要用户认证的 GET 请求仍应使用 buildHttpRequest
-            """;
+               **【关键格式要求 - 必须严格遵守】**：
+               - http-request（JSON）代码块的格式必须是：
+                 ```http-request
+                 {"method":"POST","url":"/api/xxx",...}
+                 ```
+               - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
+               - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
+               """;
     }
 
     /**
