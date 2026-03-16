@@ -95,19 +95,18 @@ public class SkillsAdvisor implements BaseAdvisor {
      */
     private String buildModeSpecificRules() {
         return """
-            6. 【如何选择 HTTP 工具】
-               - 只对**公开的 API**（如公开的天气 API、公开的产品列表等）使用 `httpRequest` 工具
-               - 如果 API 可能需要用户认证（用户登录态、用户个人数据等），或者你不确定是否需要认证，请使用 `buildHttpRequest` 工具
-               - 不确定时**总是使用 buildHttpRequest 工具**（更安全）
-            8. 【如何使用 buildHttpRequest 工具】
-               - 调用 buildHttpRequest 工具会返回供用户在前端执行的 HTTP 请求的元数据——即 `http-request` 代码块
-               - 你**不应该**在阅读技能文档后直接生成 `http-request` 代码块！你应该先调用 buildHttpRequest 工具
-               - 当收到该工具返回的 JSON 结果后，你必须：
-                 a) 先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据、预期结果）
-                 b) 在消息末尾原样保留工具返回的 JSON 代码块（不要修改其中的内容）
-                 c) 绝不要省略代码块，也不要尝试自行执行该操作
-                 d) **不要**问用户"是否确认"、"请回复确认"这类需要用户手动回复的问题
-                    用户只需要在弹出的确认对话框中点击按钮即可
+            6. 【如何选择 HTTP 工具 - 必须严格遵守】
+               - **GET 查询**：
+                   - 只对**公开的 API**（如公开的天气 API、商品搜索等）使用 `httpRequest` 工具
+                   - 不确定时**总是使用 buildHttpRequest 工具**（更安全）
+               - **POST 添加**（如添加购物车、创建订单）：**必须使用 buildHttpRequest**
+               - **PUT/DELETE**（如更新、删除）：**必须使用 buildHttpRequest**
+               - **任何涉及当前用户数据的操作**：比如查询当前用户的购物车信息，**必须使用 buildHttpRequest**
+
+            7. 【如何使用 buildHttpRequest 工具 - 核心流程】
+               步骤1：调用 buildHttpRequest 工具，传入 method、url、body 等参数；
+               步骤2：工具会返回 JSON 格式的请求元数据；
+               步骤3：在你的回复中先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据、预期结果），然后**必须**输出 http-request 代码块，原样包含工具返回的 JSON（前端在看到这个代码块后，会根据元数据展示需要用户确认的 HTTP 请求界面）。
 
                **【关键格式要求 - 必须严格遵守】**：
                - http-request（JSON）代码块的格式必须是：
@@ -116,6 +115,13 @@ public class SkillsAdvisor implements BaseAdvisor {
                  ```
                - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
                - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
+               
+               **正确示例**：
+               我现在帮你添加 iPhone15 到购物车：
+
+               ```http-request
+               {"method":"POST","url":"/api/products/cart","queryParams":{"productId":"1"}}
+               ```
                """;
     }
 
