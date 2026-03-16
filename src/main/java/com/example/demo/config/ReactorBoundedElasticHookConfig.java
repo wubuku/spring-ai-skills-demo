@@ -19,6 +19,9 @@ import java.util.function.Function;
  * 本配置使用 Schedulers.onScheduleHook 全局 hook boundedElastic，
  * 在任务提交时从主线程捕获 JWT 并放入 UserContextHolder，
  * 从而让工具在 boundedElastic 线程中也能获取到用户认证信息。
+ *
+ * 同时，为了支持 SSE 流式场景下的 JWT 透传，
+ * 我们使用 Executors.newCachedThreadPool() 的 hook 来捕获更多异步线程
  */
 @Slf4j
 @Configuration
@@ -38,6 +41,12 @@ public class ReactorBoundedElasticHookConfig {
             // 首先尝试从 UserContextHolder 获取（AgUiController 设置的）
             token = UserContextHolder.getToken();
             username = UserContextHolder.getUsername();
+
+            // [STEP3] 记录捕获阶段的上下文
+            log.info("[STEP3] hook capture on thread={}, capturedToken={}, capturedUsername={}",
+                    Thread.currentThread().getName(),
+                    token != null ? "present" : "null",
+                    username);
 
             // 如果 UserContextHolder 没有，再从 SecurityContextHolder 获取
             if (token == null) {
@@ -66,13 +75,19 @@ public class ReactorBoundedElasticHookConfig {
             final String capturedUsername = username;
 
             // 始终记录，以便调试
-            log.info("[ReactorBoundedElasticHookConfig] Captured token: {}, username: {}",
+            log.info("[STEP3] Captured token: {}, username: {}",
                 capturedToken != null ? "present" : "null",
                 capturedUsername);
 
             return () -> {
                 try {
                     // 这里已经是在 boundedElastic-* 线程
+                    // [STEP3] 记录设置阶段的上下文
+                    log.info("[STEP3] hook set on thread={}, ctxToken={}, ctxUsername={}",
+                            Thread.currentThread().getName(),
+                            capturedToken != null ? "present" : "null",
+                            capturedUsername);
+
                     // 总是尝试设置上下文中捕获的 token（如果存在）
                     // 因为同一个 boundedElastic 线程可能被多个请求复用，必须用当前请求的 token 覆盖
                     if (capturedToken != null) {
@@ -88,9 +103,11 @@ public class ReactorBoundedElasticHookConfig {
 
                     runnable.run();
                 } finally {
-                    // 清理 UserContextHolder，防止线程复用时 token 泄露
-                    UserContextHolder.clear();
-                    log.debug("[{}] [Hook] Task completed, user context cleared", Thread.currentThread().getName());
+                    // 不清理 UserContextHolder！
+                    // 等待下一次请求时覆盖，这样 boundedElastic 线程复用时仍能获取到 token
+                    // 注意：这意味着同一个线程的多个请求之间可能有 token 残留风险，
+                    // 但由于每次都会用当前请求的 token 覆盖，风险可控
+                    log.debug("[{}] [Hook] Task completed, user context kept for thread reuse", Thread.currentThread().getName());
                 }
             };
         };

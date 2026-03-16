@@ -172,6 +172,11 @@ public class SkillTools {
                 log.debug("自动注入用户认证头到请求");
             }
 
+            // [FINAL] 最终确认：HTTP 请求头中是否有 token
+            log.info("[FINAL] executeHttpRequest thread={}, authHeader={}",
+                    Thread.currentThread().getName(),
+                    httpHeaders.getFirst(HttpHeaders.AUTHORIZATION) != null ? "present" : "null");
+
             var entity = new HttpEntity<>(body, httpHeaders);
 
             // Step 4: 发送请求
@@ -197,30 +202,37 @@ public class SkillTools {
      * （boundedElastic 线程中 SecurityContext 已被清理，需要从 UserContextHolder 获取）
      */
     private String extractJwt() {
+        // [STEP4] 记录当前线程信息
+        log.info("[STEP4] extractJwt thread={}", Thread.currentThread().getName());
+
         // 首先尝试从 SecurityContextHolder 获取（主线程中使用）
         try {
             var auth = SecurityContextHolder.getContext().getAuthentication();
-            log.debug("从 SecurityContext 提取 JWT, authentication={}, authenticated={}",
+            log.info("[STEP4] SecurityContext authClass={}, authenticated={}",
                 auth != null ? auth.getClass().getSimpleName() : "null",
-                auth != null ? auth.isAuthenticated() : false);
+                auth != null && auth.isAuthenticated());
             if (auth != null && auth.isAuthenticated()) {
                 Object credentials = auth.getCredentials();
-                log.debug("credentials 类型: {}", credentials != null ? credentials.getClass().getSimpleName() : "null");
+                log.info("[STEP4] credentials 类型: {}", credentials != null ? credentials.getClass().getSimpleName() : "null");
                 if (credentials instanceof String) {
+                    log.info("[STEP4] 从 SecurityContext 提取到 token");
                     return (String) credentials;
                 }
             }
         } catch (Exception e) {
-            log.debug("从 SecurityContext 提取 JWT 失败: {}", e.getMessage());
+            log.info("[STEP4] 从 SecurityContext 提取 JWT 失败: {}", e.getMessage());
         }
 
-        // 如果 SecurityContextHolder 为空，尝试从 UserContextHolder 获取（boundedElastic 线程中使用）
+        // 从 UserContextHolder 获取（boundedElastic 线程中使用）
+        // 由于不清理 UserContextHolder，boundedElastic 线程复用时仍能获取到 token
         String token = UserContextHolder.getToken();
+        log.info("[STEP4] UserContextHolder token: {}", token != null ? "present" : "null");
         if (token != null) {
-            log.debug("从 UserContextHolder 获取到 JWT token");
+            log.info("[STEP4] 从 UserContextHolder 获取到 JWT token");
             return token;
         }
 
+        log.warn("[STEP4] 所有方式都无法获取 JWT token！");
         return null;
     }
 

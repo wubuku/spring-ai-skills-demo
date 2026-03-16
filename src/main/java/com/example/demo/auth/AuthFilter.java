@@ -45,12 +45,12 @@ public class AuthFilter implements Filter {
 
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 String token = authHeader.substring(7);
-                log.info("[AuthFilter] Token 前20字符: {}", token.substring(0, Math.min(20, token.length())));
+                log.info("[STEP1] AuthFilter Token 前20字符: {}", token.substring(0, Math.min(20, token.length())));
 
                 // 验证 Token
                 AuthService.AuthUser user = authService.validateToken(token);
                 if (user != null) {
-                    log.info("[AuthFilter] Token 验证成功, 用户: {}", user.getUsername());
+                    log.info("[STEP1] Token 验证成功, 用户: {}", user.getUsername());
                     // 设置到 Spring Security ContextHolder
                     // 这样 SecurityContextHolder + INHERITABLETHREADLOCAL 机制就能工作
                     UsernamePasswordAuthenticationToken authentication =
@@ -60,14 +60,25 @@ public class AuthFilter implements Filter {
                             Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
                         );
                     SecurityContextHolder.getContext().setAuthentication(authentication);
-                    log.info("[AuthFilter] SecurityContext 已设置");
+
+                    // [STEP1] 记录 SecurityContext 设置结果
+                    var authObj = SecurityContextHolder.getContext().getAuthentication();
+                    log.info("[STEP1] SecurityContext 设置完成: authClass={}, authenticated={}",
+                            authObj != null ? authObj.getClass().getSimpleName() : "null",
+                            authObj != null && authObj.isAuthenticated());
+
+                    log.info("[STEP1] SecurityContext 已设置");
 
                     // 设置到 UserContextHolder，供 Reactor hook 捕获并传递到 boundedElastic 线程
                     UserContextHolder.setToken(token);
                     UserContextHolder.setUsername(user.getUsername());
-                    log.info("[AuthFilter] UserContextHolder 已设置");
+
+                    // [STEP1] 记录 UserContextHolder 设置结果
+                    log.info("[STEP1] UserContextHolder 已设置: token={}, username={}",
+                            UserContextHolder.getToken() != null,
+                            UserContextHolder.getUsername());
                 } else {
-                    log.warn("[AuthFilter] Token 验证失败");
+                    log.warn("[STEP1] Token 验证失败");
                 }
             }
 

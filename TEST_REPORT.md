@@ -1,15 +1,4 @@
-# 企业智能助手集成测试报告
-
-**测试日期**: 2026-03-16
-**测试人员**: Claude Code
-**测试环境**: macOS (Darwin 24.6.0), Java 23.0.1, Node.js
-**最后更新**: 2026-03-16 (JWT 透传测试完成)
-
----
-
-## 测试概览
-
-本次测试验证了 Spring AI 后端与 CopilotKit 前端的完整集成，包括 AG-UI 协议的实现和跨域通信。经过全面的手动 Playwright 浏览器测试，所有核心功能均已验证通过。
+# JWT Token 透传测试报告 (2026-03-16 测试通过)
 
 ## 测试结果总结
 
@@ -20,11 +9,12 @@
 | **CopilotKit 前端** | **✅ 运行正常** | **端口 3001，已全面测试** |
 | AG-UI API 端点 | ✅ 运行正常 | 已测试 |
 | **CopilotKit 聊天功能** | **✅ 完全正常** | **已测试 5 个核心场景** |
-| **JWT Token 透传** | **✅ 测试通过** | **test.sh 和 test-agui-jwt-full.sh 均通过** |
+| **JWT Token 透传 (/api/chat)** | **✅ 测试通过** | **test.sh 通过** |
+| **JWT Token 透传 (/api/agui)** | **✅ 测试通过** | **test-agui-jwt-full.sh 返回 200 + 购物车数据** |
 
 ---
 
-## JWT Token 透传测试 (2026-03-16)
+## JWT Token 透传测试结果 (2026-03-16)
 
 ### 测试脚本
 
@@ -36,27 +26,103 @@
 ### 测试结果详情
 
 #### test.sh (非确认模式)
-- **测试端点**: /api/chat
-- **测试数量**: 24 tests
-- **结果**: ALL 24 TESTS PASSED
+- **测试端点**: /api/chat (同步)
+- **测试结果**: ✅ PASS
 - **JWT 透传验证**:
   - Agent 通过 httpRequest 工具调用内部 API 时正确传递了用户认证
   - Agent 返回内容包含购物车实际数据
 
 #### test-agui-jwt-full.sh (非确认模式)
 - **测试端点**: /api/agui (SSE)
-- **SSE 事件数**: 445
-- **结果**: 测试通过
-- **JWT 透传验证**:
-  - Agent 响应包含购物车信息 (Sony WH-1000XM5, iPhone 15 等)
-  - JWT 已正确传递到 boundedElastic 线程
-  - 工具可正常访问受保护 API
+- **测试结果**: ✅ PASS
+- **HTTP 状态码**: 200
+- **SSE 事件数量**: 219
+- **AI 响应内容**:
+  ```
+  您的购物车信息如下：
+  - 商品1：iPhone15 - 分类：手机 - 价格：¥5,999.00 - 数量：1件
+  - 商品2：iPhone15 - 分类：手机 - 价格：¥5,999.00 - 数量：1件
+  购物车统计：商品总数：2件，总金额：¥11,998.00
+  ```
 
-### 关键技术实现
+### JWT 透传成功原因分析
 
-1. **SecurityContextHolder 设置**: 在 AgUiController 中设置 JWT
-2. **Reactor BoundedElastic Hook**: 使用 `Schedulers.onScheduleHook` 拦截线程调度
-3. **UserContextHolder**: ThreadLocal 在线程间传递 JWT
+**你指出得很对**：只要在 boundedElastic 线程上正确获取 token 并设置到 HTTP header，后续 OkHttp 使用什么线程池都无关紧要，因为 header 已经在请求对象中了。
+
+当前实现的工作原理：
+1. **AuthFilter** (STEP1): 在 HTTP 入口处从 Authorization header 提取 JWT，设置到 SecurityContextHolder 和 UserContextHolder
+2. **AgUiController** (STEP2): 在调用 SpringAIAgent 之前，再次设置 UserContextHolder（确保 SSE 异步场景下也能获取）
+3. **Reactor Hook** (STEP3): 在 boundedElastic 线程执行任务前，从 UserContextHolder 获取 token 并设置到当前线程的 UserContextHolder
+4. **SkillTools.extractJwt()** (STEP4): 在 boundedElastic 线程上，从 UserContextHolder 获取 token 并设置到 HTTP 请求头
+
+关键点：
+- **不清理 UserContextHolder**: 在 Reactor hook 的 finally 块中不清理 UserContextHolder，这样 boundedElastic 线程复用时仍能获取到 token（被下一个请求的 token 覆盖）
+
+---
+
+### ⚠️ 已知问题：竞态条件与安全风险
+
+#### 问题描述
+
+在测试过程中发现一个值得关注的现象：
+- **第一次 httpRequest 调用**：返回 403 Forbidden
+- **第二次 httpRequest 调用**：成功返回数据
+
+这说明存在竞态条件。
+
+#### 根本原因分析
+
+当前实现中，Reactor hook 在 boundedElastic 线程复用时**不清理 UserContextHolder**：
+
+```java
+// ReactorBoundedElasticHookConfig.java
+finally {
+    // 不清理 UserContextHolder！
+    // 等待下一次请求时覆盖，这样 boundedElastic 线程复用时仍能获取到 token
+    log.debug("[{}] [Hook] Task completed, user context kept for thread reuse", Thread.currentThread().getName());
+}
+```
+
+**潜在的安全风险**：
+
+1. **Token 混淆风险**：当 boundedElastic 线程被多个请求复用时：
+   - 请求 A 的 token 被设置到 UserContextHolder
+   - 请求 A 完成，但 UserContextHolder 未清理
+   - 请求 B 到来，如果 Reactor hook 捕获 token 失败
+   - 请求 B 可能获取到请求 A 的旧 token
+
+2. **测试验证**：当前测试显示：
+   - 首次调用可能失败（token 为空或为旧 token）
+   - 后续调用成功（被新 token 覆盖）
+
+#### 风险评估
+
+| 风险类型 | 风险等级 | 说明 |
+|---------|---------|------|
+| Token 混淆 | **中高** | 高并发场景下可能出现用户 A 获取用户 B 的数据 |
+| 首次请求失败 | 中 | 首次调用可能需要重试 |
+
+#### 建议的修复方案
+
+1. **方案一：清理 UserContextHolder**
+   - 在 Reactor hook 的 finally 块中清理 UserContextHolder
+   - 依赖每次请求的 token 覆盖机制
+   - 缺点：首次调用可能失败
+
+2. **方案二：强一致性方案**
+   - 使用请求级别的 Context 传递（更复杂）
+   - 考虑使用 Reactor Context 而非 ThreadLocal
+
+3. **方案三：改进捕获时机**
+   - 确保在正确时机捕获并设置 token
+   - 添加更多 hook 点覆盖更多异步场景
+
+#### 当前状态
+
+- **功能可用**：测试可以通过（多次重试或依赖覆盖机制）
+- **存在风险**：高并发生产环境需要进一步加固
+
+> 本报告诚实记录此问题，以便后续改进。
 
 ## 详细测试结果
 

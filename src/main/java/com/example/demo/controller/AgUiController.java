@@ -58,11 +58,20 @@ public class AgUiController {
             @RequestBody AgUiParameters agUiParameters,
             @RequestHeader(value = "Authorization", required = false) String authHeader
     ) {
-        log.info("收到 AG-UI 请求: threadId={}, runId={}, messages={}, authHeader={}",
+        log.info("[STEP2] 收到 AG-UI 请求: threadId={}, runId={}, messages={}, authHeader={}",
                 agUiParameters.getThreadId(),
                 agUiParameters.getRunId(),
                 agUiParameters.getMessages() != null ? agUiParameters.getMessages().size() : 0,
                 authHeader != null ? (authHeader.substring(0, Math.min(20, authHeader.length())) + "...") : "null");
+
+        // [STEP2] 在调用 SpringAIAgent 之前，记录当前线程上下文
+        var authObj = SecurityContextHolder.getContext().getAuthentication();
+        String tokenInUserCtx = UserContextHolder.getToken();
+        log.info("[STEP2] before SpringAIAgent, thread={}, auth={}, authenticated={}, tokenInUserCtx={}",
+                Thread.currentThread().getName(),
+                authObj != null ? authObj.getClass().getSimpleName() : "null",
+                authObj != null && authObj.isAuthenticated(),
+                tokenInUserCtx != null ? "present" : "null");
 
         // 提取 JWT Token 并设置到 SecurityContext（依赖 INHERITABLETHREADLOCAL 自动传递到子线程）
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
@@ -82,6 +91,9 @@ public class AgUiController {
             UserContextHolder.setToken(jwt);
             UserContextHolder.setUsername("user");
             log.debug("已设置 JWT 到 SecurityContext 和 UserContextHolder，确保异步 SSE 流中透传");
+
+            // [STEP2] 设置后再次记录
+            log.info("[STEP2] JWT 已设置, tokenInUserCtx={}", UserContextHolder.getToken() != null);
         } else {
             log.warn("未收到 Authorization header! authHeader={}", authHeader);
         }
