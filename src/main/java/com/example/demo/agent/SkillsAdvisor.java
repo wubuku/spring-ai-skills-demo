@@ -19,15 +19,17 @@ public class SkillsAdvisor implements BaseAdvisor {
     private final SkillRegistry registry;
     private final SkillTools skillTools;
     private final String apiBaseUrl;
-    private final boolean confirmBeforeMutate;
 
+    /**
+     * confirm-before-mutate 配置已移除
+     * 原因：AG-UI + SSE + Spring AI 场景不支持用户态 Token 透传
+     * 后端不再试图"代表用户调用API"，任何需要用户 access token 的操作都推到前端
+     */
     public SkillsAdvisor(SkillRegistry registry, SkillTools skillTools,
-                         @Value("${app.api.base-url}") String apiBaseUrl,
-                         @Value("${app.confirm-before-mutate:false}") boolean confirmBeforeMutate) {
+                         @Value("${app.api.base-url}") String apiBaseUrl) {
         this.registry = registry;
         this.skillTools = skillTools;
         this.apiBaseUrl = apiBaseUrl;
-        this.confirmBeforeMutate = confirmBeforeMutate;
     }
 
     @Override
@@ -39,8 +41,7 @@ public class SkillsAdvisor implements BaseAdvisor {
     @Override
     public ChatClientRequest before(ChatClientRequest request, AdvisorChain chain) {
         String systemPrompt = buildSystemPrompt();
-        log.info("[SkillsAdvisor] 注入系统提示，模式={}, HTTP工具={}, 技能数量={}",
-                confirmBeforeMutate ? "确认模式" : "直接执行模式",
+        log.info("[SkillsAdvisor] 注入系统提示，HTTP工具={}, 技能数量={}",
                 getHttpToolName(),
                 registry.all().size());
         log.debug("[SkillsAdvisor] 系统提示前300字：{}", systemPrompt.substring(0, Math.min(300, systemPrompt.length())));
@@ -89,48 +90,46 @@ public class SkillsAdvisor implements BaseAdvisor {
     }
 
     /**
-     * 根据模式返回不同的规则指令
+     * HTTP 工具调用规则
+     * 后端不再试图"代表用户调用API"，任何可能需要用户 access token 的操作都推到前端
      */
     private String buildModeSpecificRules() {
-        String httpToolName = getHttpToolName();
+        return """
+            6. 【HTTP 工具使用规则】：
+               - **禁止**生成 `http-request` 或 `http` 代码块！
+               - 所有 API 调用必须通过工具调用完成。
 
-        if (confirmBeforeMutate) {
-            // 确认模式规则
-            return """
-                6. 【用户确认模式】已启用！但是你**不应该**直接生成 `http-request` 代码块！你应该先调用 buildHttpRequest 工具，当返回结果中包含 `[CONFIRM_REQUIRED]` 时，
-                   才可以最终确认*该操作需要用户手动确认后执行*。此时，你必须：
-                   a) 先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据、预期结果）
-                   b) 在消息末尾原样保留工具返回的 JSON 代码块（不要修改其中的内容）
-                   c) 绝不要省略代码块，也不要尝试自行执行该操作
-                   d) 不要在代码块外重复展示请求参数的技术细节
+            7. 【如何选择 HTTP 工具】：
+               - 如果 API 可能需要用户认证（用户登录态、用户个人数据等），或者你不确定是否需要认证，请使用 `buildHttpRequest` 工具
+               - 不确定时**总是使用 buildHttpRequest 工具**（更安全）
+               - 只有确定是**完全公开的 API**（如公开的天气 API、公开的产品列表等）才使用 `httpRequest` 工具
 
-                **【关键格式要求】**：
-                - http-request（JSON）代码块的格式必须是：
-                  ```http-request
-                  {"method":"POST","url":"/api/xxx",...}
-                  ```
-                - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
-                - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
-                - 禁止在语言标识符后添加任何字符或空格后直接跟 JSON
+            8. 【buildHttpRequest 工具返回确认请求】
+               - 调用 buildHttpRequest 后，如果返回结果中包含 `[CONFIRM_REQUIRED]`，说明该操作需要用户确认
+               - 此时，你必须：
+                 a) 先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据）
+                 b) 在消息末尾原样保留工具返回的 JSON 代码块（不要修改其中的内容）
+                 c) 绝不要省略代码块，也不要尝试自行执行该操作
 
-                **【重要】GET 请求说明**：
-                - GET 查询操作是安全的，会直接执行并返回结果
-                - buildHttpRequest 工具对于 GET 请求会直接执行，不需要用户确认
-                """;
-        } else {
-            // 直接执行模式规则（强制工具调用）
-            return """
-                6. 【直接执行模式】已启用！你必须通过调用 `httpRequest` 工具来执行 API 请求！
-                   - 禁止生成 `http-request` 或 `http` 代码块！
-                   - 所有 API 调用必须通过工具调用完成，工具会自动处理认证！
-                """;
-        }
+            **【关键格式要求】**：
+            - http-request（JSON）代码块的格式必须是：
+              ```http-request
+              {"method":"POST","url":"/api/xxx",...}
+              ```
+            - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
+            - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
+            - 禁止在语言标识符后添加任何字符或空格后直接跟 JSON
+
+            **【重要】GET 请求说明**：
+            - GET 查询操作通常用于获取数据，但不意味着不需要认证
+            - 如果是获取用户个人信息、用户订单等，需要用户认证的 GET 请求仍应使用 buildHttpRequest
+            """;
     }
 
     /**
-     * 根据模式返回不同的 HTTP 工具名称
+     * 返回 HTTP 工具名称（默认使用 buildHttpRequest，因为不确定时使用这个更安全）
      */
     private String getHttpToolName() {
-        return confirmBeforeMutate ? "buildHttpRequest" : "httpRequest";
+        return "buildHttpRequest";
     }
 }

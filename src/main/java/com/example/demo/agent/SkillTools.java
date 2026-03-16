@@ -26,20 +26,20 @@ public class SkillTools {
     private final SkillRegistry registry;
     private final RestTemplate restTemplate;
     private final String apiBaseUrl;
-    private final boolean confirmBeforeMutate;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<String> loadedSkills = new CopyOnWriteArrayList<>();
 
+    /**
+     * confirm-before-mutate 配置已移除
+     * 原因：AG-UI + SSE + Spring AI 场景不支持用户态 Token 透传
+     * 后端不再试图"代表用户调用API"，任何需要用户 access token 的操作都推到前端
+     */
     public SkillTools(SkillRegistry registry, RestTemplate restTemplate,
-                      @Value("${app.api.base-url}") String apiBaseUrl,
-                      @Value("${app.confirm-before-mutate:false}") boolean confirmBeforeMutate) {
+                      @Value("${app.api.base-url}") String apiBaseUrl) {
         this.registry = registry;
         this.restTemplate = restTemplate;
         this.apiBaseUrl = apiBaseUrl;
-        this.confirmBeforeMutate = confirmBeforeMutate;
     }
-
-    public boolean isConfirmBeforeMutate() { return confirmBeforeMutate; }
 
     public void reset() { loadedSkills.clear(); }
     public List<String> getLoadedSkills() { return loadedSkills; }
@@ -107,15 +107,8 @@ public class SkillTools {
             }
         }
 
-        // GET 请求直接执行
-        if ("GET".equalsIgnoreCase(method)) {
-            log.info("[buildHttpRequest] GET 请求，直接执行");
-            String result = executeHttpRequest(method, resolvedUrl, pathParams, queryParams, null, body);
-            log.info("[buildHttpRequest] GET 返回: {}", result.substring(0, Math.min(100, result.length())));
-            return result;
-        }
-
-        // 非 GET 请求返回元数据供前端确认
+        // buildHttpRequest 的语义：只构建请求，不直接执行
+        // 返回元数据供前端确认，前端拿到用户 token 后在自己的浏览器中执行
         log.info("[buildHttpRequest] {} 请求，返回确认元数据", method);
         String confirmUrl = resolvedUrl.startsWith("http") ? resolvedUrl : apiBaseUrl + resolvedUrl;
         Map<String, Object> meta = new LinkedHashMap<>();

@@ -41,7 +41,10 @@ spring:
 app:
   api:
     base-url: http://localhost:${server.port:8080}
-  confirm-before-mutate: false
+  # confirm-before-mutate 配置已移除
+  # 原因：AG-UI + SSE + Spring AI 场景不支持用户态 Token 透传，后端不再试图"代表用户调用API"
+  # 任何可能需要用户 access token 的操作都推到前端，由用户在自己的浏览器中调用（浏览器总是有用户的 token）
+  # confirm-before-mutate: false
 
 server:
   port: 8080
