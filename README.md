@@ -225,9 +225,6 @@ mvn clean package -DskipTests
 
 # 运行
 mvn spring-boot:run -DskipTests
-
-# 运行（开启确认模式：变更操作需用户手动确认）
-mvn spring-boot:run -DskipTests '-Dspring-boot.run.arguments=--app.confirm-before-mutate=true'
 ```
 
 ### 访问地址
