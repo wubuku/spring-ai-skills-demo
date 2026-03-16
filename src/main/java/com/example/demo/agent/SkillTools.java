@@ -64,10 +64,8 @@ public class SkillTools {
     }
 
     /**
-     * 工具1（模式1）：直接发送 HTTP 请求并返回结果
-     * 用于 confirmBeforeMutate = false 时
-     *
-     * 支持认证透传机制：通过 SecurityContextHolder 获取 JWT
+     * 工具1（模式1）：直接发送 HTTP 请求并返回结果。
+     * 一定程度上支持认证透传机制：通过 SecurityContextHolder 获取 JWT
      */
     @Tool(description = "发送 HTTP 请求调用 REST API，并直接返回执行结果。支持 GET/POST/PUT/DELETE 所有方法。")
     public String httpRequest(
@@ -82,14 +80,9 @@ public class SkillTools {
     }
 
     /**
-     * 工具2（模式2）：HTTP 请求工具（确认模式）
-     * 用于 confirmBeforeMutate = true 时
-     *
-     * 此工具根据请求类型决定：
-     * - GET 请求：直接执行并返回结果
-     * - POST/PUT/DELETE：返回请求元数据，供前端显示确认按钮
+     * 工具2（模式2）：构建HTTP 请求工具（前端确认后请求的模式）
      */
-    @Tool(description = "发送 HTTP 请求。GET 查询会直接执行并返回结果；POST/PUT/DELETE 等修改操作会返回元数据供用户确认。")
+    @Tool(description = "返回 HTTP GET/POST/PUT/DELETE 等操作的元数据供用户在前端确认后执行。")
     public String buildHttpRequest(
         @ToolParam(description = "HTTP 方法：GET/POST/PUT/DELETE") String method,
         @ToolParam(description = "API 路径（相对路径）") String url,
