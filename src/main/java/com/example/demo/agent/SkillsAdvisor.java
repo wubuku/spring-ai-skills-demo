@@ -92,22 +92,21 @@ public class SkillsAdvisor implements BaseAdvisor {
     /**
      * HTTP 工具调用规则
      * 后端不再试图"代表用户调用API"，任何可能需要用户 access token 的操作都推到前端
+     * 重要：SSE 端点无法稳定实现 token 透传！任何涉及当前用户数据的操作都必须交给前端执行
      */
     private String buildModeSpecificRules() {
         return """
-            6. 【如何选择 HTTP 工具 - 必须严格遵守】
-               - **GET 查询**：
-                   - 只对**公开的 API**（如公开的天气 API、商品搜索等）使用 `httpRequest` 工具
-                   - 不确定时**总是使用 buildHttpRequest 工具**（更安全）
-               - **POST 添加**（如添加购物车、创建订单）：**必须使用 buildHttpRequest**
-               - **PUT/DELETE**（如更新、删除）：**必须使用 buildHttpRequest**
-               - **任何涉及当前用户数据的操作**：比如查询当前用户的购物车信息，**必须使用 buildHttpRequest**
+            6. 【强制规则 - 必须严格遵守】
+               - **httpRequest 工具**：仅用于调用**完全公开的、无需认证的外部 API**（如公开的天气 API，商品搜索 API 等）
+               - **buildHttpRequest 工具**：用于构建所有需要认证的 API 调用的请求元数据（如方法、路径、查询参数、请求头、请求体）
+               - **任何涉及当前用户数据的操作**（如查看购物车、查询订单、添加购物车、结算）：**必须使用 buildHttpRequest**
+               - **绝对禁止**：对需要认证的 API 使用 httpRequest 工具（会失败并返回 403 错误）
 
             7. 【用户认证状态 - 重要说明】
                - 用户已通过前端登录，前端会携带用户的 access token
                - 当你在回复中输出 http-request 代码块后，前端会使用用户的 token 执行请求
-               - **不要**说"需要认证"、"无法访问"、"需要用户登录"之类的话
-               - **应该**直接输出 http-request 代码块，让前端展示确认界面
+               - **禁止**说"需要认证"、"无法访问"、"需要用户登录"之类的话
+               - **必须**直接输出 http-request 代码块，让前端展示确认界面
 
             8. 【如何使用 buildHttpRequest 工具 - 核心流程】
                步骤1：调用 buildHttpRequest 工具，传入 method、url、body 等参数；
