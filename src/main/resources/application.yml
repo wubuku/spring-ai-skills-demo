@@ -21,7 +21,8 @@ spring:
       api-key: ${OPENAI_API_KEY}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
       chat:
-        enabled: true
+        # 禁用 Spring AI 自动配置！让 OkHttp 配置生效！
+        enabled: false
         options:
           model: ${OPENAI_MODEL:gpt-4o}
           temperature: 0.7
