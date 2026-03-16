@@ -1,5 +1,6 @@
 package com.example.demo.agent;
 
+import com.example.demo.auth.UserContextHolder;
 import com.example.demo.model.Skill;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
@@ -192,10 +193,11 @@ public class SkillTools {
 
     /**
      * 提取 JWT Token
-     * 从 SecurityContextHolder 获取（依赖 INHERITABLETHREADLOCAL 自动传递到子线程）
+     * 优先从 SecurityContextHolder 获取，如果为空则从 UserContextHolder 获取
+     * （boundedElastic 线程中 SecurityContext 已被清理，需要从 UserContextHolder 获取）
      */
     private String extractJwt() {
-        // 从 SecurityContextHolder 获取（依赖 INHERITABLETHREADLOCAL 机制）
+        // 首先尝试从 SecurityContextHolder 获取（主线程中使用）
         try {
             var auth = SecurityContextHolder.getContext().getAuthentication();
             log.debug("从 SecurityContext 提取 JWT, authentication={}, authenticated={}",
@@ -211,6 +213,14 @@ public class SkillTools {
         } catch (Exception e) {
             log.debug("从 SecurityContext 提取 JWT 失败: {}", e.getMessage());
         }
+
+        // 如果 SecurityContextHolder 为空，尝试从 UserContextHolder 获取（boundedElastic 线程中使用）
+        String token = UserContextHolder.getToken();
+        if (token != null) {
+            log.debug("从 UserContextHolder 获取到 JWT token");
+            return token;
+        }
+
         return null;
     }
 

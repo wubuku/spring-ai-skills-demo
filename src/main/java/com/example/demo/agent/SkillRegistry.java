@@ -66,23 +66,35 @@ public class SkillRegistry {
         }
 
         // 1. 加载所有 Skills
+        log.info("开始扫描 skills 目录: {}", skillsPath.toAbsolutePath());
         Files.list(skillsPath)
             .filter(Files::isDirectory)
             .forEach(dir -> {
+                log.debug("扫描目录: {}", dir.getFileName());
                 var mdFile = dir.resolve("SKILL.md");
-                if (!Files.exists(mdFile)) return;
+                if (!Files.exists(mdFile)) {
+                    log.debug("跳过目录 {} - 未找到 SKILL.md", dir.getFileName());
+                    return;
+                }
                 try {
                     String content = Files.readString(mdFile);
                     String[] parts = content.split("---", 3);
-                    if (parts.length < 3) return;
+                    if (parts.length < 3) {
+                        log.warn("跳过技能 {} - YAML frontmatter 格式错误 (parts.length={})", dir.getFileName(), parts.length);
+                        return;
+                    }
 
                     var meta = yaml.readValue(parts[1], Skill.SkillMeta.class);
                     String body = parts[2].strip();
                     skills.put(meta.getName(), new Skill(meta, body));
+                    log.info("成功加载技能: {} (name={})", dir.getFileName(), meta.getName());
                 } catch (IOException e) {
+                    log.error("解析 Skill 失败: {} - {}", dir.getFileName(), e.getMessage());
                     throw new RuntimeException("解析 Skill 失败: " + dir, e);
                 }
             });
+
+        log.info("技能加载完成，共加载 {} 个技能: {}", skills.size(), skills.keySet());
 
         // 2. 为所有 Skills 构建 API 索引
         for (Skill skill : skills.values()) {

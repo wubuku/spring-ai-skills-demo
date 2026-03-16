@@ -59,6 +59,8 @@ public class SkillsAdvisor implements BaseAdvisor {
             .map(s -> "- `" + s.getMeta().getName() + "`：" + s.getMeta().getDescription())
             .collect(Collectors.joining("\n"));
 
+        log.info("[SkillsAdvisor] 所有技能列表: {}", registry.all().keySet());
+
         String loadedContext = skillTools.getLoadedSkills().stream()
             .map(name -> registry.get(name)
                 .map(s -> "\n\n## 已激活技能：" + name + "\n" + s.getBody())
@@ -66,7 +68,7 @@ public class SkillsAdvisor implements BaseAdvisor {
             .collect(Collectors.joining());
 
         String httpToolName = getHttpToolName();
-        String confirmRule = buildConfirmRule();
+        String modeRules = buildModeSpecificRules();
 
         return """
             你是一个智能助手。可用技能如下：
@@ -83,8 +85,46 @@ public class SkillsAdvisor implements BaseAdvisor {
             5. 部分技能具有分层结构（如 OpenAPI 生成的技能），其 SKILL.md 中会列出 references 目录下的参考文件路径，
                需要调用 `readSkillReference` 工具读取具体的资源/操作文档，再据此调用 %s 工具
             %s
-            %s
-            """.formatted(skillList, apiBaseUrl, httpToolName, httpToolName, loadedContext, confirmRule);
+            """.formatted(skillList, apiBaseUrl, httpToolName, httpToolName, loadedContext, modeRules);
+    }
+
+    /**
+     * 根据模式返回不同的规则指令
+     */
+    private String buildModeSpecificRules() {
+        String httpToolName = getHttpToolName();
+
+        if (confirmBeforeMutate) {
+            // 确认模式规则
+            return """
+                6. 【用户确认模式】已启用！但是你**不应该**直接生成 `http-request` 代码块！你应该先调用 buildHttpRequest 工具，当返回结果中包含 `[CONFIRM_REQUIRED]` 时，
+                   才可以最终确认*该操作需要用户手动确认后执行*。此时，你必须：
+                   a) 先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据、预期结果）
+                   b) 在消息末尾原样保留工具返回的 JSON 代码块（不要修改其中的内容）
+                   c) 绝不要省略代码块，也不要尝试自行执行该操作
+                   d) 不要在代码块外重复展示请求参数的技术细节
+
+                **【关键格式要求】**：
+                - http-request（JSON）代码块的格式必须是：
+                  ```http-request
+                  {"method":"POST","url":"/api/xxx",...}
+                  ```
+                - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
+                - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
+                - 禁止在语言标识符后添加任何字符或空格后直接跟 JSON
+
+                **【重要】GET 请求说明**：
+                - GET 查询操作是安全的，会直接执行并返回结果
+                - buildHttpRequest 工具对于 GET 请求会直接执行，不需要用户确认
+                """;
+        } else {
+            // 直接执行模式规则（强制工具调用）
+            return """
+                6. 【直接执行模式】已启用！你必须通过调用 `httpRequest` 工具来执行 API 请求！
+                   - 禁止生成 `http-request` 或 `http` 代码块！
+                   - 所有 API 调用必须通过工具调用完成，工具会自动处理认证！
+                """;
+        }
     }
 
     /**
@@ -92,26 +132,5 @@ public class SkillsAdvisor implements BaseAdvisor {
      */
     private String getHttpToolName() {
         return confirmBeforeMutate ? "buildHttpRequest" : "httpRequest";
-    }
-
-    private String buildConfirmRule() {
-        if (!confirmBeforeMutate) return "";
-        return """
-            6. 【用户确认模式】已启用！但是你**不应该**直接生成 `http-request` 代码块！你应该先调用 buildHttpRequest 工具，当返回结果中包含 `[CONFIRM_REQUIRED]` 时，
-               才可以最终确认*该操作需要用户手动确认后执行*。此时，你必须：
-               a) 先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据、预期结果）
-               b) 在消息末尾原样保留工具返回的 JSON 代码块（不要修改其中的内容）
-               c) 绝不要省略代码块，也不要尝试自行执行该操作
-               d) 不要在代码块外重复展示请求参数的技术细节
-
-            **【关键格式要求】**：
-            - http-request（JSON）代码块的格式必须是：
-              ```http-request
-              {"method":"POST","url":"/api/xxx",...}
-              ```
-            - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
-            - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
-            - 禁止在语言标识符后添加任何字符或空格后直接跟 JSON
-            """;
     }
 }

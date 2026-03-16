@@ -26,8 +26,7 @@ import java.util.concurrent.TimeUnit;
  * 注意：
  * 1. OkHttp 用于同步 REST 调用（/api/chat）
  * 2. WebClient 用于 SSE 流式调用（/api/agui）
- * 3. 两者都需要通过 JVM 参数配置代理才能正常访问 DeepSeek API
- *    例如：-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7890
+ * 3. 代理是可选的 - 如果设置了 -Dhttp.proxyHost 和 -Dhttp.proxyPort 则启用
  */
 @Configuration
 public class SpringAiConfig {
