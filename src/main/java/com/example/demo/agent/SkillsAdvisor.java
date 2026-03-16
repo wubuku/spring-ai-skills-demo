@@ -102,6 +102,7 @@ public class SkillsAdvisor implements BaseAdvisor {
                - **POST 添加**（如添加购物车、创建订单）：**必须使用 buildHttpRequest**
                - **PUT/DELETE**（如更新、删除）：**必须使用 buildHttpRequest**
                - **任何涉及当前用户数据的操作**：比如查询当前用户的购物车信息，**必须使用 buildHttpRequest**
+               - **重要**：用户已通过前端登录，不要询问用户是否登录或要求用户登录
 
             7. 【如何使用 buildHttpRequest 工具 - 核心流程】
                步骤1：调用 buildHttpRequest 工具，传入 method、url、body 等参数；
@@ -115,7 +116,7 @@ public class SkillsAdvisor implements BaseAdvisor {
                  ```
                - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
                - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
-               
+
                **正确示例**：
                我现在帮你添加 iPhone15 到购物车：
 
