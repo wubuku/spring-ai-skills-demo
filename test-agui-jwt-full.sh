@@ -31,7 +31,7 @@ echo "购物车商品数量: $item_count"
 
 echo ""
 echo "=== 步骤3: 通过 /api/agui 端点查询购物车 (SSE) ==="
-AGUI_REQUEST='{"messages":[{"role":"user","content":"查询我的购物车信息"}]}'
+AGUI_REQUEST='{"messages":[{"role":"user","content":"我的购物车已经有产品了，请直接使用 httpRequest 工具查询购物车，返回商品名称和价格"}]}'
 
 # 保存原始 SSE 响应
 SSE_RAW_FILE="/tmp/sse_response_$$.txt"
