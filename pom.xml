@@ -37,6 +37,12 @@
             <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
 
+        <!-- Spring AI Anthropic (用于切换到 Anthropic API 兼容模型) -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-anthropic</artifactId>
+        </dependency>
+
         <!-- SpringDoc OpenAPI (Swagger UI) -->
         <dependency>
             <groupId>org.springdoc</groupId>

@@ -19,6 +19,15 @@ public class ChatController {
         this.agentService = agentService;
     }
 
+    /**
+     * 测试端点 - 用于验证 observation logging
+     */
+    @GetMapping("/test")
+    public Map<String, String> test() {
+        String response = agentService.chat("你好", "test");
+        return Map.of("response", response);
+    }
+
     @PostMapping
     public Map<String, String> chat(
             @RequestBody ChatMessage message,

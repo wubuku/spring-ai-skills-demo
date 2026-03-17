@@ -2,6 +2,10 @@ spring:
   application:
     name: spring-ai-skills-demo
 
+  # 允许 Bean 定义覆盖（解决自定义配置与自动配置冲突）
+  main:
+    allow-bean-definition-overriding: true
+
   # H2 文件型数据库（数据持久化到 ./data/chat-memory.mv.db）
   datasource:
     url: jdbc:h2:file:./data/chat-memory;DB_CLOSE_ON_EXIT=FALSE;DB_CLOSE_DELAY=-1;AUTO_RECONNECT=TRUE
@@ -17,8 +21,12 @@ spring:
 
   # Spring AI 配置
   ai:
+    # 开启 Spring AI 日志，打印最终发送给模型的 Prompt
+    # 注意：chat.observations 不能和 openai.chat 同时存在，需要分开配置
+    # LLM Provider 开关：openai 或 anthropic
+    provider: ${app.llm.provider:openai}
     openai:
-      api-key: ${OPENAI_API_KEY}
+      api-key: ${OPENAI_API_KEY:dummy}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
       chat:
         # 禁用 Spring AI 自动配置！让 OkHttp 配置生效！
@@ -26,6 +34,16 @@ spring:
         options:
           model: ${OPENAI_MODEL:gpt-4o}
           temperature: 0.7
+    # Anthropic 配置（用于切换到 Anthropic API 兼容模型）
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:dummy}
+      base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+      chat:
+        enabled: false
+        options:
+          model: ${ANTHROPIC_MODEL:claude-3-5-sonnet-20241022}
+          temperature: 0.7
+          max-tokens: 4096
     # Chat Memory JDBC 配置
     chat:
       memory:
@@ -33,12 +51,28 @@ spring:
           jdbc:
             initialize-schema: always
             platform: h2
+      # Observations 配置 - 用于打印 prompt 和 completion
+      observations:
+        enabled: true
+        log-prompt: true
+        log-completion: true
     retry:
       max-attempts: 5
       initial-interval: 3000
       multiplier: 2
 
+# 确保 observation 开启
+management:
+  observations:
+    enabled: true
+  tracing:
+    sampling:
+      probability: 1.0
+
 app:
+  # LLM Provider 开关：openai 或 anthropic
+  llm:
+    provider: ${LLM_PROVIDER:openai}
   api:
     base-url: http://localhost:${server.port:8080}
   # confirm-before-mutate 配置已移除
@@ -60,3 +94,7 @@ logging:
   level:
     com.example.demo: DEBUG
     org.springframework.ai: DEBUG
+    org.springframework.ai.chat.client.observation: DEBUG
+    org.springframework.ai.chat.client.ChatClient: DEBUG
+    org.springframework.ai.chat.observation: DEBUG
+    org.springframework.ai.model.chat.observation: DEBUG
