@@ -94,6 +94,7 @@ export function CopilotAssistantMessage(props: AssistantMessageProps) {
         requestMeta ? (
           <ConfirmDialogContainer
             key={`${messageId}-${requestMeta.method}-${requestMeta.url}`}
+            messageId={messageId}
             requestMeta={requestMeta}
           />
         ) : undefined

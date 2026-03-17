@@ -108,6 +108,7 @@ const confirmStateCache = new Map<string, CachedState>();
 
 interface ConfirmDialogContainerProps {
   requestMeta: HttpRequestMeta;
+  messageId?: string;  // 用于隔离不同消息卡片的确认状态
   description?: string;
   respond?: (result: HttpExecutionResult) => void;
   onComplete?: () => void;
@@ -121,13 +122,16 @@ interface ConfirmDialogContainerProps {
  */
 export function ConfirmDialogContainer({
   requestMeta,
+  messageId,
   description,
   respond,
   onComplete,
 }: ConfirmDialogContainerProps) {
-  // 生成包含参数的稳定 key
+  // 如果 messageId 为空，使用随机生成的 ID 确保每个消息卡片有独立状态
+  const effectiveMessageId = messageId || `msg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  // 生成包含 messageId、参数 的稳定 key，确保不同消息卡片的相同请求有独立状态
   const paramsStr = requestMeta.params ? JSON.stringify(requestMeta.params) : '';
-  const stableKey = `${requestMeta.method}-${requestMeta.url}-${paramsStr}`;
+  const stableKey = `${effectiveMessageId}-${requestMeta.method}-${requestMeta.url}-${paramsStr}`;
   const cached = confirmStateCache.get(stableKey);
 
   const [stage, setStage] = useState<Stage>(cached?.stage ?? 'pending');
