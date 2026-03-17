@@ -60,6 +60,28 @@ public class SkillsAdvisor implements BaseAdvisor {
         return response;
     }
 
+    /**
+     * 系统提示词模板 - 使用可读性占位符
+     */
+    private static final String SYSTEM_PROMPT_TEMPLATE = """
+        你是一个智能助手。可用技能如下：
+
+        <available_skills>
+        {{SKILL_LIST}}
+        </available_skills>
+
+        **重要规则：**
+        1. 使用某个技能前，必须先调用 `loadSkill` 工具加载它的完整指令
+        2. 不要凭记忆猜测 API 参数，必须先加载技能查看文档
+        3. 加载技能后，注意其 links 字段提示的关联技能
+        4. API 基础 URL 是 {{API_BASE_URL}}（技能文档中的路径都是相对路径，调用 {{HTTP_TOOL_NAME}} 时只需传相对路径）
+        5. 部分技能具有分层结构（如 OpenAPI 生成的技能），其 SKILL.md 中会列出 references 目录下的参考文件路径，
+           需要调用 `readSkillReference` 工具读取具体的资源/操作文档，再据此调用 {{HTTP_TOOL_NAME}} 工具
+        {{LOADED_CONTEXT}}
+
+        {{MODE_RULES}}
+        """;
+
     private String buildSystemPrompt() {
         String skillList = registry.all().values().stream()
             .map(s -> "- `" + s.getMeta().getName() + "`：" + s.getMeta().getDescription())
@@ -76,22 +98,15 @@ public class SkillsAdvisor implements BaseAdvisor {
         String httpToolName = getHttpToolName();
         String modeRules = buildModeSpecificRules();
 
-        return """
-            你是一个智能助手。可用技能如下：
+        // 使用 replace 替换占位符，确保 modeRules 被包含
+        String systemPrompt = SYSTEM_PROMPT_TEMPLATE
+            .replace("{{SKILL_LIST}}", skillList)
+            .replace("{{API_BASE_URL}}", apiBaseUrl)
+            .replace("{{HTTP_TOOL_NAME}}", httpToolName)
+            .replace("{{LOADED_CONTEXT}}", loadedContext)
+            .replace("{{MODE_RULES}}", modeRules);
 
-            <available_skills>
-            %s
-            </available_skills>
-
-            **重要规则：**
-            1. 使用某个技能前，必须先调用 `loadSkill` 工具加载它的完整指令
-            2. 不要凭记忆猜测 API 参数，必须先加载技能查看文档
-            3. 加载技能后，注意其 links 字段提示的关联技能
-            4. API 基础 URL 是 %s（技能文档中的路径都是相对路径，调用 %s 时只需传相对路径）
-            5. 部分技能具有分层结构（如 OpenAPI 生成的技能），其 SKILL.md 中会列出 references 目录下的参考文件路径，
-               需要调用 `readSkillReference` 工具读取具体的资源/操作文档，再据此调用 %s 工具
-            %s
-            """.formatted(skillList, apiBaseUrl, httpToolName, httpToolName, loadedContext, modeRules);
+        return systemPrompt;
     }
 
     /**
