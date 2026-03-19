@@ -223,6 +223,9 @@ set -a && source .env && set +a
 # 构建
 mvn clean package -DskipTests
 
+# 如果需要重启服务，可以这样精准杀死在某个端口上运行的服务端进程：
+# lsof -ti:8080 -sTCP:LISTEN | xargs -r kill -9 2>/dev/null; echo "Killed server on port 8080"; sleep 1; lsof -ti:8080 || echo "Port 8080 is free"
+
 # 运行
 mvn spring-boot:run -DskipTests
 ```
