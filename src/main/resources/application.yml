@@ -61,6 +61,13 @@ spring:
       initial-interval: 3000
       multiplier: 2
 
+# SiliconFlow 嵌入模型配置（用于 VectorStoreChatMemoryAdvisor）
+siliconflow:
+  api-key: ${SILICONFLOW_API_KEY:}
+  base-url: ${SILICONFLOW_URL:https://api.siliconflow.cn/v1}
+  model: ${SILICONFLOW_MODEL:BAAI/bge-m3}
+  dimensions: ${SILICONFLOW_DIMENSIONS:1024}
+
 # 确保 observation 开启
 management:
   observations:

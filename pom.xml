@@ -76,6 +76,18 @@
             <artifactId>spring-ai-starter-model-chat-memory-repository-jdbc</artifactId>
         </dependency>
 
+        <!-- Spring AI Vector Store (SimpleVectorStore) -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-vector-store</artifactId>
+        </dependency>
+
+        <!-- Spring AI Vector Store Advisors (包含 VectorStoreChatMemoryAdvisor) -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-advisors-vector-store</artifactId>
+        </dependency>
+
         <!-- H2 文件型数据库 -->
         <dependency>
             <groupId>com.h2database</groupId>

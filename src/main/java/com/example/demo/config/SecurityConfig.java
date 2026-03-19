@@ -45,7 +45,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/v3/user/**").permitAll()
                 .requestMatchers("/api/v3/store/order").permitAll()
                 .requestMatchers("/h2-console/**").permitAll()
-                .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/swagger-ui-init-ui.js", "/v3/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll()
                 .requestMatchers("/").permitAll()
                 .requestMatchers("/index.html").permitAll()
                 // 受保护端点需要认证

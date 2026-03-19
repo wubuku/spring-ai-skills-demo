@@ -6,6 +6,8 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
+import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.chat.client.advisor.vectorstore.VectorStoreChatMemoryAdvisor;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -17,7 +19,8 @@ public class AgentService {
     public AgentService(ChatClient.Builder builder,
                         SkillTools skillTools,
                         SkillsAdvisor skillsAdvisor,
-                        JdbcChatMemoryRepository jdbcChatMemoryRepository) {
+                        JdbcChatMemoryRepository jdbcChatMemoryRepository,
+                        VectorStore vectorStore) {
         this.skillTools = skillTools;
 
         // 使用 JDBC 存储，保留最近 20 条消息的窗口
@@ -26,10 +29,16 @@ public class AgentService {
                 .maxMessages(20)
                 .build();
 
+        // 创建 VectorStoreChatMemoryAdvisor（用于语义记忆搜索）
+        VectorStoreChatMemoryAdvisor vectorStoreChatMemoryAdvisor =
+            VectorStoreChatMemoryAdvisor.builder(vectorStore)
+                .build();
+
         this.chatClient = builder
             .defaultAdvisors(
                 skillsAdvisor,
-                MessageChatMemoryAdvisor.builder(chatMemory).build()
+                MessageChatMemoryAdvisor.builder(chatMemory).build(),
+                vectorStoreChatMemoryAdvisor
             )
             .defaultTools(skillTools)
             .build();

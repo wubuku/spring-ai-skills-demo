@@ -10,6 +10,7 @@
 - **分层 Skill 结构** - 支持 OpenAPI 规范生成的复杂技能
 - **PetStore Mock 后端** - 完整的 Swagger PetStore API 示例实现
 - **会话记忆系统** - 基于 H2 数据库的持久化对话记忆，支持多会话隔离
+- **🆕 语义记忆自动注入** - 基于 VectorStoreChatMemoryAdvisor，自动将相关历史对话注入到上下文
 - **确认模式** - 变更操作需用户手动确认后才执行
 - **OkHttp 重试机制** - 处理 LLM API 的间歇性网络问题
 - **🆕 CopilotKit 前端集成** - 现代化的 Next.js 15 + React 19 前端，支持 AG-UI 协议
@@ -117,7 +118,11 @@ MessageChatMemoryAdvisor
 
 ### 会话记忆系统
 
-基于 Spring AI 的 `JdbcChatMemoryRepository` + H2 文件数据库实现：
+基于 Spring AI 的双层记忆系统：
+
+#### 1. 短期记忆 - MessageChatMemoryAdvisor
+
+基于 `JdbcChatMemoryRepository` + H2 文件数据库实现：
 
 - **持久化存储**：对话历史保存在 `./data/chat-memory.mv.db`
 - **消息窗口**：保留最近 20 条消息，防止上下文过长
@@ -130,14 +135,39 @@ ChatMemory chatMemory = MessageWindowChatMemory.builder()
         .chatMemoryRepository(jdbcChatMemoryRepository)
         .maxMessages(20)
         .build();
+```
+
+#### 2. 长期记忆 - VectorStoreChatMemoryAdvisor 🆕
+
+基于向量存储的语义记忆自动注入机制，实现跨会话的上下文增强：
+
+- **自动注入**：每次对话自动检索相关历史记忆，无需手动调用
+- **语义匹配**：通过向量相似度在历史对话中查找相关内容
+- **跨会话关联**：同一 conversationId 的对话会被向量化和存储
+- **持久化**：向量数据存储在 `./data/vector-store.json`
+- **嵌入模型**：使用 SiliconFlow API（BAAI/bge-m3 模型，1024 维）
+
+```java
+// AgentService.java
+VectorStoreChatMemoryAdvisor vectorStoreChatMemoryAdvisor =
+    VectorStoreChatMemoryAdvisor.builder(vectorStore)
+        .build();
 
 this.chatClient = builder
     .defaultAdvisors(
         skillsAdvisor,
-        MessageChatMemoryAdvisor.builder(chatMemory).build()
+        MessageChatMemoryAdvisor.builder(chatMemory).build(),
+        vectorStoreChatMemoryAdvisor  // 语义记忆自动注入
     )
+    .defaultTools(skillTools)
     .build();
 ```
+
+**工作原理**：
+1. 用户发送消息时，`VectorStoreChatMemoryAdvisor.before()` 自动在向量存储中搜索相似的历史对话
+2. 搜索结果通过 `{long_term_memory}` 占位符自动注入到 Prompt 中
+3. LLM 在生成回复时能看到相关的历史记忆上下文
+4. `VectorStoreChatMemoryAdvisor.after()` 将当前对话内容存储到向量数据库
 
 ### Skills 格式
 
@@ -390,6 +420,42 @@ curl -s -X POST http://localhost:8080/api/chat \
 
 预期行为：Agent 会表示不记得（因为这是新会话）。
 
+### 3.1 语义记忆自动注入测试（VectorStoreChatMemoryAdvisor）🆕
+
+测试语义记忆自动注入功能：
+
+```bash
+# 第一次对话：告诉 Agent 你想要的商品类型
+curl -s -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"content":"帮我找一款3000元以下的耳机", "conversationId": "vector-test-001"}' \
+  --max-time 60
+```
+
+```bash
+# 第二次对话：使用语义相似的问题询问（Agent 会通过向量搜索找到之前的对话）
+curl -s -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"content":"刚才那个耳机具体价格是多少？", "conversationId": "vector-test-001"}' \
+  --max-time 60
+```
+
+预期行为：Agent 能理解"刚才那个耳机"指的是第一次对话中推荐的耳机，并能回答具体价格（2499元）。
+
+验证向量存储文件：
+```bash
+# 检查向量存储文件（应用关闭时自动创建）
+ls -la ./data/vector-store.json
+```
+
+预期结果：向量存储文件存在且有内容。
+
+自动注入原理：
+- 对话内容被转换为 1024 维向量（BAAI/bge-m3 模型）
+- 新消息会自动在向量数据库中搜索相似的历史对话
+- 搜索结果通过 `{long_term_memory}` 占位符自动注入到 Prompt
+- 无需手动调用，Advisor 隐式自动运行
+
 ### 4. 确认模式测试
 
 以 `confirm-before-mutate=true` 启动应用后，Agent 对变更操作（POST/PUT/DELETE）不会直接执行，而是返回包含 `` ```http-request `` 代码块的确认请求：
@@ -432,6 +498,9 @@ curl -s -X POST http://localhost:8080/api/chat \
 
 # PetStore 测试脚本（分层 Skill 场景）- 13 个测试用例
 ./test-petstore.sh
+
+# 向量存储测试脚本（语义记忆场景）🆕
+./test-vector-store-memory.sh
 ```
 
 测试脚本会自动启动应用、运行全部测试用例，最后输出通过/失败汇总。
@@ -454,7 +523,9 @@ spring-ai-skills-demo/
 │   ├── config/
 │   │   ├── SpringAiConfig.java     # OkHttp + 重试配置
 │   │   ├── AgUiConfig.java         # AG-UI 配置 🆕
-│   │   └── CorsConfig.java         # 跨域配置 🆕
+│   │   ├── CorsConfig.java         # 跨域配置 🆕
+│   │   ├── VectorStoreConfig.java  # 向量存储配置 🆕
+│   │   └── VectorStorePersistenceExecutor.java  # 向量持久化 🆕
 │   ├── controller/
 │   │   ├── ChatController.java     # 聊天 API
 │   │   ├── ProductController.java  # 商品 REST API
