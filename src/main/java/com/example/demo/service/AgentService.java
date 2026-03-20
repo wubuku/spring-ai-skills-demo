@@ -7,6 +7,7 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.VectorStoreChatMemoryAdvisor;
 import org.springframework.stereotype.Service;
 
@@ -34,11 +35,16 @@ public class AgentService {
             VectorStoreChatMemoryAdvisor.builder(vectorStore)
                 .build();
 
+        // 创建 QuestionAnswerAdvisor（用于 RAG 知识库问答）
+        QuestionAnswerAdvisor questionAnswerAdvisor = QuestionAnswerAdvisor.builder(vectorStore)
+            .build();
+
         this.chatClient = builder
             .defaultAdvisors(
                 skillsAdvisor,
                 MessageChatMemoryAdvisor.builder(chatMemory).build(),
-                vectorStoreChatMemoryAdvisor
+                vectorStoreChatMemoryAdvisor,
+                questionAnswerAdvisor
             )
             .defaultTools(skillTools)
             .build();
