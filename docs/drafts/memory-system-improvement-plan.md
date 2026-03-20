@@ -231,6 +231,16 @@ enum class MemoryType {
 
 ## 四、改进建议（适合 Demo 实现）
 
+**重要说明**: Spring AI 只提供了基础的记忆组件（`MessageChatMemoryAdvisor`、`VectorStoreChatMemoryAdvisor`、`QuestionAnswerAdvisor`），用于**对话历史的存储和检索**。但以下能力**没有内置解决方案**，需要自建：
+
+- 用户偏好提取（需要 LLM 调用）
+- 记忆合并/去重
+- 用户画像管理
+- 记忆权重/置信度
+- 记忆冲突解决
+
+这正是 Mem0、LangMem 等第三方库存在的价值。Demo 的改进方案基于 Spring AI Advisor API 构建自定义组件。
+
 ### 4.1 推荐方案: 用户偏好提取器
 
 **核心思路**: 在每次对话后，异步调用 LLM 提取用户偏好，存入 VectorStore
