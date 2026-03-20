@@ -9,11 +9,12 @@
 - **渐进式披露 Skills** - 三级加载机制：目录 → 技能文档 → 参考文件
 - **分层 Skill 结构** - 支持 OpenAPI 规范生成的复杂技能
 - **PetStore Mock 后端** - 完整的 Swagger PetStore API 示例实现
-- **会话记忆系统** - 基于 H2 数据库的持久化对话记忆，支持多会话隔离
+- **会话记忆系统** - 基于 JDBC 的持久化对话记忆，支持多会话隔离
 - **🆕 语义记忆自动注入** - 基于 VectorStoreChatMemoryAdvisor，自动将相关历史对话注入到上下文
 - **确认模式** - 变更操作需用户手动确认后才执行
 - **OkHttp 重试机制** - 处理 LLM API 的间歇性网络问题
 - **🆕 CopilotKit 前端集成** - 现代化的 Next.js 15 + React 19 前端，支持 AG-UI 协议
+- **🆕 双存储后端支持** - 默认 H2 文件数据库 + SimpleVectorStore，可切换为 PostgreSQL + PgVectorStore
 
 ## 技术栈
 
@@ -25,6 +26,8 @@
 | springdoc-openapi | 2.6.0 |
 | OkHttp | 4.12.0 |
 | H2 Database | 2.3.232 |
+| PostgreSQL | 16+ (可选) |
+| PgVector | 0.7+ (可选) |
 | Maven | 3.8+ |
 
 兼容任何 OpenAI API 兼容的 LLM 服务（OpenAI、DeepSeek 等）。
@@ -118,16 +121,26 @@ MessageChatMemoryAdvisor
 
 ### 会话记忆系统
 
-基于 Spring AI 的双层记忆系统：
+基于 Spring AI 的双层记忆系统，支持双存储后端切换：
+
+#### 存储后端配置
+
+| 配置 | 默认配置 | PostgreSQL 配置 |
+|------|---------|----------------|
+| 激活方式 | 无需设置（默认） | `SPRING_PROFILES_ACTIVE=postgresql` |
+| Chat Memory | H2 文件数据库 | PostgreSQL 数据库 |
+| Vector Store | SimpleVectorStore | PgVectorStore |
+| 数据文件 | `./data/chat-memory.mv.db` | PostgreSQL 服务器 |
+| 向量存储 | `./data/vector-store.json` | `vector_store` 表 |
 
 #### 1. 短期记忆 - MessageChatMemoryAdvisor
 
-基于 `JdbcChatMemoryRepository` + H2 文件数据库实现：
+基于 `JdbcChatMemoryRepository` 实现：
 
-- **持久化存储**：对话历史保存在 `./data/chat-memory.mv.db`
+- **默认配置**：H2 文件数据库 `./data/chat-memory.mv.db`
+- **PostgreSQL 配置**：PostgreSQL 数据库（`SPRING_AI_CHAT_MEMORY` 表）
 - **消息窗口**：保留最近 20 条消息，防止上下文过长
 - **多会话隔离**：通过 `conversationId` 区分不同会话
-- **自动配置**：使用 `spring-ai-starter-model-chat-memory-repository-jdbc` 自动配置
 
 ```java
 // AgentService.java
@@ -168,6 +181,10 @@ this.chatClient = builder
 2. 搜索结果通过 `{long_term_memory}` 占位符自动注入到 Prompt 中
 3. LLM 在生成回复时能看到相关的历史记忆上下文
 4. `VectorStoreChatMemoryAdvisor.after()` 将当前对话内容存储到向量数据库
+
+**向量存储后端**：
+- **默认配置**：SimpleVectorStore，持久化到 `./data/vector-store.json`
+- **PostgreSQL 配置**：PgVectorStore，持久化到 PostgreSQL `vector_store` 表（HNSW 索引）
 
 ### Skills 格式
 
@@ -236,19 +253,24 @@ LLM 工作流程：
 OPENAI_API_KEY=your-api-key
 OPENAI_BASE_URL=https://api.deepseek.com   # 或 https://api.openai.com
 OPENAI_MODEL=deepseek-chat                  # 或 gpt-4o
+
+# PostgreSQL 数据库配置（可选，用于 PostgreSQL profile）
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/spring-ai-skills-demo
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=123456
 ```
 
 ### 构建与运行
 
 ```bash
 # 加载环境变量
-set -a && source .env && set +a 
+set -a && source .env && set +a
 # set -a 用于开启allexport模式后加载.env，确保变量导出给子进程（Spring Boot应用）
 # source .env 加载环境变量
 # set +a 关闭allexport模式
 #
 # 另一种常见写法：
-# export $(cat .env | grep -v '^#' | xargs) 
+# export $(cat .env | grep -v '^#' | xargs)
 
 # 构建
 mvn clean package -DskipTests
@@ -256,8 +278,11 @@ mvn clean package -DskipTests
 # 如果需要重启服务，可以这样精准杀死在某个端口上运行的服务端进程：
 # lsof -ti:8080 -sTCP:LISTEN | xargs -r kill -9 2>/dev/null; echo "Killed server on port 8080"; sleep 1; lsof -ti:8080 || echo "Port 8080 is free"
 
-# 运行
+# 运行（默认配置：H2 + SimpleVectorStore）
 mvn spring-boot:run -DskipTests
+
+# 运行（PostgreSQL 配置：PostgreSQL + PgVectorStore）
+SPRING_PROFILES_ACTIVE=postgresql mvn spring-boot:run -DskipTests
 ```
 
 ### 访问地址
@@ -524,7 +549,9 @@ spring-ai-skills-demo/
 │   │   ├── SpringAiConfig.java     # OkHttp + 重试配置
 │   │   ├── AgUiConfig.java         # AG-UI 配置 🆕
 │   │   ├── CorsConfig.java         # 跨域配置 🆕
-│   │   ├── VectorStoreConfig.java  # 向量存储配置 🆕
+│   │   ├── VectorStoreConfig.java  # 向量存储配置（默认 SimpleVectorStore）
+│   │   ├── VectorStorePostgresqlConfig.java  # PgVectorStore 配置 🆕
+│   │   ├── EmbeddingModelConfig.java  # 共享嵌入模型配置 🆕
 │   │   └── VectorStorePersistenceExecutor.java  # 向量持久化 🆕
 │   ├── controller/
 │   │   ├── ChatController.java     # 聊天 API
@@ -581,9 +608,11 @@ spring-ai-skills-demo/
 │   ├── petstore.yaml              # OpenAPI 3.0 规范
 │   └── application.yml
 │
-├── data/                          # H2 数据库文件（自动创建）
+├── data/                          # H2 数据库文件（自动创建，默认配置）
 │   ├── chat-memory.mv.db          # 对话记忆数据库
 │   └── chat-memory.trace.db       # 数据库跟踪日志
+│
+├── application-postgresql.yml      # PostgreSQL 配置文件 🆕
 │
 ├── docs/drafts/                   # 文档草稿 🆕
 │   ├── enterprise-agent-frontend-guide-v4.md  # 前端集成指南
