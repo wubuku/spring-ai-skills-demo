@@ -6,18 +6,10 @@ spring:
   main:
     allow-bean-definition-overriding: true
 
-  # H2 文件型数据库（数据持久化到 ./data/chat-memory.mv.db）
-  datasource:
-    url: jdbc:h2:file:./data/chat-memory;DB_CLOSE_ON_EXIT=FALSE;DB_CLOSE_DELAY=-1;AUTO_RECONNECT=TRUE
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
-
-  # H2 控制台（调试用）
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+  # 默认排除 PgVectorStore 自动配置（当 postgresql profile 激活时会启用）
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration
 
   # Spring AI 配置
   ai:
@@ -61,6 +53,19 @@ spring:
       initial-interval: 3000
       multiplier: 2
 
+  # H2 文件型数据库（数据持久化到 ./data/chat-memory.mv.db）
+  datasource:
+    url: jdbc:h2:file:./data/chat-memory;DB_CLOSE_ON_EXIT=FALSE;DB_CLOSE_DELAY=-1;AUTO_RECONNECT=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  # H2 控制台（调试用）
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
 # SiliconFlow 嵌入模型配置（用于 VectorStoreChatMemoryAdvisor）
 siliconflow:
   api-key: ${SILICONFLOW_API_KEY:}
@@ -82,10 +87,6 @@ app:
     provider: ${LLM_PROVIDER:openai}
   api:
     base-url: http://localhost:${server.port:8080}
-  # confirm-before-mutate 配置已移除
-  # 原因：AG-UI + SSE + Spring AI 场景不支持用户态 Token 透传，后端不再试图"代表用户调用API"
-  # 任何可能需要用户 access token 的操作都推到前端，由用户在自己的浏览器中调用（浏览器总是有用户的 token）
-  # confirm-before-mutate: false
 
 server:
   port: 8080

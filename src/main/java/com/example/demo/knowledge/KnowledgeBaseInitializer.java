@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -54,11 +55,16 @@ public class KnowledgeBaseInitializer {
     private Document readFile(Path file) {
         try {
             String content = Files.readString(file);
-            String id = file.getFileName().toString().replace(".md", "");
+            // 使用 UUID 作为文档 ID（兼容 PgVectorStore 等需要 UUID 的 VectorStore）
+            // 原始文件名保存在 metadata 中
+            String originalId = file.getFileName().toString().replace(".md", "");
             return Document.builder()
-                .id(id)
+                .id(UUID.randomUUID().toString())
                 .text(content)
-                .metadata(java.util.Map.of("source", file.toString()))
+                .metadata(java.util.Map.of(
+                    "source", file.toString(),
+                    "originalId", originalId
+                ))
                 .build();
         } catch (IOException e) {
             log.error("读取文件失败: {}", file, e);

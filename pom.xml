@@ -82,16 +82,29 @@
             <artifactId>spring-ai-vector-store</artifactId>
         </dependency>
 
+        <!-- Spring AI PGVector Store Starter (通过 postgresql profile 切换使用) -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-vector-store-pgvector</artifactId>
+        </dependency>
+
         <!-- Spring AI Vector Store Advisors (包含 VectorStoreChatMemoryAdvisor) -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-advisors-vector-store</artifactId>
         </dependency>
 
-        <!-- H2 文件型数据库 -->
+        <!-- H2 文件型数据库 (默认使用) -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- PostgreSQL 数据库 (通过 postgresql profile 切换使用) -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
 
