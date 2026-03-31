@@ -248,6 +248,120 @@
             font-size: 12px;
             color: #888;
         }
+        /* 多模态输入样式 */
+        .multimodal-area {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .file-btn {
+            width: 42px;
+            height: 42px;
+            border: 2px solid #e0e0e0;
+            border-radius: 50%;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            font-size: 18px;
+        }
+        .file-btn:hover {
+            border-color: #667eea;
+            background: #f8f7ff;
+        }
+        .file-btn.recording {
+            border-color: #e74c3c;
+            background: #fee;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        .file-btn .tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        }
+        .file-btn:hover .tooltip {
+            opacity: 1;
+        }
+        .file-input {
+            display: none;
+        }
+        .preview-area {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+        .preview-item {
+            position: relative;
+            display: inline-block;
+        }
+        .preview-item img {
+            max-width: 80px;
+            max-height: 80px;
+            border-radius: 8px;
+            border: 2px solid #e0e0e0;
+        }
+        .preview-item audio {
+            max-width: 150px;
+            height: 30px;
+        }
+        .preview-item .remove-btn {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .recording-indicator {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            color: #e74c3c;
+            font-size: 13px;
+        }
+        .recording-indicator.active {
+            display: flex;
+        }
+        .recording-indicator .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #e74c3c;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .voice-duration {
+            font-family: monospace;
+            min-width: 35px;
+        }
     </style>
 </head>
 <body>
@@ -273,13 +387,37 @@
                 • 加入购物车：比如"把第二个加入购物车"<br>
                 • 结算订单：比如"帮我结算"<br>
                 <br>
-                <strong>提示：部分功能需要登录后才能使用</strong>
+                <strong>提示：部分功能需要登录后才能使用</strong><br>
+                <br>
+                <strong>多模态功能：</strong><br>
+                • <strong>图片上传</strong>：点击 📷 按钮选择图片<br>
+                • <strong>语音识别</strong>：点击 🎤 按钮开始录音，再次点击停止
             </div>
         </div>
+        <div class="preview-area" id="previewArea"></div>
         <div class="input-area">
             <input type="text" id="userInput" placeholder="输入你的需求..."
                    onkeypress="if(event.key==='Enter') sendMessage()">
-            <button id="sendBtn" onclick="sendMessage()">发送</button>
+            <div class="multimodal-area">
+                <!-- 图片上传按钮 -->
+                <button class="file-btn" onclick="document.getElementById('imageInput').click()" title="上传图片">
+                    <span class="tooltip">上传图片</span>
+                    📷
+                </button>
+                <input type="file" id="imageInput" class="file-input" accept="image/*" onchange="handleImageSelect(this)">
+                <!-- 语音录制按钮 -->
+                <button class="file-btn" id="voiceBtn" onclick="toggleVoiceRecording()" title="语音输入">
+                    <span class="tooltip">语音输入</span>
+                    🎤
+                </button>
+                <button id="sendBtn" onclick="sendMessage()">发送</button>
+            </div>
+        </div>
+        <div class="recording-indicator" id="recordingIndicator">
+            <span class="dot"></span>
+            <span>正在录音...</span>
+            <span class="voice-duration" id="voiceDuration">0:00</span>
+            <button onclick="toggleVoiceRecording()" style="margin-left:8px;padding:4px 8px;background:#e74c3c;color:white;border:none;border-radius:4px;cursor:pointer;">停止</button>
         </div>
     </div>
 
@@ -567,6 +705,305 @@
             btnContainer.appendChild(cancelBtn);
             msgDiv.appendChild(btnContainer);
             messages.scrollTop = messages.scrollHeight;
+        }
+
+        // ==================== 多模态支持：图片和语音 ====================
+
+        // 存储选中的图片和录制的音频
+        let selectedImages = [];
+        let recordedAudio = null;
+        let recordedAudioBlob = null;
+
+        // 图片选择处理
+        function handleImageSelect(input) {
+            const files = Array.from(input.files);
+            files.forEach(file => {
+                if (file.type.startsWith('image/')) {
+                    addImagePreview(file);
+                }
+            });
+            // 清空input以便再次选择同一张图片
+            input.value = '';
+        }
+
+        // 添加图片预览
+        function addImagePreview(file) {
+            const previewArea = document.getElementById('previewArea');
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const div = document.createElement('div');
+                div.className = 'preview-item';
+                div.dataset.filename = file.name;
+                div.dataset.filetype = 'image';
+
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                img.title = file.name;
+
+                const btn = document.createElement('button');
+                btn.className = 'remove-btn';
+                btn.innerHTML = '×';
+                btn.onclick = function() {
+                    removePreview(div);
+                    // 从selectedImages中移除
+                    selectedImages = selectedImages.filter(f => f.name !== file.name);
+                };
+
+                div.appendChild(img);
+                div.appendChild(btn);
+                previewArea.appendChild(div);
+
+                // 保存图片文件
+                selectedImages.push(file);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // 移除预览项
+        function removePreview(div) {
+            div.remove();
+            updatePreviewVisibility();
+        }
+
+        // 更新预览区可见性
+        function updatePreviewVisibility() {
+            const previewArea = document.getElementById('previewArea');
+            previewArea.style.display = (selectedImages.length > 0 || recordedAudioBlob) ? 'flex' : 'none';
+        }
+
+        // ==================== 语音录制 ====================
+
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let recordingStartTime = 0;
+        let recordingTimer = null;
+        let isRecording = false;
+
+        // 切换语音录制
+        async function toggleVoiceRecording() {
+            if (!isRecording) {
+                await startRecording();
+            } else {
+                stopRecording();
+            }
+        }
+
+        // 开始录音
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioChunks = [];
+
+                // 优先使用 webm 格式（大多数浏览器支持）
+                let mimeType = 'audio/webm;codecs=opus';
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                    mimeType = 'audio/webm';
+                    if (!MediaRecorder.isTypeSupported(mimeType)) {
+                        mimeType = 'audio/mp4';
+                        if (!MediaRecorder.isTypeSupported(mimeType)) {
+                            mimeType = ''; // 让浏览器自行选择
+                        }
+                    }
+                }
+
+                mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+
+                mediaRecorder.ondataavailable = function(e) {
+                    if (e.data.size > 0) {
+                        audioChunks.push(e.data);
+                    }
+                };
+
+                mediaRecorder.onstop = function() {
+                    const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+                    recordedAudioBlob = blob;
+                    recordedAudio = new File([blob], 'recording.webm', { type: 'audio/webm' });
+                    addAudioPreview();
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                recordingStartTime = Date.now();
+
+                // 更新UI
+                document.getElementById('voiceBtn').classList.add('recording');
+                document.getElementById('recordingIndicator').classList.add('active');
+
+                // 开始计时
+                recordingTimer = setInterval(updateRecordingDuration, 100);
+
+            } catch (error) {
+                console.error('无法访问麦克风:', error);
+                appendMessage('assistant', '无法访问麦克风，请检查浏览器权限设置。');
+            }
+        }
+
+        // 停止录音
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+
+            isRecording = false;
+            clearInterval(recordingTimer);
+
+            // 更新UI
+            document.getElementById('voiceBtn').classList.remove('recording');
+            document.getElementById('recordingIndicator').classList.remove('active');
+        }
+
+        // 更新录音时长显示
+        function updateRecordingDuration() {
+            const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            document.getElementById('voiceDuration').textContent =
+                minutes + ':' + seconds.toString().padStart(2, '0');
+        }
+
+        // 添加音频预览
+        function addAudioPreview() {
+            const previewArea = document.getElementById('previewArea');
+
+            const div = document.createElement('div');
+            div.className = 'preview-item';
+            div.id = 'audio-preview';
+            div.dataset.filetype = 'audio';
+
+            const audio = document.createElement('audio');
+            audio.controls = true;
+            audio.src = URL.createObjectURL(recordedAudioBlob);
+
+            const btn = document.createElement('button');
+            btn.className = 'remove-btn';
+            btn.innerHTML = '×';
+            btn.onclick = function() {
+                removePreview(div);
+                recordedAudio = null;
+                recordedAudioBlob = null;
+            };
+
+            div.appendChild(audio);
+            div.appendChild(btn);
+            previewArea.appendChild(div);
+
+            updatePreviewVisibility();
+        }
+
+        // ==================== 发送消息（支持多模态） ====================
+
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const messages = document.getElementById('messages');
+            const userMessage = input.value.trim();
+
+            // 如果没有输入且没有附件，直接返回
+            if (!userMessage && selectedImages.length === 0 && !recordedAudio) {
+                return;
+            }
+
+            // 如果正在录音，先停止
+            if (isRecording) {
+                stopRecording();
+            }
+
+            // 显示用户消息（包含附件信息）
+            let displayContent = userMessage;
+            if (selectedImages.length > 0 || recordedAudio) {
+                const attachments = [];
+                if (selectedImages.length > 0) {
+                    attachments.push(`[图片: ${selectedImages.length}张]`);
+                }
+                if (recordedAudio) {
+                    attachments.push('[语音]');
+                }
+                displayContent = userMessage + '\n' + attachments.join(' ');
+            }
+            appendMessage('user', displayContent);
+            input.value = '';
+            sendBtn.disabled = true;
+
+            // 显示加载中
+            const loadingDiv = appendMessage('assistant', '<span class="loading"></span> 正在处理...');
+
+            try {
+                let response;
+                let data;
+
+                // 判断是否需要使用多模态接口（上传了图片或音频）
+                const hasAttachments = selectedImages.length > 0 || recordedAudio;
+
+                if (hasAttachments) {
+                    // 使用 FormData 发送多模态请求
+                    const formData = new FormData();
+                    if (userMessage) {
+                        formData.append('query', userMessage);
+                    }
+                    formData.append('conversationId', 'default');
+
+                    // 添加图片
+                    selectedImages.forEach(file => {
+                        formData.append('image', file);
+                    });
+
+                    // 添加音频
+                    if (recordedAudio) {
+                        formData.append('audio', recordedAudio);
+                    }
+
+                    const authHeaders = {};
+                    const token = localStorage.getItem('auth_token');
+                    if (token) {
+                        authHeaders['Authorization'] = 'Bearer ' + token;
+                    }
+
+                    response = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: authHeaders,
+                        body: formData
+                    });
+                    data = await response.json();
+                } else {
+                    // 使用 JSON 发送纯文本请求（保持向后兼容）
+                    response = await fetch('/api/chat/text', {
+                        method: 'POST',
+                        headers: getAuthHeaders(),
+                        body: JSON.stringify({ query: userMessage, conversationId: 'default' })
+                    });
+                    data = await response.json();
+                }
+
+                messages.removeChild(loadingDiv);
+
+                // 检测是否包含需要用户确认的操作
+                const confirmAction = parseConfirmAction(data.response);
+                if (confirmAction) {
+                    showConfirmAction(confirmAction);
+                } else {
+                    appendMessage('assistant', data.response);
+                }
+
+                // 清理附件
+                clearAttachments();
+
+            } catch (error) {
+                messages.removeChild(loadingDiv);
+                appendMessage('assistant', '抱歉，服务出问题了：' + error.message);
+            } finally {
+                sendBtn.disabled = false;
+                input.focus();
+            }
+        }
+
+        // 清理所有附件
+        function clearAttachments() {
+            selectedImages = [];
+            recordedAudio = null;
+            recordedAudioBlob = [];
+            document.getElementById('previewArea').innerHTML = '';
+            updatePreviewVisibility();
         }
     </script>
 </body>
