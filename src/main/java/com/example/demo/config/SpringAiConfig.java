@@ -10,14 +10,18 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.anthropic.api.AnthropicApi;
+import org.springframework.ai.audio.transcription.TranscriptionModel;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.openai.api.OpenAiAudioApi;
+import org.springframework.ai.openai.OpenAiAudioTranscriptionModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -76,6 +80,24 @@ public class SpringAiConfig {
 
     @Value("${spring.ai.anthropic.chat.options.max-tokens}")
     private Integer anthropicMaxTokens;
+
+    @Value("${vision.base-url}")
+    private String visionBaseUrl;
+
+    @Value("${vision.api-key}")
+    private String visionApiKey;
+
+    @Value("${vision.model}")
+    private String visionModel;
+
+    @Value("${transcription.base-url}")
+    private String transcriptionBaseUrl;
+
+    @Value("${transcription.api-key}")
+    private String transcriptionApiKey;
+
+    @Value("${transcription.model}")
+    private String transcriptionModelName;
 
     @Bean
     @Primary
@@ -277,5 +299,313 @@ public class SpringAiConfig {
         ChatModel chatModel = availableModels.get(0);
         log.info("Creating ChatClient with model: {}", chatModel.getClass().getSimpleName());
         return ChatClient.create(chatModel);
+    }
+
+    /**
+     * 视觉模型 ChatClient Bean（用于图片理解）
+     * 使用火山方舟/豆包视觉 API
+     */
+    @Bean("visionChatClient")
+    public ChatClient visionChatClient() {
+        if (visionBaseUrl == null || visionBaseUrl.isBlank() ||
+            visionApiKey == null || visionApiKey.isBlank() ||
+            visionModel == null || visionModel.isBlank()) {
+            log.warn("Vision configuration is incomplete. visionChatClient will not be created.");
+            return ChatClient.create(invocation -> {
+                throw new IllegalStateException("visionChatClient not configured. Set vision.base-url, vision.api-key, and vision.model.");
+            });
+        }
+
+        log.info("Creating Vision ChatClient: baseUrl={}, model={}", visionBaseUrl, visionModel);
+
+        OpenAiApi visionApi = OpenAiApi.builder()
+                .baseUrl(visionBaseUrl)
+                .apiKey(visionApiKey)
+                .webClientBuilder(WebClient.builder())
+                .build();
+
+        OpenAiChatModel visionChatModel = OpenAiChatModel.builder()
+                .openAiApi(visionApi)
+                .defaultOptions(OpenAiChatOptions.builder()
+                        .model(visionModel)
+                        .build())
+                .build();
+
+        return ChatClient.create(visionChatModel);
+    }
+
+    /**
+     * 语音转写模型 Bean（用于语音转文字）
+     * 使用智谱 GLM-ASR API（需要 /v4/audio/transcriptions 端点）
+     */
+    @Bean
+    public TranscriptionModel transcriptionModel(RestClient.Builder restClientBuilder) {
+        if (transcriptionBaseUrl == null || transcriptionBaseUrl.isBlank() ||
+            transcriptionApiKey == null || transcriptionApiKey.isBlank() ||
+            transcriptionModelName == null || transcriptionModelName.isBlank()) {
+            log.warn("Transcription configuration is incomplete. Creating no-op TranscriptionModel.");
+            return new TranscriptionModel() {
+                @Override
+                public org.springframework.ai.audio.transcription.AudioTranscriptionResponse call(
+                        org.springframework.ai.audio.transcription.AudioTranscriptionPrompt prompt) {
+                    return new org.springframework.ai.audio.transcription.AudioTranscriptionResponse(
+                            new org.springframework.ai.audio.transcription.AudioTranscription("【语音转写功能未配置，无法处理音频】"));
+                }
+            };
+        }
+
+        log.info("Creating Custom TranscriptionModel for GLM-ASR: baseUrl={}, model={}", transcriptionBaseUrl, transcriptionModelName);
+
+        // 智谱 GLM-ASR 使用 /v4/audio/transcriptions 端点
+        final String glmAsrEndpoint = transcriptionBaseUrl.endsWith("/")
+            ? transcriptionBaseUrl + "v4/audio/transcriptions"
+            : transcriptionBaseUrl + "/v4/audio/transcriptions";
+        final String apiKey = transcriptionApiKey;
+        final String model = transcriptionModelName;
+
+        return new TranscriptionModel() {
+            @Override
+            public org.springframework.ai.audio.transcription.AudioTranscriptionResponse call(
+                    org.springframework.ai.audio.transcription.AudioTranscriptionPrompt prompt) {
+
+                try {
+                    // AudioTranscriptionPrompt.getInstructions() 返回 Resource
+                    org.springframework.core.io.Resource audioResource = prompt.getInstructions();
+                    String originalFilename = "audio.mp3";
+
+                    // 尝试获取原始文件名
+                    if (audioResource instanceof org.springframework.core.io.FileSystemResource) {
+                        java.io.File file = ((org.springframework.core.io.FileSystemResource) audioResource).getFile();
+                        originalFilename = file.getName();
+                    }
+
+                    if (audioResource == null) {
+                        org.springframework.ai.audio.transcription.AudioTranscription audio =
+                            new org.springframework.ai.audio.transcription.AudioTranscription("【语音转写失败】无法获取音频资源");
+                        return new org.springframework.ai.audio.transcription.AudioTranscriptionResponse(audio);
+                    }
+
+                    // 调用转写方法
+                    String result = doTranscribe(audioResource, originalFilename);
+                    org.springframework.ai.audio.transcription.AudioTranscription audioTranscription =
+                        new org.springframework.ai.audio.transcription.AudioTranscription(result);
+                    return new org.springframework.ai.audio.transcription.AudioTranscriptionResponse(audioTranscription);
+
+                } catch (Exception e) {
+                    log.error("GLM-ASR 转写失败: {}", e.getMessage(), e);
+                    org.springframework.ai.audio.transcription.AudioTranscription audio =
+                        new org.springframework.ai.audio.transcription.AudioTranscription("【语音转写失败】" + e.getMessage());
+                    return new org.springframework.ai.audio.transcription.AudioTranscriptionResponse(audio);
+                }
+            }
+
+            @Override
+            public String transcribe(org.springframework.core.io.Resource audioResource) {
+                // MultimodalAgentService 调用此方法
+                try {
+                    String originalFilename = "audio.mp3";
+
+                    // 尝试获取原始文件名
+                    if (audioResource instanceof org.springframework.core.io.FileSystemResource) {
+                        java.io.File file = ((org.springframework.core.io.FileSystemResource) audioResource).getFile();
+                        originalFilename = file.getName();
+                    }
+
+                    return doTranscribe(audioResource, originalFilename);
+
+                } catch (Exception e) {
+                    log.error("GLM-ASR 转写失败: {}", e.getMessage(), e);
+                    return "【语音转写失败】" + e.getMessage();
+                }
+            }
+
+            private String doTranscribe(org.springframework.core.io.Resource audioResource, String filename) {
+                try {
+                    // 读取音频文件内容
+                    byte[] audioBytes;
+                    try (java.io.InputStream is = audioResource.getInputStream()) {
+                        audioBytes = is.readAllBytes();
+                    }
+
+                    // 确保音频为单声道格式（GLM ASR 要求）
+                    audioBytes = ensureMonoAudio(audioBytes, filename);
+
+                    // 使用 HttpURLConnection 发送 multipart 请求
+                    java.net.URL url = new java.net.URL(glmAsrEndpoint);
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setDoOutput(true);
+                    conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+
+                    String boundary = "----SpringFormBoundary" + System.currentTimeMillis();
+                    conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+
+                    try (java.io.OutputStream os = conn.getOutputStream()) {
+                        String partBoundary = "--" + boundary;
+
+                        // 写入 file 部分
+                        os.write((partBoundary + "\r\n").getBytes());
+                        os.write(("Content-Disposition: form-data; name=\"file\"; filename=\"" + filename + "\"\r\n").getBytes());
+                        os.write("Content-Type: audio/mpeg\r\n\r\n".getBytes());
+                        os.write(audioBytes);
+                        os.write("\r\n".getBytes());
+
+                        // 写入 model 部分
+                        os.write((partBoundary + "\r\n").getBytes());
+                        os.write("Content-Disposition: form-data; name=\"model\"\r\n\r\n".getBytes());
+                        os.write(model.getBytes());
+                        os.write("\r\n".getBytes());
+
+                        // 写入 stream 部分
+                        os.write((partBoundary + "\r\n").getBytes());
+                        os.write("Content-Disposition: form-data; name=\"stream\"\r\n\r\n".getBytes());
+                        os.write("false".getBytes());
+                        os.write("\r\n".getBytes());
+
+                        // 结束边界
+                        os.write((partBoundary + "--\r\n").getBytes());
+                    }
+
+                    // 读取响应
+                    StringBuilder responseBuilder = new StringBuilder();
+                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(conn.getInputStream()))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            responseBuilder.append(line);
+                        }
+                    }
+
+                    // 解析 JSON 响应
+                    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    com.fasterxml.jackson.databind.JsonNode jsonNode = mapper.readTree(responseBuilder.toString());
+                    return jsonNode.has("text") ? jsonNode.get("text").asText() : responseBuilder.toString();
+
+                } catch (Exception e) {
+                    log.error("GLM-ASR API 调用失败: {}", e.getMessage(), e);
+                    return "【语音转写失败】" + e.getMessage();
+                }
+            }
+
+            /**
+             * 确保音频为单声道格式（GLM ASR 要求），返回处理后的音频字节数组
+             */
+            private byte[] ensureMonoAudio(byte[] audioBytes, String filename) {
+                // 创建临时文件
+                java.io.File tempInput = null;
+                java.io.File tempOutput = null;
+                try {
+                    tempInput = java.io.File.createTempFile("glm_asr_input_", getFileExtension(filename));
+                    tempInput.deleteOnExit();
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tempInput)) {
+                        fos.write(audioBytes);
+                    }
+
+                    // 检查音频通道数
+                    int channels = getAudioChannels(tempInput);
+                    log.debug("音频通道数: {}", channels);
+
+                    if (channels <= 1) {
+                        log.debug("音频已是单声道，直接使用");
+                        return audioBytes;
+                    }
+
+                    // 需要转换为单声道
+                    log.info("音频为 {} 声道，转换为单声道...", channels);
+                    tempOutput = java.io.File.createTempFile("glm_asr_mono_", getFileExtension(filename));
+                    tempOutput.deleteOnExit();
+
+                    boolean converted = convertToMono(tempInput, tempOutput);
+                    if (converted && tempOutput.exists()) {
+                        return java.nio.file.Files.readAllBytes(tempOutput.toPath());
+                    }
+
+                    log.warn("音频转换失败，使用原始音频");
+                    return audioBytes;
+
+                } catch (Exception e) {
+                    log.error("音频格式处理失败: {}", e.getMessage(), e);
+                    return audioBytes;
+                } finally {
+                    // 清理临时文件
+                    if (tempInput != null && tempInput.exists()) {
+                        tempInput.delete();
+                    }
+                    if (tempOutput != null && tempOutput.exists()) {
+                        tempOutput.delete();
+                    }
+                }
+            }
+
+            private String getFileExtension(String filename) {
+                if (filename == null || !filename.contains(".")) {
+                    return ".mp3";
+                }
+                return filename.substring(filename.lastIndexOf("."));
+            }
+
+            private int getAudioChannels(java.io.File audioFile) {
+                try {
+                    ProcessBuilder pb = new ProcessBuilder(
+                        "ffprobe", "-v", "quiet",
+                        "-show_entries", "stream=channels",
+                        "-of", "csv=p=0",
+                        audioFile.getAbsolutePath()
+                    );
+                    pb.redirectErrorStream(true);
+                    Process process = pb.start();
+
+                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(process.getInputStream()))) {
+                        String line = reader.readLine();
+                        if (line != null && !line.trim().isEmpty()) {
+                            return Integer.parseInt(line.trim());
+                        }
+                    }
+
+                    int exitCode = process.waitFor();
+                    if (exitCode != 0) {
+                        log.warn("ffprobe 返回非零退出码: {}", exitCode);
+                    }
+                } catch (Exception e) {
+                    log.warn("获取音频通道数失败: {}", e.getMessage());
+                }
+                return -1; // 无法确定，假设单声道
+            }
+
+            private boolean convertToMono(java.io.File input, java.io.File output) {
+                try {
+                    ProcessBuilder pb = new ProcessBuilder(
+                        "ffmpeg", "-y", "-v", "quiet",
+                        "-i", input.getAbsolutePath(),
+                        "-ac", "1",
+                        "-ar", "16000",
+                        output.getAbsolutePath()
+                    );
+                    pb.redirectErrorStream(true);
+                    Process process = pb.start();
+                    int exitCode = process.waitFor();
+
+                    if (exitCode == 0 && output.exists()) {
+                        log.info("音频已成功转换为单声道");
+                        return true;
+                    } else {
+                        // 读取错误输出
+                        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                                new java.io.InputStreamReader(process.getErrorStream()))) {
+                            StringBuilder error = new StringBuilder();
+                            String line;
+                            while ((line = reader.readLine()) != null) {
+                                error.append(line).append("\n");
+                            }
+                            log.warn("ffmpeg 转换失败，退出码: {}, 错误: {}", exitCode, error);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("ffmpeg 转换失败: {}", e.getMessage(), e);
+                }
+                return false;
+            }
+        };
     }
 }

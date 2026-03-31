@@ -37,6 +37,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/products/*").permitAll()
                 .requestMatchers("/api/products/**").permitAll()
                 .requestMatchers("/api/chat").permitAll()
+                .requestMatchers("/api/chat/**").permitAll()
                 .requestMatchers("/api/explain-result").permitAll()
                 .requestMatchers("/api/agui/**").permitAll()
                 // PetStore API 公开端点

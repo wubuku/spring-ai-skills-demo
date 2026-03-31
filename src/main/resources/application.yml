@@ -2,6 +2,10 @@ spring:
   application:
     name: spring-ai-skills-demo
 
+  # 默认使用 PostgreSQL（与 .env 中的 SPRING_DATASOURCE_URL 一致）
+  profiles:
+    active: postgresql
+
   # 允许 Bean 定义覆盖（解决自定义配置与自动配置冲突）
   main:
     allow-bean-definition-overriding: true
@@ -10,6 +14,12 @@ spring:
   autoconfigure:
     exclude:
       - org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration
+
+  # 文件上传配置
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
 
   # Spring AI 配置
   ai:
@@ -87,6 +97,18 @@ app:
     provider: ${LLM_PROVIDER:openai}
   api:
     base-url: http://localhost:${server.port:8080}
+
+# 视觉模型配置（火山方舟/豆包视觉）
+vision:
+  base-url: ${VISION_BASE_URL:}
+  api-key: ${VISION_API_KEY:}
+  model: ${VISION_MODEL:}
+
+# 语音转写配置（智谱 GLM-ASR）
+transcription:
+  base-url: ${TRANSCRIPTION_BASE_URL:}
+  api-key: ${TRANSCRIPTION_API_KEY:}
+  model: ${TRANSCRIPTION_MODEL:}
 
 server:
   port: 8080
