@@ -86,11 +86,27 @@ spring:
       path: /h2-console
 
 # SiliconFlow 嵌入模型配置（用于 VectorStoreChatMemoryAdvisor）
+# ⚠️ 重要提示：base-url 千万不要带 /v1 路径！
+# Spring AI 的 OpenAiEmbeddingModel 会自动在 base-url 后追加 /v1/embeddings
+# 如果配置了 /v1，最终 URL 会变成 https://api.siliconflow.cn/v1/v1/embeddings，导致 404 错误！
+# 正确示例：https://api.siliconflow.cn
+# 错误示例：https://api.siliconflow.cn/v1 ❌
 siliconflow:
   api-key: ${SILICONFLOW_API_KEY:}
-  base-url: ${SILICONFLOW_URL:https://api.siliconflow.cn/v1}
+  base-url: ${SILICONFLOW_URL:https://api.siliconflow.cn}
   model: ${SILICONFLOW_MODEL:BAAI/bge-m3}
   dimensions: ${SILICONFLOW_DIMENSIONS:1024}
+
+# 知识库配置
+knowledge-base:
+  # 知识库路径列表，支持类路径（classpath:）和文件系统路径（file:）
+  # 可以通过环境变量 KNOWLEDGE_BASE_PATHS 覆盖，多个路径用逗号分隔
+  # 例如：
+  #   KNOWLEDGE_BASE_PATHS=classpath:knowledge-base/*.md,file:/opt/knowledge/*.md
+  #   - classpath:knowledge-base/*.md
+  #   - file:/opt/knowledge/*.md
+  #   - file:/Users/xxx/Documents/knowledge/**/*.md
+  paths: ${KNOWLEDGE_BASE_PATHS:classpath:knowledge-base/*.md}
 
 # 确保 observation 开启
 management:

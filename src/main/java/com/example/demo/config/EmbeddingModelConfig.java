@@ -22,7 +22,10 @@ public class EmbeddingModelConfig {
     @Value("${siliconflow.api-key:}")
     private String siliconFlowApiKey;
 
-    @Value("${siliconflow.base-url:https://api.siliconflow.cn/v1}")
+    // ⚠️ 重要：base-url 不要带 /v1 路径！
+    // Spring AI 的 OpenAiEmbeddingModel 会自动追加 /v1/embeddings
+    // 如果这里带了 /v1，最终 URL 会变成 https://api.siliconflow.cn/v1/v1/embeddings，导致 404 错误！
+    @Value("${siliconflow.base-url:https://api.siliconflow.cn}")
     private String siliconFlowBaseUrl;
 
     @Value("${siliconflow.model:BAAI/bge-m3}")

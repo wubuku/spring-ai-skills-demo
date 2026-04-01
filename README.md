@@ -655,6 +655,105 @@ ls -la ./data/vector-store.json
 - 搜索结果通过 `{long_term_memory}` 占位符自动注入到 Prompt
 - 无需手动调用，Advisor 隐式自动运行
 
+### 3.2 多路径知识库测试（RAG）🆕
+
+测试从多个路径加载知识库文档，支持类路径和文件系统路径混合配置：
+
+**1. 创建文件系统知识库目录**
+
+```bash
+mkdir -p /tmp/test-knowledge-base
+```
+
+创建测试文档 `/tmp/test-knowledge-base/store-hours.md`：
+
+```markdown
+# 商店营业时间
+
+## 正常营业时间
+
+- **周一至周五**: 上午 9:00 - 晚上 9:00
+- **周六至周日**: 上午 10:00 - 晚上 10:00
+```
+
+创建测试文档 `/tmp/test-knowledge-base/return-policy.md`：
+
+```markdown
+# 退换货政策
+
+## 退货条件
+
+1. **时间限制**: 自购买之日起 30 天内可申请退货
+2. **商品状态**: 商品必须保持原包装完好
+```
+
+**2. 配置多路径知识库**
+
+通过环境变量配置多个知识库路径（逗号分隔）：
+
+```bash
+export KNOWLEDGE_BASE_PATHS="classpath:knowledge-base/*.md,file:/tmp/test-knowledge-base/*.md"
+```
+
+或在 `.env` 文件中添加：
+
+```bash
+KNOWLEDGE_BASE_PATHS=classpath:knowledge-base/*.md,file:/tmp/test-knowledge-base/*.md
+```
+
+路径格式说明：
+- `classpath:knowledge-base/*.md` - 加载类路径下的知识库文件
+- `file:/tmp/test-knowledge-base/*.md` - 加载文件系统的知识库文件
+- 支持通配符 `*` 和 `**`（递归匹配子目录）
+
+**3. 启动应用并测试 RAG**
+
+```bash
+export $(cat .env | grep -v '^#' | xargs)
+export KNOWLEDGE_BASE_PATHS="classpath:knowledge-base/*.md,file:/tmp/test-knowledge-base/*.md"
+mvn spring-boot:run -DskipTests
+```
+
+观察启动日志，确认从两个路径加载了文档：
+
+```
+INFO  c.e.d.k.KnowledgeBaseInitializer : 开始加载知识库，配置的路径列表: [classpath:knowledge-base/*.md, file:/tmp/test-knowledge-base/*.md]
+INFO  c.e.d.k.KnowledgeBaseInitializer : 从路径 [classpath:knowledge-base/*.md] 加载了 3 个文档
+INFO  c.e.d.k.KnowledgeBaseInitializer : 从路径 [file:/tmp/test-knowledge-base/*.md] 加载了 2 个文档
+INFO  c.e.d.k.KnowledgeBaseInitializer : 知识库加载完成，共 5 篇文档
+```
+
+**4. 测试 RAG 问答**
+
+测试文件系统知识库的问答：
+
+```bash
+# 测试商店营业时间（来自文件系统知识库）
+curl -s -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "你们的商店周末几点开门？"}'
+```
+
+预期回复包含：周六至周日上午 10:00 开门
+
+```bash
+# 测试退换货政策（来自文件系统知识库）
+curl -s -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "我买了件衣服想退货，有什么要求？"}'
+```
+
+预期回复包含：30 天内可申请退货、保持原包装完好等信息
+
+**5. 配置示例**
+
+| 场景 | 配置值 |
+|------|--------|
+| 默认（仅类路径） | `classpath:knowledge-base/*.md` |
+| 类路径 + 文件系统 | `classpath:knowledge-base/*.md,file:/opt/knowledge/*.md` |
+| 多个文件系统路径 | `file:/data/kb/*.md,file:/opt/docs/**/*.md` |
+| Docker 环境 | `classpath:knowledge-base/*.md,file:/app/knowledge/*.md` |
+
 ### 4. 确认模式测试
 
 以 `confirm-before-mutate=true` 启动应用后，Agent 对变更操作（POST/PUT/DELETE）不会直接执行，而是返回包含 `` ```http-request `` 代码块的确认请求：
