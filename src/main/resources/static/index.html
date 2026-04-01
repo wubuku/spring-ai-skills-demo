@@ -814,10 +814,18 @@
                     }
                 };
 
-                mediaRecorder.onstop = function() {
+                mediaRecorder.onstop = async function() {
                     const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
                     recordedAudioBlob = blob;
-                    recordedAudio = new File([blob], 'recording.webm', { type: 'audio/webm' });
+
+                    // 将 webm/opus 转换为 WAV 格式（智谱 GLM-ASR 不支持 webm）
+                    try {
+                        const wavBlob = await convertToWav(blob);
+                        recordedAudio = new File([wavBlob], 'recording.wav', { type: 'audio/wav' });
+                    } catch (e) {
+                        console.error('WAV 转换失败，使用原始格式:', e);
+                        recordedAudio = new File([blob], 'recording.webm', { type: 'audio/webm' });
+                    }
                     addAudioPreview();
                 };
 
@@ -860,6 +868,79 @@
             const seconds = elapsed % 60;
             document.getElementById('voiceDuration').textContent =
                 minutes + ':' + seconds.toString().padStart(2, '0');
+        }
+
+        /**
+         * 将 webm/opus 音频 Blob 转换为 WAV 格式
+         * 使用 Web Audio API 解码并重新编码为 PCM WAV
+         */
+        async function convertToWav(blob) {
+            // 创建 AudioContext（使用 16000Hz 采样率，智谱 ASR 推荐）
+            const audioContext = new AudioContext({ sampleRate: 16000 });
+
+            // 解码音频数据
+            const arrayBuffer = await blob.arrayBuffer();
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+            // 转换为单声道 WAV
+            const wavBuffer = encodeWavMono(audioBuffer, 16000);
+
+            await audioContext.close();
+
+            return new Blob([wavBuffer], { type: 'audio/wav' });
+        }
+
+        /**
+         * 编码 AudioBuffer 为单声道 16-bit PCM WAV 格式
+         */
+        function encodeWavMono(audioBuffer, sampleRate) {
+            const numChannels = 1;  // 单声道
+            const bitsPerSample = 16;  // 16-bit
+            const bytesPerSample = bitsPerSample / 8;
+            const blockAlign = numChannels * bytesPerSample;
+            const byteRate = sampleRate * blockAlign;
+            const dataSize = audioBuffer.length * bytesPerSample;
+            const bufferSize = 44 + dataSize;  // WAV header 44 bytes
+
+            const buffer = new ArrayBuffer(bufferSize);
+            const view = new DataView(buffer);
+
+            // RIFF header
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, bufferSize - 8, true);  // file size - 8
+            writeString(view, 8, 'WAVE');
+
+            // fmt chunk
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);  // chunk size
+            view.setUint16(20, 1, true);   // PCM format
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true);
+
+            // data chunk
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataSize, true);
+
+            // 写入 PCM 数据（单声道）
+            const channelData = audioBuffer.getChannelData(0);
+            let offset = 44;
+            for (let i = 0; i < channelData.length; i++) {
+                const sample = Math.max(-1, Math.min(1, channelData[i]));
+                const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                view.setInt16(offset, intSample, true);
+                offset += 2;
+            }
+
+            return buffer;
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
         }
 
         // 添加音频预览

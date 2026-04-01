@@ -31,6 +31,7 @@ import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.io.InputStream;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -464,8 +465,14 @@ public class SpringAiConfig {
                         audioBytes = is.readAllBytes();
                     }
 
+                    log.info("原始音频文件: {}, 大小: {} bytes", filename, audioBytes.length);
+
                     // 确保音频为单声道格式（GLM ASR 要求）
                     audioBytes = ensureMonoAudio(audioBytes, filename);
+
+                    // 前端已转换为 WAV 格式，直接使用 audio/wav
+                    String contentType = "audio/wav";
+                    log.info("使用 Content-Type: {}", contentType);
 
                     // 使用 HttpURLConnection 发送 multipart 请求
                     java.net.URL url = new java.net.URL(glmAsrEndpoint);
@@ -483,7 +490,7 @@ public class SpringAiConfig {
                         // 写入 file 部分
                         os.write((partBoundary + "\r\n").getBytes());
                         os.write(("Content-Disposition: form-data; name=\"file\"; filename=\"" + filename + "\"\r\n").getBytes());
-                        os.write("Content-Type: audio/mpeg\r\n\r\n".getBytes());
+                        os.write(("Content-Type: " + contentType + "\r\n\r\n").getBytes());
                         os.write(audioBytes);
                         os.write("\r\n".getBytes());
 
@@ -504,19 +511,32 @@ public class SpringAiConfig {
                     }
 
                     // 读取响应
+                    int responseCode = conn.getResponseCode();
+                    log.info("GLM-ASR 响应码: {}", responseCode);
+
+                    InputStream responseStream = (responseCode >= 400) ? conn.getErrorStream() : conn.getInputStream();
                     StringBuilder responseBuilder = new StringBuilder();
-                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(conn.getInputStream()))) {
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            responseBuilder.append(line);
+                    if (responseStream != null) {
+                        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                                new java.io.InputStreamReader(responseStream))) {
+                            String line;
+                            while ((line = reader.readLine()) != null) {
+                                responseBuilder.append(line);
+                            }
                         }
+                    }
+
+                    String responseBody = responseBuilder.toString();
+                    log.info("GLM-ASR 响应体: {}", responseBody);
+
+                    if (responseCode >= 400) {
+                        return "【语音转写失败】HTTP " + responseCode + ": " + responseBody;
                     }
 
                     // 解析 JSON 响应
                     com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-                    com.fasterxml.jackson.databind.JsonNode jsonNode = mapper.readTree(responseBuilder.toString());
-                    return jsonNode.has("text") ? jsonNode.get("text").asText() : responseBuilder.toString();
+                    com.fasterxml.jackson.databind.JsonNode jsonNode = mapper.readTree(responseBody);
+                    return jsonNode.has("text") ? jsonNode.get("text").asText() : responseBody;
 
                 } catch (Exception e) {
                     log.error("GLM-ASR API 调用失败: {}", e.getMessage(), e);
