@@ -1,0 +1,66 @@
+# Git
+.git
+.gitignore
+.gitmodules
+
+# IDE
+.idea
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings
+.vscode
+*.swp
+*.swo
+
+# Build output
+target/
+!target/*.jar
+build/
+*.class
+
+# Maven
+.mvn/
+mvnw
+mvnw.cmd
+
+# Logs
+*.log
+logs/
+
+# Test reports
+test-output/
+surefire-reports/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Frontend (optional, if you want to include it in the image, remove this line)
+# frontend/
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Environment files (security)
+.env
+.env.*
+!.env.example
+
+# Data directories (will be mounted as volumes)
+data/
+
+# Scripts
+*.sh
+
+# AG-UI submodule (if not needed in the image)
+ag-ui-4j/

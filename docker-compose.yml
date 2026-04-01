@@ -1,0 +1,87 @@
+# Spring AI Skills Demo - Docker Compose 配置
+# 支持两种部署模式：
+# 1. 默认模式（H2 数据库）：适合快速体验和开发测试
+# 2. PostgreSQL 模式：适合生产环境，需要外部 PostgreSQL 数据库
+
+version: '3.8'
+
+services:
+  # Java 后端服务
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spring-ai-skills-demo
+    ports:
+      - "8080:8080"
+    environment:
+      # LLM 配置（必需）
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      
+      # Anthropic 配置（可选）
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}
+      
+      # LLM Provider 选择（openai 或 anthropic）
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      
+      # SiliconFlow 嵌入模型配置（用于向量记忆）
+      - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY:-}
+      - SILICONFLOW_URL=${SILICONFLOW_URL:-https://api.siliconflow.cn/v1}
+      - SILICONFLOW_MODEL=${SILICONFLOW_MODEL:-BAAI/bge-m3}
+      - SILICONFLOW_DIMENSIONS=${SILICONFLOW_DIMENSIONS:-1024}
+      
+      # 视觉模型配置（可选）
+      - VISION_BASE_URL=${VISION_BASE_URL:-}
+      - VISION_API_KEY=${VISION_API_KEY:-}
+      - VISION_MODEL=${VISION_MODEL:-}
+      
+      # 语音转写配置（可选）
+      - TRANSCRIPTION_BASE_URL=${TRANSCRIPTION_BASE_URL:-}
+      - TRANSCRIPTION_API_KEY=${TRANSCRIPTION_API_KEY:-}
+      - TRANSCRIPTION_MODEL=${TRANSCRIPTION_MODEL:-}
+      
+      # 确认模式配置
+      - APP_CONFIRM_BEFORE_MUTATE=${APP_CONFIRM_BEFORE_MUTATE:-false}
+      
+      # 数据库配置（默认使用 H2，如果使用 PostgreSQL 请取消下面的注释并配置）
+      # - SPRING_PROFILES_ACTIVE=postgresql
+      # - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/spring-ai-skills-demo}
+      # - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER:-postgres}
+      # - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-}
+    volumes:
+      # 挂载数据卷用于持久化 H2 数据库和向量存储
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # PostgreSQL 数据库服务（可选，取消注释以启用）
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: spring-ai-postgres
+  #   environment:
+  #     - POSTGRES_DB=spring-ai-skills-demo
+  #     - POSTGRES_USER=${POSTGRES_USER:-postgres}
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+# 数据卷定义（用于 PostgreSQL 模式）
+# volumes:
+#   postgres_data:

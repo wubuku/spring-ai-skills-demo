@@ -4,6 +4,180 @@
 
 核心思路：LLM 初始只看到简短的技能目录（Level 1 元数据），需要时再调用 `loadSkill` 按需加载完整 API 指令（Level 2），对于复杂的分层 Skill（如 OpenAPI 规范生成的），可进一步调用 `readSkillReference` 按需读取具体操作/资源文档（Level 3），相比一次性注入完整规范可减少 60-90% 的 token 消耗。
 
+## 🐳 Docker 部署（推荐）
+
+项目提供了完整的 Docker 支持，使用多阶段构建优化镜像大小，支持两种部署模式。
+
+### 前置要求
+
+- Docker 20.10+
+- Docker Compose 2.0+
+- OpenAI 兼容 API Key
+
+### 快速开始
+
+1. **克隆项目并进入目录**
+
+```bash
+cd spring-ai-skills-demo
+```
+
+2. **配置环境变量**
+
+复制示例环境文件并编辑：
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env` 文件，配置你的 API 密钥：
+
+```bash
+# 必需配置
+OPENAI_API_KEY=your-api-key-here
+OPENAI_BASE_URL=https://api.deepseek.com  # 或 https://api.openai.com
+OPENAI_MODEL=deepseek-chat                # 或 gpt-4o
+
+# 可选配置
+SILICONFLOW_API_KEY=your-siliconflow-key  # 用于向量记忆功能
+```
+
+3. **使用 Docker Compose 启动**
+
+```bash
+# 构建并启动服务
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f app
+
+# 等待服务启动完成（约 30-60 秒）
+```
+
+4. **访问应用**
+
+| 功能 | URL |
+|------|-----|
+| 聊天界面 | http://localhost:8080 |
+| Swagger UI | http://localhost:8080/swagger-ui.html |
+| H2 控制台 | http://localhost:8080/h2-console |
+
+### Docker 常用命令
+
+```bash
+# 停止服务
+docker-compose down
+
+# 停止并删除数据卷（会清空 H2 数据库）
+docker-compose down -v
+
+# 重新构建镜像
+docker-compose up -d --build
+
+# 查看容器状态
+docker-compose ps
+
+# 进入容器内部
+docker-compose exec app sh
+
+# 查看应用日志
+docker-compose logs -f app
+```
+
+### 仅使用 Dockerfile 部署
+
+如果你不想使用 Docker Compose，也可以直接使用 Dockerfile：
+
+```bash
+# 构建镜像
+docker build -t spring-ai-skills-demo .
+
+# 运行容器
+docker run -d \
+  --name spring-ai-skills-demo \
+  -p 8080:8080 \
+  -e OPENAI_API_KEY=your-api-key \
+  -e OPENAI_BASE_URL=https://api.deepseek.com \
+  -e OPENAI_MODEL=deepseek-chat \
+  -v $(pwd)/data:/app/data \
+  --restart unless-stopped \
+  spring-ai-skills-demo
+```
+
+示例（连接宿主机的 PostgreSQL 数据库数据库，映射到本机的 8082 端口）：
+
+```bash
+docker run -d \
+  --name spring-ai-skills-demo \
+  -p 8082:8080 \
+  -e OPENAI_API_KEY=sk-xxx \
+  -e OPENAI_BASE_URL=https://api.deepseek.com \
+  -e OPENAI_MODEL=deepseek-chat \
+  -e SILICONFLOW_API_KEY=sk-xxx \
+  -e SILICONFLOW_MODEL=BAAI/bge-m3 \
+  -e SILICONFLOW_DIMENSIONS=1024 \
+  -e SILICONFLOW_URL=https://api.siliconflow.cn \
+  -e SPRING_PROFILES_ACTIVE=postgresql \
+  -e SPRING_DATASOURCE_URL=jdbc:postgresql://host.docker.internal:5432/spring-ai-skills-demo \
+  -e SPRING_DATASOURCE_USERNAME=postgres \
+  -e SPRING_DATASOURCE_PASSWORD=123456 \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=123456 \
+  -v $(pwd)/data:/app/data \
+  --add-host=host.docker.internal:host-gateway \
+  --restart unless-stopped \
+  spring-ai-skills-demo
+```
+
+### PostgreSQL 模式部署
+
+对于生产环境，建议使用 PostgreSQL 数据库替代 H2：
+
+1. **编辑 `docker-compose.yml`**，取消 PostgreSQL 相关配置的注释
+
+2. **在 `.env` 中添加 PostgreSQL 配置**：
+
+```bash
+SPRING_PROFILES_ACTIVE=postgresql
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your-secure-password
+SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/spring-ai-skills-demo
+```
+
+3. **启动服务**：
+
+```bash
+docker-compose up -d
+```
+
+### 数据持久化
+
+- **H2 模式**：数据存储在 `./data` 目录，通过 volume 挂载到容器
+- **PostgreSQL 模式**：数据存储在 Docker volume `postgres_data` 中
+
+### 生产环境建议
+
+1. **使用 PostgreSQL 模式**：H2 适合开发和测试，生产环境请使用 PostgreSQL
+2. **配置健康检查**：Dockerfile 已内置健康检查，可通过 `docker ps` 查看状态
+3. **限制资源使用**：在 `docker-compose.yml` 中添加资源限制：
+
+```yaml
+services:
+  app:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+```
+
+4. **使用反向代理**：生产环境建议配合 Nginx 或 Traefik 使用
+
+---
+
 ## 功能特性
 
 - **渐进式披露 Skills** - 三级加载机制：目录 → 技能文档 → 参考文件
