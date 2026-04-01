@@ -13,12 +13,14 @@ import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.audio.transcription.TranscriptionModel;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.minimax.MiniMaxChatModel;
+import org.springframework.ai.minimax.MiniMaxChatOptions;
+import org.springframework.ai.minimax.api.MiniMaxApi;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
-import org.springframework.ai.openai.api.OpenAiAudioApi;
-import org.springframework.ai.openai.OpenAiAudioTranscriptionModel;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -80,6 +82,19 @@ public class SpringAiConfig {
 
     @Value("${spring.ai.anthropic.chat.options.max-tokens}")
     private Integer anthropicMaxTokens;
+
+    // MiniMax 配置
+    @Value("${spring.ai.minimax.base-url:https://api.minimax.chat}")
+    private String minimaxBaseUrl;
+
+    @Value("${spring.ai.minimax.api-key}")
+    private String minimaxApiKey;
+
+    @Value("${spring.ai.minimax.chat.options.model:abab6.5g-chat}")
+    private String minimaxModel;
+
+    @Value("${spring.ai.minimax.chat.options.temperature:0.7}")
+    private Double minimaxTemperature;
 
     @Value("${vision.base-url}")
     private String visionBaseUrl;
@@ -184,13 +199,8 @@ public class SpringAiConfig {
      * 仅在 provider=openai 时创建
      */
     @Bean("openAiChatModel")
-    @Primary
+    @ConditionalOnProperty(name = "app.llm.provider", havingValue = "openai")
     public ChatModel openAiChatModel(RestClient.Builder restClientBuilder) {
-        if (!"openai".equals(provider)) {
-            log.debug("OpenAI ChatModel skipped, provider is: {}", provider);
-            return null;
-        }
-
         log.info("Creating OpenAI ChatModel: baseUrl={}, model={}", openAiBaseUrl, openAiModel);
 
         OpenAiApi openAiApi = OpenAiApi.builder()
@@ -216,13 +226,8 @@ public class SpringAiConfig {
      * 仅在 provider=anthropic 时创建
      */
     @Bean("anthropicChatModel")
-    @Primary
+    @ConditionalOnProperty(name = "app.llm.provider", havingValue = "anthropic")
     public ChatModel anthropicChatModel() {
-        if (!"anthropic".equals(provider)) {
-            log.debug("Anthropic ChatModel skipped, provider is: {}", provider);
-            return null;
-        }
-
         log.info("Creating Anthropic ChatModel: baseUrl={}, model={}, maxTokens={}",
                 anthropicBaseUrl, anthropicModel, anthropicMaxTokens);
 
@@ -244,34 +249,60 @@ public class SpringAiConfig {
     }
 
     /**
+     * MiniMax ChatModel Bean
+     * 仅在 provider=minimax 时创建
+     * 注意：使用 @ConditionalOnProperty 确保只在需要时创建
+     */
+    @Bean("minimaxChatModel")
+    @ConditionalOnProperty(name = "app.llm.provider", havingValue = "minimax")
+    public ChatModel minimaxChatModel(RestClient.Builder restClientBuilder) {
+        log.info("Creating MiniMax ChatModel: baseUrl={}, model={}", minimaxBaseUrl, minimaxModel);
+
+        MiniMaxApi miniMaxApi = new MiniMaxApi(minimaxBaseUrl, minimaxApiKey, restClientBuilder);
+
+        MiniMaxChatOptions options = MiniMaxChatOptions.builder()
+                .model(minimaxModel)
+                .temperature(minimaxTemperature)
+                .build();
+
+        return new MiniMaxChatModel(miniMaxApi, options);
+    }
+
+    /**
      * 主 ChatModel Bean - 根据 provider 配置动态选择
-     * 同时禁用 Spring AI 自动配置的 ChatModel
+     * 这是唯一被标记为 @Primary 的 ChatModel
      */
     @Bean("chatModel")
     @Primary
-    @ConditionalOnMissingBean(name = "chatModel")
     public ChatModel chatModel(
-            @Autowired(required = false) ChatModel openAiChatModel,
-            @Autowired(required = false) ChatModel anthropicChatModel) {
-        if ("openai".equals(provider) && openAiChatModel != null) {
-            log.info("Using OpenAI ChatModel as primary");
-            return openAiChatModel;
-        } else if ("anthropic".equals(provider) && anthropicChatModel != null) {
-            log.info("Using Anthropic ChatModel as primary");
-            return anthropicChatModel;
+            @Autowired(required = false) @Qualifier("openAiChatModel") ChatModel openAiChatModel,
+            @Autowired(required = false) @Qualifier("anthropicChatModel") ChatModel anthropicChatModel,
+            @Autowired(required = false) @Qualifier("miniMaxChatModel") ChatModel miniMaxChatModel) {
+        
+        ChatModel selectedModel = null;
+        String modelName = null;
+        
+        if ("openai".equals(provider)) {
+            selectedModel = openAiChatModel;
+            modelName = "OpenAI";
+        } else if ("anthropic".equals(provider)) {
+            selectedModel = anthropicChatModel;
+            modelName = "Anthropic";
+        } else if ("minimax".equals(provider)) {
+            selectedModel = miniMaxChatModel;
+            modelName = "MiniMax";
+        }
+        
+        if (selectedModel != null) {
+            log.info("Using {} ChatModel as primary (provider={})", modelName, provider);
+            return selectedModel;
         }
 
-        // Fallback: 如果没有可用的 ChatModel
-        log.warn("No ChatModel available for provider: {}", provider);
-        if (openAiChatModel != null) {
-            log.warn("Fallback to OpenAI ChatModel");
-            return openAiChatModel;
-        }
-        if (anthropicChatModel != null) {
-            log.warn("Fallback to Anthropic ChatModel");
-            return anthropicChatModel;
-        }
-        throw new IllegalStateException("No ChatModel configured. Set app.llm.provider to 'openai' or 'anthropic'.");
+        // Fallback: 如果没有找到对应 provider 的 ChatModel
+        log.error("No ChatModel available for provider: {}", provider);
+        throw new IllegalStateException(
+            "No ChatModel configured for provider: " + provider + 
+            ". Set app.llm.provider to 'openai', 'anthropic', or 'minimax'.");
     }
 
     /**

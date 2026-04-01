@@ -1,5 +1,6 @@
 package com.example.demo.config;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
@@ -14,6 +15,7 @@ import org.springframework.context.annotation.Configuration;
  *
  * 此配置始终激活（无 profile 限制），因为嵌入模型与存储类型无关
  */
+@Slf4j
 @Configuration
 public class EmbeddingModelConfig {
 
@@ -36,6 +38,10 @@ public class EmbeddingModelConfig {
      */
     @Bean
     public EmbeddingModel embeddingModel() {
+        log.info("Creating EmbeddingModel with baseUrl={}, model={}, apiKey={}",
+            siliconFlowBaseUrl, siliconFlowModel,
+            siliconFlowApiKey != null ? siliconFlowApiKey.substring(0, Math.min(10, siliconFlowApiKey.length())) + "..." : "null");
+
         OpenAiApi openAiApi = OpenAiApi.builder()
             .baseUrl(siliconFlowBaseUrl)
             .apiKey(siliconFlowApiKey)

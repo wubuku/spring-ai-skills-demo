@@ -43,6 +43,12 @@
             <artifactId>spring-ai-starter-model-anthropic</artifactId>
         </dependency>
 
+        <!-- Spring AI MiniMax (原生 MiniMax 模型支持) -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-minimax</artifactId>
+        </dependency>
+
         <!-- SpringDoc OpenAPI (Swagger UI) -->
         <dependency>
             <groupId>org.springdoc</groupId>

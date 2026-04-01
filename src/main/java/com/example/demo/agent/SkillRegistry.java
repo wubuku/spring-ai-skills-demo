@@ -6,16 +6,24 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
+import org.springframework.core.io.support.ResourcePatternResolver;
+import org.springframework.core.io.support.ResourcePatternUtils;
 import org.springframework.stereotype.Component;
 import jakarta.annotation.PostConstruct;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -29,6 +37,9 @@ public class SkillRegistry {
      * Value: ApiIndexEntry（包含 Skill 名称和参考文件路径）
      */
     private final Map<String, ApiIndexEntry> apiIndex = new ConcurrentHashMap<>();
+
+    @Autowired
+    private ResourceLoader resourceLoader;
 
     /**
      * API 索引条目
@@ -58,56 +69,122 @@ public class SkillRegistry {
     @PostConstruct
     public void init() throws IOException {
         var yaml = new ObjectMapper(new YAMLFactory());
-        var skillsPath = Path.of("src/main/resources/skills");
+        
+        // 首先尝试从类路径加载（支持 JAR 包内运行）
+        ResourcePatternResolver resolver = ResourcePatternUtils.getResourcePatternResolver(resourceLoader);
+        
+        try {
+            // 尝试加载 classpath:skills/*/SKILL.md
+            Resource[] skillResources = resolver.getResources("classpath:skills/*/SKILL.md");
+            
+            if (skillResources.length > 0) {
+                log.info("从类路径找到 {} 个技能", skillResources.length);
+                
+                for (Resource resource : skillResources) {
+                    String url = resource.getURL().toString();
+                    // 提取技能目录名
+                    String skillDir = extractSkillDirName(url);
+                    
+                    log.debug("加载技能资源: {}, 目录名: {}", url, skillDir);
+                    
+                    try {
+                        String content = readResourceAsString(resource);
+                        String[] parts = content.split("---", 3);
+                        if (parts.length < 3) {
+                            log.warn("跳过技能 {} - YAML frontmatter 格式错误", skillDir);
+                            continue;
+                        }
 
-        if (!Files.exists(skillsPath)) {
-            Files.createDirectories(skillsPath);
-            return;
-        }
-
-        // 1. 加载所有 Skills
-        log.info("开始扫描 skills 目录: {}", skillsPath.toAbsolutePath());
-        Files.list(skillsPath)
-            .filter(Files::isDirectory)
-            .forEach(dir -> {
-                log.debug("扫描目录: {}", dir.getFileName());
-                var mdFile = dir.resolve("SKILL.md");
-                if (!Files.exists(mdFile)) {
-                    log.debug("跳过目录 {} - 未找到 SKILL.md", dir.getFileName());
-                    return;
-                }
-                try {
-                    String content = Files.readString(mdFile);
-                    String[] parts = content.split("---", 3);
-                    if (parts.length < 3) {
-                        log.warn("跳过技能 {} - YAML frontmatter 格式错误 (parts.length={})", dir.getFileName(), parts.length);
-                        return;
+                        var meta = yaml.readValue(parts[1], Skill.SkillMeta.class);
+                        String body = parts[2].strip();
+                        skills.put(meta.getName(), new Skill(meta, body));
+                        log.info("成功加载技能: {} (name={})", skillDir, meta.getName());
+                    } catch (IOException e) {
+                        log.error("解析 Skill 失败: {} - {}", skillDir, e.getMessage());
                     }
-
-                    var meta = yaml.readValue(parts[1], Skill.SkillMeta.class);
-                    String body = parts[2].strip();
-                    skills.put(meta.getName(), new Skill(meta, body));
-                    log.info("成功加载技能: {} (name={})", dir.getFileName(), meta.getName());
-                } catch (IOException e) {
-                    log.error("解析 Skill 失败: {} - {}", dir.getFileName(), e.getMessage());
-                    throw new RuntimeException("解析 Skill 失败: " + dir, e);
                 }
-            });
-
+            } else {
+                log.warn("未从类路径找到技能，尝试从文件系统加载");
+                // 回退到文件系统加载（本地开发）
+                loadFromFileSystem(yaml);
+            }
+        } catch (IOException e) {
+            log.error("从类路径加载技能失败: {}", e.getMessage());
+            // 回退到文件系统加载
+            loadFromFileSystem(yaml);
+        }
+        
         log.info("技能加载完成，共加载 {} 个技能: {}", skills.size(), skills.keySet());
 
         // 2. 为所有 Skills 构建 API 索引
         for (Skill skill : skills.values()) {
-                indexSkillApis(skill);
-            }
+            indexSkillApis(skill, resolver);
+        }
 
         log.info("API 索引构建完成，共 {} 个端点", apiIndex.size());
+    }
+    
+    private void loadFromFileSystem(ObjectMapper yaml) {
+        Path skillsPath = Path.of("src/main/resources/skills");
+        
+        if (!Files.exists(skillsPath)) {
+            log.error("文件系统 skills 目录不存在: {}", skillsPath);
+            return;
+        }
+        
+        try {
+            Files.list(skillsPath)
+                .filter(Files::isDirectory)
+                .forEach(dir -> {
+                    var mdFile = dir.resolve("SKILL.md");
+                    if (!Files.exists(mdFile)) {
+                        return;
+                    }
+                    try {
+                        String content = Files.readString(mdFile);
+                        String[] parts = content.split("---", 3);
+                        if (parts.length < 3) {
+                            log.warn("跳过技能 {} - YAML frontmatter 格式错误", dir.getFileName());
+                            return;
+                        }
+
+                        var meta = yaml.readValue(parts[1], Skill.SkillMeta.class);
+                        String body = parts[2].strip();
+                        skills.put(meta.getName(), new Skill(meta, body));
+                        log.info("成功加载技能: {} (name={})", dir.getFileName(), meta.getName());
+                    } catch (IOException e) {
+                        log.error("解析 Skill 失败: {} - {}", dir.getFileName(), e.getMessage());
+                    }
+                });
+        } catch (IOException e) {
+            log.error("从文件系统加载技能失败: {}", e.getMessage());
+        }
+    }
+    
+    private String extractSkillDirName(String url) {
+        // 从 URL 如 "jar:file:/app/app.jar!/BOOT-INF/classes!/skills/search-products/SKILL.md"
+        // 或 "file:/path/to/project/src/main/resources/skills/search-products/SKILL.md"
+        // 提取 "search-products"
+        int skillsIndex = url.lastIndexOf("/skills/");
+        if (skillsIndex == -1) return "unknown";
+        
+        String afterSkills = url.substring(skillsIndex + 8); // +8 for "/skills/"
+        int nextSlash = afterSkills.indexOf('/');
+        if (nextSlash == -1) return "unknown";
+        
+        return afterSkills.substring(0, nextSlash);
+    }
+    
+    private String readResourceAsString(Resource resource) throws IOException {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(resource.getInputStream()))) {
+            return reader.lines().collect(Collectors.joining("\n"));
+        }
     }
 
     /**
      * 为单个 Skill 构建 API 索引
      */
-    private void indexSkillApis(Skill skill) {
+    private void indexSkillApis(Skill skill, ResourcePatternResolver resolver) {
         String skillName = skill.getMeta().getName();
         String body = skill.getBody();
 
@@ -116,14 +193,20 @@ public class SkillRegistry {
         }
 
         // 检查是否为分层 Skill（有 references/operations 目录)
-        Path operationsDir = Path.of("src/main/resources/skills/" + skillName + "/references/operations");
-        boolean isHierarchical = Files.exists(operationsDir);
-
-        if (isHierarchical) {
-            // 分层 Skill：解析 operations/*.md 文件
-            indexHierarchicalSkill(skillName, operationsDir);
-        } else {
-            // 平面 Skill:解析 SKILL.md 中的 API 端点
+        boolean isHierarchical = false;
+        try {
+            Resource[] opResources = resolver.getResources("classpath:skills/" + skillName + "/references/operations/*.md");
+            isHierarchical = opResources.length > 0;
+            
+            if (isHierarchical) {
+                // 分层 Skill：解析 operations/*.md 文件
+                indexHierarchicalSkill(skillName, opResources);
+            } else {
+                // 平面 Skill:解析 SKILL.md 中的 API 端点
+                indexFlatSkill(skillName, body, skill.getMeta().getDescription());
+            }
+        } catch (IOException e) {
+            // 回退到平面 Skill 处理
             indexFlatSkill(skillName, body, skill.getMeta().getDescription());
         }
     }
@@ -160,56 +243,46 @@ public class SkillRegistry {
     /**
      * 索引分层 Skill 的 API（读取 operations/*.md)
      */
-    private void indexHierarchicalSkill(String skillName, Path operationsDir) {
-        try {
-            Files.list(operationsDir)
-                .filter(p -> p.toString().endsWith(".md"))
-                .forEach(opFile -> indexOperationFile(skillName, opFile));
-        } catch (IOException e) {
-            log.warn("索引分层 Skill 失败: {}", skillName, e);
-        }
-    }
+    private void indexHierarchicalSkill(String skillName, Resource[] opResources) {
+        for (Resource resource : opResources) {
+            try {
+                String content = readResourceAsString(resource);
+                String filename = resource.getFilename();
+                
+                // 解析操作文件的第一行，如 "# GET /pet/findByStatus"
+                Pattern titlePattern = Pattern.compile("^#\\s+(\\w+)\\s+(\\S+)", Pattern.MULTILINE);
+                Matcher matcher = titlePattern.matcher(content);
 
-    /**
-     * 索引单个操作文件
-     */
-    private void indexOperationFile(String skillName, Path operationFile) {
-        try {
-            String content = Files.readString(operationFile);
+                if (matcher.find()) {
+                    String method = matcher.group(1);
+                    String path = matcher.group(2);
 
-            // 解析操作文件的第一行，如 "# GET /pet/findByStatus"
-            Pattern titlePattern = Pattern.compile("^#\\s+(\\w+)\\s+(\\S+)", Pattern.MULTILINE);
-            Matcher matcher = titlePattern.matcher(content);
-
-            if (matcher.find()) {
-                String method = matcher.group(1);
-                String path = matcher.group(2);
-
-                // 提取简短描述（标题后的下一行，通常是 **Description:** 格式）
-                String[] lines = content.split("\n");
-                String description = "";
-                for (int i = 1; i < Math.min(5, lines.length); i++) {
-                    String line = lines[i].trim();
-                    if (line.startsWith("**") && line.contains(":**")) {
-                        description = line.replaceAll("\\*\\*", "").trim();
-                        break;
+                    // 提取简短描述（标题后的下一行，通常是 **Description:** 格式）
+                    String[] lines = content.split("\n");
+                    String description = "";
+                    for (int i = 1; i < Math.min(5, lines.length); i++) {
+                        String line = lines[i].trim();
+                        if (line.startsWith("**") && line.contains(":**")) {
+                            description = line.replaceAll("\\*\\*", "").trim();
+                            break;
+                        }
                     }
+
+                    String indexKey = method.toUpperCase() + " " + path;
+                    String relativePath = "operations/" + filename;
+
+                    apiIndex.put(indexKey, new ApiIndexEntry(
+                        skillName,
+                        path,
+                        method.toUpperCase(),
+                        description,
+                        relativePath,
+                        true
+                    ));
                 }
-
-                String indexKey = method.toUpperCase() + " " + path;
-                String relativePath = "operations/" + operationFile.getFileName().toString();
-
-                apiIndex.put(indexKey, new ApiIndexEntry(
-                    skillName,
-                    path,
-                    method.toUpperCase(),
-                    description,
-                    relativePath,
-                    true
-                ));
+            } catch (IOException e) {
+                log.warn("索引操作文件失败: {}", resource.getFilename(), e);
             }
-        } catch (IOException e) {
-            log.warn("索引操作文件失败: {}", operationFile, e);
         }
     }
 
@@ -343,7 +416,7 @@ public class SkillRegistry {
     }
 
     /**
-     * 获取完整的 API 描述文档(供 LLM 阅读)
+     * 获取完整的 API 描述文档
      */
     public String getFullApiDescription(ApiIndexEntry entry) {
         if (entry == null) {
@@ -358,8 +431,9 @@ public class SkillRegistry {
         if (entry.isHierarchical() && entry.getReferencePath() != null) {
             // 分层 Skill：读取操作文件
             try {
-                Path opFile = Path.of("src/main/resources/skills/" + entry.getSkillName() + "/references/" + entry.getReferencePath());
-                return Files.readString(opFile);
+                ResourcePatternResolver resolver = ResourcePatternUtils.getResourcePatternResolver(resourceLoader);
+                Resource resource = resolver.getResource("classpath:skills/" + entry.getSkillName() + "/references/" + entry.getReferencePath());
+                return readResourceAsString(resource);
             } catch (IOException e) {
                 log.warn("读取操作文件失败: {}", entry.getReferencePath(), e);
                 return null;
