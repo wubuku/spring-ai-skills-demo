@@ -19,3 +19,4 @@ Thumbs.db
 # H2 Database files
 data/
 .playwright-mcp
+CLAUDE.md

@@ -347,11 +347,17 @@ public class SpringAiConfig {
             });
         }
 
-        log.info("Creating Vision ChatClient: baseUrl={}, model={}", visionBaseUrl, visionModel);
+        log.info("Creating Vision ChatClient: baseUrl={}, model={}, completionsPath=/chat/completions", visionBaseUrl, visionModel);
 
+        // 修复：Spring AI OpenAiApi 默认追加 /v1/chat/completions，但火山方舟 ARK API 需要 /chat/completions
+        // 参考：
+        // - Issue #710: https://github.com/spring-projects/spring-ai/issues/710
+        // - Discussion #463: https://github.com/spring-projects/spring-ai/discussions/463
+        // 也可通过配置 spring.ai.openai.chat.completions-path=/chat/completions 实现（此处用代码方式）
         OpenAiApi visionApi = OpenAiApi.builder()
                 .baseUrl(visionBaseUrl)
                 .apiKey(visionApiKey)
+                .completionsPath("/chat/completions")
                 .webClientBuilder(WebClient.builder())
                 .build();
 
