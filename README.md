@@ -189,6 +189,154 @@ services:
 - **OkHttp 重试机制** - 处理 LLM API 的间歇性网络问题
 - **🆕 CopilotKit 前端集成** - 现代化的 Next.js 15 + React 19 前端，支持 AG-UI 协议
 - **🆕 双存储后端支持** - 默认 H2 文件数据库 + SimpleVectorStore，可切换为 PostgreSQL + PgVectorStore
+- **🆕 多模态输入支持** - 支持图片识别和语音转写，可同时或单独使用
+
+## 多模态聊天 API
+
+项目提供两个聊天端点，前端可根据场景选择合适的接口。
+
+### 端点对比
+
+| 特性 | 文本聊天 | 多模态聊天 |
+|------|---------|-----------|
+| 端点 | `POST /api/chat` | `POST /api/chat` (multipart) |
+| Content-Type | `application/json` | `multipart/form-data` |
+| 文本输入 | ✅ | ✅ |
+| 图片上传 | ❌ | ✅ |
+| 语音上传 | ❌ | ✅ |
+| Skills 工具调用 | ✅ | ✅ |
+| RAG 知识库 | ✅ | ✅ |
+| 会话记忆 | ✅ | ✅ |
+| 确认模式 | ✅ | ✅ |
+
+### 端点 1：纯文本聊天（向后兼容）
+
+适合纯文本对话场景，与传统 Web 界面配合使用。
+
+**请求示例：**
+
+```bash
+curl -s -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"content":"你好，请回复 OK","conversationId":"test-001"}' \
+  --max-time 60
+```
+
+**响应：**
+
+```json
+{"response":"OK"}
+```
+
+### 端点 2：多模态聊天（图片 + 语音）
+
+适合需要图片识别或语音转写的场景，支持同时上传图片和音频。
+
+**请求参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| query | string | 否 | 文本问题 |
+| conversationId | string | 否 | 会话 ID（默认 "default"） |
+| image | file | 否 | 图片文件（PNG, JPG, JPEG, GIF, WebP） |
+| audio | file | 否 | 音频文件（WAV, MP3, M4A） |
+
+**图片识别示例：**
+
+```bash
+curl -s -X POST http://localhost:8080/api/chat \
+  -F "query=请详细描述这张图片的内容" \
+  -F "conversationId=test-image-001" \
+  -F "image=@/path/to/image.png;type=image/png" \
+  --max-time 180
+```
+
+**语音识别示例：**
+
+```bash
+curl -s -X POST http://localhost:8080/api/chat \
+  -F "query=请转写这段音频的内容" \
+  -F "conversationId=test-audio-001" \
+  -F "audio=@/path/to/audio.wav;type=audio/wav" \
+  --max-time 300
+```
+
+**同时上传图片和语音：**
+
+```bash
+curl -s -X POST http://localhost:8080/api/chat \
+  -F "query=这张图片里的人说了什么？" \
+  -F "conversationId=test-multimodal-001" \
+  -F "image=@/path/to/image.png;type=image/png" \
+  -F "audio=@/path/to/audio.wav;type=audio/wav" \
+  --max-time 300
+```
+
+**响应格式（两种端点统一）：**
+
+```json
+{"answer":"AI 的回复内容..."}
+```
+
+### 工作原理
+
+```
+用户上传（图片/音频）
+       │
+       ▼
+MultimodalAgentService.chat()
+       │
+       ├─── 图片 ──→ Vision ChatClient ──→ 图片描述
+       │              (doubao-1-5-vision)
+       │
+       ├─── 音频 ──→ TranscriptionModel ──→ 语音转写
+       │              (glm-asr-2512)
+       │
+       ▼
+合并【图片描述】+【语音转写】+【用户文本】
+       │
+       ▼
+AgentService.chat() ──→ 保留所有能力（Skills、RAG、记忆等）
+       │
+       ▼
+返回 AI 回复
+```
+
+### 配置要求
+
+多模态功能依赖以下外部服务（需在 `.env` 中配置）：
+
+```bash
+# 视觉模型配置（火山引擎 ARK）- 用于图片识别
+VISION_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+VISION_API_KEY=your-ark-api-key
+VISION_MODEL=doubao-1-5-vision-pro-32k-250115
+
+# 语音转写配置（智谱 GLM-ASR）- 用于语音转文字
+TRANSCRIPTION_BASE_URL=https://open.bigmodel.cn/api/paas
+TRANSCRIPTION_API_KEY=your-glm-api-key
+TRANSCRIPTION_MODEL=glm-asr-2512
+```
+
+**说明：**
+- 图片识别必需配置视觉模型
+- 语音转写为可选（未配置时，音频会被忽略并提示用户）
+- 文本聊天（`/api/chat` JSON 格式）无需额外配置
+
+### 测试脚本
+
+项目提供 `test-multimodal.sh` 测试脚本，支持快速验证多模态功能：
+
+```bash
+# 测试所有功能（需提供测试文件）
+./test-multimodal.sh --image /path/to/test.png --audio /path/to/test.wav
+
+# 跳过语音测试
+./test-multimodal.sh --image /path/to/test.png --skip-audio
+
+# 查看帮助
+./test-multimodal.sh --help
+```
 
 ## 技术栈
 
