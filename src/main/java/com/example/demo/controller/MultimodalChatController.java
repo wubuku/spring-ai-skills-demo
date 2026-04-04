@@ -181,12 +181,8 @@ public class MultimodalChatController {
                                 ? token.substring(7)  // 去掉前缀
                                 : token;
 
-                            // 使用 HashMap 允许 null 值
-                            Map<String, Object> delta = new java.util.HashMap<>();
-                            delta.put("content", content);
-                            Map<String, Object> choice = new java.util.HashMap<>();
-                            choice.put("delta", delta);
-                            choice.put("finish_reason", null);
+                            Map<String, Object> delta = Map.of("content", content);
+                            Map<String, Object> choice = Map.of("delta", delta);
                             Map<String, Object> chunk = new java.util.HashMap<>();
                             chunk.put("type", type);
                             chunk.put("choices", List.of(choice));
