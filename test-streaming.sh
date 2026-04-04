@@ -75,6 +75,7 @@ for arg in "$@"; do
         --text) TEST_MODE="text" ;;
         --image) TEST_MODE="image" ;;
         --audio) TEST_MODE="audio" ;;
+        --image_audio) TEST_MODE="image_audio" ;;
         --all) TEST_MODE="all" ;;
     esac
 done
@@ -296,6 +297,75 @@ test_multimodal_stream_with_audio() {
 }
 
 # ══════════════════════════════════════════════════════════
+#  TEST 3C: 多模态流式聊天 - 图片 + 语音
+# ══════════════════════════════════════════════════════════
+test_multimodal_stream_image_and_audio() {
+    bold "[TEST 3C] 多模态流式聊天 - 图片 + 语音 (/api/chat/multimodal/stream)"
+
+    if [ ! -f "$TEST_IMAGE" ]; then
+        yellow "  ⚠ 测试图片不存在: $TEST_IMAGE"
+        return
+    fi
+
+    if [ ! -f "$TEST_AUDIO" ]; then
+        yellow "  ⚠ 测试音频不存在: $TEST_AUDIO"
+        return
+    fi
+
+    local full_response=""
+    local event_count=0
+    local vision_events=0
+    local content_events=0
+
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        [[ "$line" == ":"* ]] && continue
+
+        if [[ "$line" == data:* ]]; then
+            data="${line#data: }"
+            [[ "$data" == "[DONE]" ]] && continue
+            full_response="${full_response}${data}"
+            event_count=$((event_count + 1))
+
+            if [[ "$data" == *'"type":"vision"'* ]]; then
+                vision_events=$((vision_events + 1))
+            elif [[ "$data" == *'"type":"content"'* ]]; then
+                content_events=$((content_events + 1))
+            fi
+        fi
+    done < <(curl -s -N -X POST "$BASE_URL/api/chat/multimodal/stream" \
+        -F "query=请描述图片和音频的内容" \
+        -F "conversationId=test-image-audio" \
+        -F "image=@$TEST_IMAGE;type=image/jpeg" \
+        -F "audio=@$TEST_AUDIO;type=audio/mpeg" \
+        --max-time 240)
+
+    echo "  收到 $event_count 个事件块 (视觉流: $vision_events, LLM流: $content_events)"
+
+    if [ -n "$full_response" ]; then
+        green "  ✓ 收到图片+语音流式响应"
+        PASS=$((PASS + 1))
+
+        if [ $vision_events -gt 0 ]; then
+            green "  ✓ 视觉模型流正常工作 ($vision_events 个事件)"
+        else
+            yellow "  ⚠ 未检测到视觉模型流事件"
+        fi
+
+        if [ $content_events -gt 0 ]; then
+            green "  ✓ LLM 流正常工作 ($content_events 个事件)"
+        else
+            yellow "  ⚠ 未检测到 LLM 流事件"
+        fi
+
+        echo "  响应片段: ${full_response:0:200}..."
+    else
+        red "  ✗ 未收到图片+语音流式响应"
+        FAIL=$((FAIL + 1))
+    fi
+}
+
+# ══════════════════════════════════════════════════════════
 #  TEST 4: 流式响应完整性检查
 # ══════════════════════════════════════════════════════════
 test_stream_completeness() {
@@ -356,6 +426,9 @@ case "$TEST_MODE" in
     audio)
         test_multimodal_stream_with_audio
         ;;
+    image_audio)
+        test_multimodal_stream_image_and_audio
+        ;;
     all)
         test_text_stream_json
         echo ""
@@ -364,6 +437,8 @@ case "$TEST_MODE" in
         test_multimodal_stream_with_image
         echo ""
         test_multimodal_stream_with_audio
+        echo ""
+        test_multimodal_stream_image_and_audio
         echo ""
         test_stream_completeness
         ;;
