@@ -190,24 +190,33 @@ services:
 - **🆕 CopilotKit 前端集成** - 现代化的 Next.js 15 + React 19 前端，支持 AG-UI 协议
 - **🆕 双存储后端支持** - 默认 H2 文件数据库 + SimpleVectorStore，可切换为 PostgreSQL + PgVectorStore
 - **🆕 多模态输入支持** - 支持图片识别和语音转写，可同时或单独使用
+- **🆕 SSE 流式响应** - 支持 Server-Sent Events 流式输出，实时显示 AI 生成内容
 
-## 多模态聊天 API
+## 聊天端点概览
 
-项目提供两个聊天端点，前端可根据场景选择合适的接口。
+项目提供多个聊天端点，支持不同场景需求：
+
+| 端点 | 方法 | Content-Type | 流式 | 说明 |
+|------|------|--------------|------|------|
+| `/api/chat` | POST | `application/json` | ❌ | 纯文本同步聊天 |
+| `/api/chat/stream` | POST | `application/json` | ✅ | 纯文本流式聊天 |
+| `/api/chat` | POST | `multipart/form-data` | ❌ | 多模态同步聊天（图片+语音） |
+| `/api/chat/multimodal/stream` | POST | `multipart/form-data` | ✅ | 多模态流式聊天（图片+语音） |
 
 ### 端点对比
 
-| 特性 | 文本聊天 | 多模态聊天 |
-|------|---------|-----------|
-| 端点 | `POST /api/chat` | `POST /api/chat` (multipart) |
-| Content-Type | `application/json` | `multipart/form-data` |
-| 文本输入 | ✅ | ✅ |
-| 图片上传 | ❌ | ✅ |
-| 语音上传 | ❌ | ✅ |
-| Skills 工具调用 | ✅ | ✅ |
-| RAG 知识库 | ✅ | ✅ |
-| 会话记忆 | ✅ | ✅ |
-| 确认模式 | ✅ | ✅ |
+| 特性 | 文本聊天 | 多模态聊天 | 流式版本 |
+|------|---------|-----------|---------|
+| 端点 | `POST /api/chat` | `POST /api/chat` (multipart) | `POST /api/chat/stream` |
+| Content-Type | `application/json` | `multipart/form-data` | 同左列 |
+| 文本输入 | ✅ | ✅ | ✅ |
+| 图片上传 | ❌ | ✅ | ✅ |
+| 语音上传 | ❌ | ✅ | ✅ |
+| Skills 工具调用 | ✅ | ✅ | ✅ |
+| RAG 知识库 | ✅ | ✅ | ✅ |
+| 会话记忆 | ✅ | ✅ | ✅ |
+| 确认模式 | ✅ | ✅ | ✅ |
+| **SSE 流式输出** | ❌ | ❌ | ✅ |
 
 ### 端点 1：纯文本聊天（向后兼容）
 
@@ -278,6 +287,51 @@ curl -s -X POST http://localhost:8080/api/chat \
 {"answer":"AI 的回复内容..."}
 ```
 
+### 端点 3：纯文本流式聊天（SSE）
+
+适合需要实时显示 AI 生成内容的场景，使用 Server-Sent Events 协议。
+
+**请求示例：**
+
+```bash
+curl -s -N -X POST http://localhost:8080/api/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{"content":"你好，介绍一下你自己","conversationId":"test-stream-001"}' \
+  --max-time 60
+```
+
+**SSE 响应格式：**
+
+```
+data:你
+data:好
+data:！
+data:我
+data:是
+...
+data:[DONE]
+```
+
+### 端点 4：多模态流式聊天（SSE）
+
+适合需要图片识别或语音转写的流式场景。
+
+**图片流式识别示例：**
+
+```bash
+curl -s -N -X POST http://localhost:8080/api/chat/multimodal/stream \
+  -F "query=这张图片里有什么?" \
+  -F "conversationId=test-multimodal-stream" \
+  -F "image=@/path/to/image.jpg;type=image/jpeg" \
+  --max-time 180
+```
+
+**响应特点：**
+- 视觉模型生成的 token 会标记 `【图片识别】` 前缀
+- LLM 生成的 token 正常输出
+- 流结束发送 `[DONE]` 标记
+
 ### 工作原理
 
 ```
@@ -325,17 +379,43 @@ TRANSCRIPTION_MODEL=glm-asr-2512
 
 ### 测试脚本
 
-项目提供 `test-multimodal.sh` 测试脚本，支持快速验证多模态功能：
+项目提供两个测试脚本，支持快速验证功能：
+
+**1. 多模态测试脚本（同步版本）：**
 
 ```bash
-# 测试所有功能（需提供测试文件）
-./test-multimodal.sh --image /path/to/test.png --audio /path/to/test.wav
+# 测试所有功能（需在 .env 中配置 TEST_IMAGE_PATH 和 TEST_AUDIO_PATH）
+./test-multimodal.sh
 
-# 跳过语音测试
-./test-multimodal.sh --image /path/to/test.png --skip-audio
+# 或命令行指定文件
+./test-multimodal.sh --image /path/to/test.png --audio /path/to/test.wav
 
 # 查看帮助
 ./test-multimodal.sh --help
+```
+
+**2. 流式聊天测试脚本（新增）：**
+
+```bash
+# 测试纯文本流式聊天
+./test-streaming.sh --text
+
+# 测试带图片的多模态流式聊天
+./test-streaming.sh --image
+
+# 测试带语音的多模态流式聊天
+./test-streaming.sh --audio
+
+# 测试所有流式端点
+./test-streaming.sh --all
+```
+
+**注意：** 测试文件路径需要在 `.env` 中配置：
+
+```bash
+# E2E 测试配置
+TEST_IMAGE_PATH=/path/to/your/test-image.jpg
+TEST_AUDIO_PATH=/path/to/your/test-audio.mp3
 ```
 
 ## 技术栈

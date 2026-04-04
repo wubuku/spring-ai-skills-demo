@@ -8,6 +8,9 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * 多模态代理服务
@@ -82,6 +85,78 @@ public class MultimodalAgentService {
      */
     public String chat(String query, String conversationId) {
         return agentService.chat(query, conversationId);
+    }
+
+    /**
+     * 多模态流式聊天
+     * 
+     * 关键设计：
+     * - 视觉模型支持流式：使用 cache() 让结果被复用两次（推给前端 + 收集后给 LLM）
+     * - 语音转写不支持流式：用 Mono.fromCallable 包装阻塞操作
+     * - 使用 Flux.concat 保证顺序：先视觉 token 流，再 LLM token 流
+     */
+    public Flux<String> streamChat(String query,
+                                   String conversationId,
+                                   Resource image,
+                                   String imageContentType,
+                                   Resource audio) {
+
+        // 路径 1：有图片 - 视觉模型流式 + LLM 流式
+        if (image != null) {
+            MediaType mt = parseMediaType(imageContentType, MediaType.IMAGE_JPEG);
+            Media media = new Media(mt, image);
+            String visionPrompt = (query != null && !query.isBlank())
+                    ? "用户问题是：" + query + "\n请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。"
+                    : "请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
+
+            // 关键：视觉模型用 stream()，并用 cache() 让结果可以被复用两次
+            Flux<String> visionTokens = visionChatClient.prompt()
+                    .user(user -> user.text(visionPrompt).media(media))
+                    .stream()
+                    .content()
+                    .cache();
+
+            // 第一段：把视觉模型的 token 直接推给前端（带前缀标识）
+            Flux<String> visionStage = visionTokens.map(token -> "【图片识别】" + token);
+
+            // 第二段：等视觉模型跑完，收集完整描述，再跑 LLM
+            Flux<String> llmStage = visionTokens
+                    .reduce("", String::concat)
+                    .flatMapMany(imageDescription -> {
+                        String finalInput = "【图片内容】" + imageDescription + "\n\n"
+                                + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
+                        return agentService.streamChat(finalInput, conversationId);
+                    });
+
+            // concat 保证顺序：先视觉 token 流，再 LLM token 流
+            return Flux.concat(visionStage, llmStage);
+        }
+
+        // 路径 2：有音频（ASR 只能同步）
+        if (audio != null && transcriptionModel != null) {
+            return Mono.fromCallable(() -> transcriptionModel.transcribe(audio))
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .flatMapMany(transcript -> {
+                        String finalInput = "【语音转写】" + transcript + "\n\n"
+                                + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
+                        return agentService.streamChat(finalInput, conversationId);
+                    });
+        } else if (audio != null && transcriptionModel == null) {
+            String finalInput = "【语音转写】语音转写功能未配置，无法处理音频。\n\n"
+                    + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
+            return agentService.streamChat(finalInput, conversationId);
+        }
+
+        // 路径 3：纯文字
+        String finalInput = (query != null && !query.isBlank()) ? query : "用户未提供有效输入。";
+        return agentService.streamChat(finalInput, conversationId);
+    }
+
+    /**
+     * 纯文本流式聊天（直接交给 AgentService 处理）
+     */
+    public Flux<String> streamChat(String query, String conversationId) {
+        return agentService.streamChat(query, conversationId);
     }
 
     /**

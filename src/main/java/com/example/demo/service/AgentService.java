@@ -10,6 +10,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.VectorStoreChatMemoryAdvisor;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
 @Service
 public class AgentService {
@@ -60,6 +61,19 @@ public class AgentService {
                 .user(userMessage)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
+                .content();
+    }
+
+    public Flux<String> streamChat(String userMessage) {
+        return streamChat(userMessage, "default");
+    }
+
+    public Flux<String> streamChat(String userMessage, String conversationId) {
+        skillTools.reset();
+        return chatClient.prompt()
+                .user(userMessage)
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                .stream()
                 .content();
     }
 }

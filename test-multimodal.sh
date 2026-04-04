@@ -1,23 +1,37 @@
 #!/usr/bin/env bash
 #
-# 多模态聊天测试脚本
+# 多模态聊天测试脚本（同步版本）
 # 测试文本聊天、图片识别、语音识别功能
 #
-# 用法:
-#   ./test-multimodal.sh                      # 运行所有测试
-#   ./test-multimodal.sh --skip-audio        # 跳过语音测试
-#   ./test-multimodal.sh --image path/to/img.png
-#   ./test-multimodal.sh --audio path/to/audio.wav
-#   ./test-multimodal.sh --image path --audio path
+# ═══════════════════════════════════════════════════════════════════
+# 使用方法
+# ═══════════════════════════════════════════════════════════════════
 #
-# 前置条件: 服务已启动 (.env 已配置)
+# 1. 在 .env 文件中配置测试文件路径（必选）：
+#    TEST_IMAGE_PATH=/path/to/your/test-image.jpg
+#    TEST_AUDIO_PATH=/path/to/your/test-audio.mp3
 #
+# 2. 运行测试：
+#    ./test-multimodal.sh                      # 运行所有测试
+#    ./test-multimodal.sh --skip-audio        # 跳过语音测试
+#    ./test-multimodal.sh --image path/to/img.png
+#    ./test-multimodal.sh --audio path/to/audio.wav
+#
+# 注意：测试文件路径从 .env 文件读取，不会提交到 git
+# ═══════════════════════════════════════════════════════════════════
 
 set -u
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
-IMAGE_FILE=""
-AUDIO_FILE=""
+
+# ── 加载 .env 文件中的测试配置 ────────────────────────────
+if [ -f .env ]; then
+    set -a && source .env && set +a
+fi
+
+# 测试文件路径（从环境变量读取，或使用命令行参数）
+IMAGE_FILE="${TEST_IMAGE_PATH:-}"
+AUDIO_FILE="${TEST_AUDIO_PATH:-}"
 SKIP_TEXT=""
 SKIP_IMAGE=""
 SKIP_AUDIO=""
@@ -44,6 +58,11 @@ show_help() {
     echo ""
     echo "环境变量:"
     echo "  BASE_URL          服务地址 (默认: http://localhost:8080)"
+    echo "  TEST_IMAGE_PATH   默认图片文件路径"
+    echo "  TEST_AUDIO_PATH   默认音频文件路径"
+    echo ""
+    echo "说明:"
+    echo "  测试文件路径优先从命令行参数读取，其次从环境变量读取"
     echo ""
     echo "示例:"
     echo "  $0 --image ./test.png"

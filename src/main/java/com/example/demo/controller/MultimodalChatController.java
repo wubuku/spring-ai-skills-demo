@@ -8,8 +8,12 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 import java.io.File;
+import java.io.IOException;
 
 /**
  * 多模态聊天控制器
@@ -22,7 +26,7 @@ import java.io.File;
 public class MultimodalChatController {
 
     private final MultimodalAgentService multimodalAgentService;
-    private final AgentService agentService;  // 用于纯文本接口，保持向后兼容
+    private final AgentService agentService;
 
     public MultimodalChatController(MultimodalAgentService multimodalAgentService,
                                    AgentService agentService) {
@@ -96,5 +100,102 @@ public class MultimodalChatController {
                 request.conversationId()
         );
         return new MultimodalChatResponse(answer);
+    }
+
+    /**
+     * 多模态流式聊天入口
+     * 支持 text + image + audio，返回 SSE 流式响应
+     */
+    @PostMapping(
+            path = "/multimodal/stream",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE
+    )
+    public SseEmitter chatStream(
+            @RequestParam(value = "query", required = false) String query,
+            @RequestParam(value = "conversationId", required = false, defaultValue = "default") String conversationId,
+            @RequestPart(value = "image", required = false) MultipartFile image,
+            @RequestPart(value = "audio", required = false) MultipartFile audio
+    ) {
+
+        SseEmitter emitter = new SseEmitter(0L);
+
+        File imageTemp = null;
+        File audioTemp = null;
+
+        try {
+            FileSystemResource imageResource = null;
+            String imageContentType = null;
+            if (image != null && !image.isEmpty()) {
+                imageTemp = File.createTempFile("img-", "-" + image.getOriginalFilename());
+                image.transferTo(imageTemp);
+                imageResource = new FileSystemResource(imageTemp);
+                imageContentType = image.getContentType();
+            }
+
+            FileSystemResource audioResource = null;
+            if (audio != null && !audio.isEmpty()) {
+                audioTemp = File.createTempFile("audio-", "-" + audio.getOriginalFilename());
+                audio.transferTo(audioTemp);
+                audioResource = new FileSystemResource(audioTemp);
+            }
+
+            final File finalImageTemp = imageTemp;
+            final File finalAudioTemp = audioTemp;
+
+            Flux<String> tokenFlux = multimodalAgentService.streamChat(
+                    query,
+                    conversationId,
+                    imageResource,
+                    imageContentType,
+                    audioResource
+            );
+
+            // 使用 Reactor 的 Schedulers.boundedElastic() 在独立线程中订阅 Flux
+            tokenFlux
+                .subscribeOn(Schedulers.boundedElastic())
+                .doFinally(signalType -> {
+                    if (finalImageTemp != null && finalImageTemp.exists()) {
+                        finalImageTemp.delete();
+                    }
+                    if (finalAudioTemp != null && finalAudioTemp.exists()) {
+                        finalAudioTemp.delete();
+                    }
+                })
+                .subscribe(
+                    token -> {
+                        try {
+                            emitter.send(SseEmitter.event().data(token));
+                        } catch (IOException e) {
+                            emitter.completeWithError(e);
+                        }
+                    },
+                    error -> emitter.completeWithError(error),
+                    () -> {
+                        try {
+                            emitter.send(SseEmitter.event().data("[DONE]"));
+                        } catch (IOException e) {
+                            emitter.completeWithError(e);
+                        } finally {
+                            emitter.complete();
+                        }
+                    }
+                );
+
+        } catch (Exception e) {
+            // 如果文件处理阶段就出错，清理临时文件并返回错误
+            if (imageTemp != null && imageTemp.exists()) {
+                imageTemp.delete();
+            }
+            if (audioTemp != null && audioTemp.exists()) {
+                audioTemp.delete();
+            }
+            emitter.completeWithError(e);
+        }
+
+        emitter.onTimeout(() -> emitter.complete());
+        emitter.onError(e -> emitter.complete());
+
+        return emitter;
     }
 }

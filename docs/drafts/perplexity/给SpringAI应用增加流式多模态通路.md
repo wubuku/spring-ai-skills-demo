@@ -6,11 +6,11 @@
 
 ---
 
-先给你一个总览：你现在的应用是「同步多模态 + 同步文本」，我们要在**不破坏现有能力（RAG、Skills、记忆、多模态）**的前提下，加一条「流式多模态通路」。
+先给你一个总览：你现在的应用是「同步多模态 + 同步文本」，我们要在不破坏现有能力（RAG、Skills、记忆、多模态）的前提下，加一条「流式多模态通路」。
 
 下面我会按**循序渐进 5 步**来带你做，尽量写成“照抄能跑”的 cookbook。
 
-***
+---
 
 ## 0. 先认识一下你现在的结构（复习）
 
@@ -31,7 +31,7 @@
 2. 给 `MultimodalAgentService` 加一个**流式多模态方法**；
 3. 在 `MultimodalChatController` 新增一个 **SSE 端点**，把流推给前端。
 
-***
+---
 
 ## 1. 在 AgentService 里加一个流式方法
 
@@ -109,7 +109,7 @@ public class AgentService {
 
 到这里为止，你已经有了一个「保留所有 RAG/记忆/Skills」的**流式 LLM 接口**，只是还没接到 Controller 而已。[^5][^3]
 
-***
+---
 
 ## 2. 给 MultimodalAgentService 加一个「多模态流式」方法
 
@@ -215,7 +215,7 @@ public class MultimodalAgentService {
 >
 > 用户会感觉前面有一小段等待，之后就像 ChatGPT 一样一点点打字。
 
-***
+---
 
 ## 3. 在 MultimodalChatController 里加一个 SSE 端点
 
@@ -368,7 +368,7 @@ public SseEmitter chatStream(
     - 返回：`text/event-stream` 的 SSE；
     - 每一条消息是一个 token（字符串），最后会有一个 `[DONE]`（你也可以去掉）。
 
-***
+---
 
 ## 4. 前端怎么用（最简单版）
 
@@ -439,7 +439,7 @@ es.onmessage = (e) => {
 ```
 
 
-***
+---
 
 ## 5. 常见坑 + 自检清单
 
@@ -461,7 +461,7 @@ es.onmessage = (e) => {
 5. 临时文件清理：
     - 用 `doFinally` 清理是比较优雅的方式，避免在异步线程里忘记删临时文件。
 
-***
+---
 
 如果你愿意，下一步我们可以在这个基础上再**加上“阶段事件”**（比如：“正在分析图片…”，“正在转写音频…”），让前端在 ASR/视觉阶段也看到进度条，而不是静默等待；不过先把上面这个「基础版流式多模态」跑通会更踏实。
 
@@ -475,7 +475,7 @@ es.onmessage = (e) => {
 
 你说得完全正确，我之前的 cookbook 在这一点上写错了！现在明确纠正。
 
-***
+---
 
 ## 纠正：视觉模型完全支持流式
 
@@ -490,7 +490,7 @@ es.onmessage = (e) => {
 
 你当前的 `describeImage()` 是用 `.call().content()` 同步调用的，**完全可以改成流式**。真正无法流式的只有 `TranscriptionModel.transcribe(audio)`。[^1]
 
-***
+---
 
 ## 正确的流水线设计
 
@@ -501,7 +501,7 @@ es.onmessage = (e) => {
 ```
 
 
-***
+---
 
 ## 关键技术：`Flux.cache()` + `Flux.concat()`
 
@@ -572,7 +572,7 @@ public Flux<String> streamChat(String query,
 ```
 
 
-***
+---
 
 ## 前端会看到的效果
 
@@ -594,7 +594,7 @@ t=5s     ← [DONE]
 ```
 
 
-***
+---
 
 ## Controller 不需要改
 

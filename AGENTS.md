@@ -44,12 +44,24 @@ Endpoints after startup:
 5. LLM then calls `SkillTools.httpRequest(...)` to invoke the actual REST API on localhost
 6. Response flows back to the user
 
+### Streaming Support
+
+The agent supports SSE (Server-Sent Events) streaming for real-time responses:
+
+- **`POST /api/chat/stream`** - Text streaming endpoint (JSON request)
+- **`POST /api/chat/multimodal/stream`** - Multimodal streaming endpoint (multipart/form-data)
+
+Both endpoints use `Flux<String>` from Project Reactor to stream tokens as they are generated.
+
 ### Key Components
 
 - **`agent/SkillRegistry`** — Reads `src/main/resources/skills/*/SKILL.md` files at startup, parsing YAML frontmatter (name, description, links) and Markdown body. Central store for all skills.
 - **`agent/SkillTools`** — Spring AI `@Tool`-annotated methods: `loadSkill` (progressive disclosure gate) and `httpRequest` (generic HTTP caller the LLM uses to invoke REST endpoints).
 - **`agent/SkillsAdvisor`** — `CallAroundAdvisor` that builds the system prompt with Level 1 catalog + Level 2 loaded content. Runs at `HIGHEST_PRECEDENCE`.
-- **`service/AgentService`** — Wires `ChatClient` with the advisor and tools; resets skill state per request (stateless turns).
+- **`service/AgentService`** — Wires `ChatClient` with the advisor and tools; resets skill state per request (stateless turns). Also provides `streamChat()` for SSE streaming.
+- **`service/MultimodalAgentService`** — Handles multimodal input (images + audio) by converting to text before passing to AgentService. Supports streaming via `streamChat()`.
+- **`controller/ChatController`** — Provides `/api/chat/stream` SSE endpoint for text streaming.
+- **`controller/MultimodalChatController`** — Provides `/api/chat/multimodal/stream` SSE endpoint for multimodal streaming.
 - **`service/ProductService`** — In-memory product catalog and cart (no database). Pre-loaded with sample data.
 
 ### Confirm-Before-Mutate Mode
