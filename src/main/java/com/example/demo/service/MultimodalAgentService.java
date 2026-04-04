@@ -90,6 +90,9 @@ public class MultimodalAgentService {
 
     /**
      * 多模态流式聊天
+     *
+     * 支持：纯文字、图片+文字、语音+文字、图片+语音+文字
+     * 每个模态都尽可能流式处理
      */
     public Flux<MultimodalToken> streamChat(String query,
                                             String conversationId,
@@ -97,49 +100,60 @@ public class MultimodalAgentService {
                                             String imageContentType,
                                             Resource audio) {
 
-        // 路径 1：有图片 - 视觉模型流式 + LLM 流式
-        if (image != null) {
-            MediaType mt = parseMediaType(imageContentType, MediaType.IMAGE_JPEG);
-            Media media = new Media(mt, image);
-            String visionPrompt = (query != null && !query.isBlank())
-                    ? "用户问题是：" + query + "\n请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。"
-                    : "请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
+        boolean hasImage = image != null;
+        boolean hasAudio = audio != null;
 
-            Flux<String> visionTokens = visionChatClient.prompt()
-                    .user(user -> user.text(visionPrompt).media(media))
-                    .stream()
-                    .content()
-                    .cache();
-
-            Flux<MultimodalToken> visionStage = visionTokens.map(token -> MultimodalToken.vision(token));
-
-            Flux<MultimodalToken> llmStage = visionTokens
-                    .reduce("", String::concat)
-                    .flatMapMany(imageDescription -> {
-                        String finalInput = "【图片内容】" + imageDescription + "\n\n"
-                                + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
-                        return agentService.streamChat(finalInput, conversationId)
-                                .map(token -> MultimodalToken.content(token));
-                    });
-
-            return Flux.concat(visionStage, llmStage);
+        // 场景 1：图片 + 语音
+        if (hasImage && hasAudio) {
+            return streamImageAndAudio(query, conversationId, image, imageContentType, audio);
         }
 
-        // 路径 2：有音频（ASR 只能同步）
-        if (audio != null && transcriptionModel != null) {
-            return Mono.fromCallable(() -> transcriptionModel.transcribe(audio))
-                    .subscribeOn(Schedulers.boundedElastic())
-                    .flatMapMany(transcript -> {
-                        Flux<MultimodalToken> transcribedStage = Flux.just(
-                                MultimodalToken.transcribed("【语音转写】" + transcript)
-                        );
-                        String finalInput = (query != null && !query.isBlank())
-                                ? "【用户输入】" + query : "";
-                        Flux<MultimodalToken> llmStage = agentService.streamChat(finalInput, conversationId)
-                                .map(token -> MultimodalToken.content(token));
-                        return Flux.concat(transcribedStage, llmStage);
-                    });
-        } else if (audio != null && transcriptionModel == null) {
+        // 场景 2：只有图片
+        if (hasImage) {
+            return streamImageOnly(query, conversationId, image, imageContentType);
+        }
+
+        // 场景 3：只有音频
+        if (hasAudio) {
+            return streamAudioOnly(query, conversationId, audio);
+        }
+
+        // 场景 4：纯文字
+        String finalInput = (query != null && !query.isBlank()) ? query : "用户未提供有效输入。";
+        return agentService.streamChat(finalInput, conversationId)
+                .map(token -> MultimodalToken.content(token));
+    }
+
+    private Flux<MultimodalToken> streamImageOnly(String query, String conversationId,
+                                                  Resource image, String imageContentType) {
+        MediaType mt = parseMediaType(imageContentType, MediaType.IMAGE_JPEG);
+        Media media = new Media(mt, image);
+        String visionPrompt = (query != null && !query.isBlank())
+                ? "用户问题是：" + query + "\n请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。"
+                : "请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
+
+        Flux<String> visionTokens = visionChatClient.prompt()
+                .user(user -> user.text(visionPrompt).media(media))
+                .stream()
+                .content()
+                .cache();
+
+        Flux<MultimodalToken> visionStage = visionTokens.map(token -> MultimodalToken.vision(token));
+
+        Flux<MultimodalToken> llmStage = visionTokens
+                .reduce("", String::concat)
+                .flatMapMany(imageDescription -> {
+                    String finalInput = "【图片内容】" + imageDescription + "\n\n"
+                            + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
+                    return agentService.streamChat(finalInput, conversationId)
+                            .map(token -> MultimodalToken.content(token));
+                });
+
+        return Flux.concat(visionStage, llmStage);
+    }
+
+    private Flux<MultimodalToken> streamAudioOnly(String query, String conversationId, Resource audio) {
+        if (transcriptionModel == null) {
             return Flux.just(MultimodalToken.transcribed("【语音转写】语音转写功能未配置，无法处理音频。\n\n"))
                     .concatWith(query != null && !query.isBlank()
                             ? agentService.streamChat("【用户输入】" + query, conversationId)
@@ -147,10 +161,53 @@ public class MultimodalAgentService {
                             : Flux.empty());
         }
 
-        // 路径 3：纯文字
-        String finalInput = (query != null && !query.isBlank()) ? query : "用户未提供有效输入。";
-        return agentService.streamChat(finalInput, conversationId)
-                .map(token -> MultimodalToken.content(token));
+        return Mono.fromCallable(() -> transcriptionModel.transcribe(audio))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMapMany(transcript -> {
+                    String finalInput = "【语音转写】" + transcript + "\n\n"
+                            + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
+                    return agentService.streamChat(finalInput, conversationId)
+                            .map(token -> MultimodalToken.content(token));
+                });
+    }
+
+    private Flux<MultimodalToken> streamImageAndAudio(String query, String conversationId,
+                                                       Resource image, String imageContentType,
+                                                       Resource audio) {
+        MediaType mt = parseMediaType(imageContentType, MediaType.IMAGE_JPEG);
+        Media media = new Media(mt, image);
+        String visionPrompt = "请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
+
+        // Vision 流式处理
+        Flux<String> visionTokens = visionChatClient.prompt()
+                .user(user -> user.text(visionPrompt).media(media))
+                .stream()
+                .content()
+                .cache();
+
+        Flux<MultimodalToken> visionStage = visionTokens.map(token -> MultimodalToken.vision(token));
+
+        // ASR 同步处理（与 vision 并行）
+        Mono<String> asrMono = transcriptionModel != null
+                ? Mono.fromCallable(() -> transcriptionModel.transcribe(audio))
+                        .subscribeOn(Schedulers.boundedElastic())
+                : Mono.just("【语音转写】语音转写功能未配置，无法处理音频。");
+
+        // LLM 需要等 vision 和 ASR 都完成
+        Flux<MultimodalToken> llmStage = visionTokens
+                .reduce("", String::concat)
+                .zipWith(asrMono)
+                .flatMapMany(tuple -> {
+                    String imageDescription = tuple.getT1();
+                    String transcript = tuple.getT2();
+                    String finalInput = "【图片内容】" + imageDescription + "\n\n"
+                            + "【语音转写】" + transcript + "\n\n"
+                            + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
+                    return agentService.streamChat(finalInput, conversationId)
+                            .map(token -> MultimodalToken.content(token));
+                });
+
+        return Flux.concat(visionStage, llmStage);
     }
 
     /**
