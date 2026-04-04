@@ -304,9 +304,9 @@ curl -s -N -X POST http://localhost:8080/api/chat/stream \
 **SSE 响应格式（OpenAI 兼容格式）：**
 
 ```json
-data:{"choices":[{"finish_reason":null,"delta":{"content":"你"}}]}
-data:{"choices":[{"finish_reason":null,"delta":{"content":"好"}}]}
-data:{"choices":[{"finish_reason":null,"delta":{"content":"！"}}]}
+data:{"choices":[{"delta":{"content":"你"}}]}
+data:{"choices":[{"delta":{"content":"好"}}]}
+data:{"choices":[{"delta":{"content":"！"}}]}
 ...
 data:[DONE]
 ```
@@ -334,12 +334,12 @@ curl -s -N -X POST http://localhost:8080/api/chat/multimodal/stream \
 **多模态 SSE 响应格式示例：**
 
 ```json
-data:{"type":"vision","choices":[{"finish_reason":null,"delta":{"content":"这"}}]}
-data:{"type":"vision","choices":[{"finish_reason":null,"delta":{"content":"张"}}]}
-data:{"type":"vision","choices":[{"finish_reason":null,"delta":{"content":"图"}}]}
+data:{"type":"vision","choices":[{"delta":{"content":"这"}}]}
+data:{"type":"vision","choices":[{"delta":{"content":"张"}}]}
+data:{"type":"vision","choices":[{"delta":{"content":"图"}}]}
 ...
-data:{"type":"content","choices":[{"finish_reason":null,"delta":{"content":"根"}}]}
-data:{"type":"content","choices":[{"finish_reason":null,"delta":{"content":"据"}}]}
+data:{"type":"content","choices":[{"delta":{"content":"根"}}]}
+data:{"type":"content","choices":[{"delta":{"content":"据"}}]}
 ...
 data:[DONE]
 ```
