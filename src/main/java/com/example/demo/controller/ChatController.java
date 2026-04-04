@@ -95,10 +95,9 @@ public class ChatController {
             .subscribe(
                 token -> {
                     try {
-                        // 使用 HashMap 序列化为 OpenAI SSE 格式
-                        Map<String, Object> delta = Map.of("content", token);
-                        Map<String, Object> choice = Map.of("delta", delta);
-                        Map<String, Object> chunk = Map.of("choices", List.of(choice));
+                        Map<String, Object> chunk = Map.of(
+                            "choices", List.of(Map.of("delta", Map.of("content", token)))
+                        );
                         emitter.send(SseEmitter.event()
                             .data(objectMapper.writeValueAsString(chunk)));
                     } catch (IOException e) {

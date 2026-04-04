@@ -172,20 +172,14 @@ public class MultimodalChatController {
                 .subscribe(
                     token -> {
                         try {
-                            // 使用 OpenAI SSE 格式，兼容多模态扩展
-                            // type 字段区分内容来源：
-                            // - "vision": 视觉模型识别结果
-                            // - "content": LLM 生成内容
-                            String type = token.startsWith("【图片识别】") ? "vision" : "content";
                             String content = token.startsWith("【图片识别】")
                                 ? token.substring(7)  // 去掉前缀
                                 : token;
+                            String type = token.startsWith("【图片识别】") ? "vision" : "content";
 
-                            Map<String, Object> delta = Map.of("content", content);
-                            Map<String, Object> choice = Map.of("delta", delta);
                             Map<String, Object> chunk = new java.util.HashMap<>();
                             chunk.put("type", type);
-                            chunk.put("choices", List.of(choice));
+                            chunk.put("choices", List.of(Map.of("delta", Map.of("content", content))));
                             emitter.send(SseEmitter.event()
                                 .data(objectMapper.writeValueAsString(chunk)));
                         } catch (IOException e) {
