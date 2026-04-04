@@ -130,16 +130,21 @@ public class MultimodalAgentService {
             return Mono.fromCallable(() -> transcriptionModel.transcribe(audio))
                     .subscribeOn(Schedulers.boundedElastic())
                     .flatMapMany(transcript -> {
-                        String finalInput = "【语音转写】" + transcript + "\n\n"
-                                + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
-                        return agentService.streamChat(finalInput, conversationId)
+                        Flux<MultimodalToken> transcribedStage = Flux.just(
+                                MultimodalToken.transcribed("【语音转写】" + transcript)
+                        );
+                        String finalInput = (query != null && !query.isBlank())
+                                ? "【用户输入】" + query : "";
+                        Flux<MultimodalToken> llmStage = agentService.streamChat(finalInput, conversationId)
                                 .map(token -> MultimodalToken.content(token));
+                        return Flux.concat(transcribedStage, llmStage);
                     });
         } else if (audio != null && transcriptionModel == null) {
-            String finalInput = "【语音转写】语音转写功能未配置，无法处理音频。\n\n"
-                    + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
-            return agentService.streamChat(finalInput, conversationId)
-                    .map(token -> MultimodalToken.content(token));
+            return Flux.just(MultimodalToken.transcribed("【语音转写】语音转写功能未配置，无法处理音频。\n\n"))
+                    .concatWith(query != null && !query.isBlank()
+                            ? agentService.streamChat("【用户输入】" + query, conversationId)
+                                    .map(token -> MultimodalToken.content(token))
+                            : Flux.empty());
         }
 
         // 路径 3：纯文字
