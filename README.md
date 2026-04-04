@@ -301,14 +301,12 @@ curl -s -N -X POST http://localhost:8080/api/chat/stream \
   --max-time 60
 ```
 
-**SSE 响应格式：**
+**SSE 响应格式（OpenAI 兼容格式）：**
 
-```
-data:你
-data:好
-data:！
-data:我
-data:是
+```json
+data:{"choices":[{"finish_reason":null,"delta":{"content":"你"}}]}
+data:{"choices":[{"finish_reason":null,"delta":{"content":"好"}}]}
+data:{"choices":[{"finish_reason":null,"delta":{"content":"！"}}]}
 ...
 data:[DONE]
 ```
@@ -328,9 +326,23 @@ curl -s -N -X POST http://localhost:8080/api/chat/multimodal/stream \
 ```
 
 **响应特点：**
-- 视觉模型生成的 token 会标记 `【图片识别】` 前缀
-- LLM 生成的 token 正常输出
+- 使用 OpenAI SSE 格式，兼容主流 AI 前端库
+- `type` 字段区分内容来源：`"vision"`（视觉模型） 或 `"content"`（LLM）
+- `delta.content` 包含实际的 token 内容
 - 流结束发送 `[DONE]` 标记
+
+**多模态 SSE 响应格式示例：**
+
+```json
+data:{"type":"vision","choices":[{"finish_reason":null,"delta":{"content":"这"}}]}
+data:{"type":"vision","choices":[{"finish_reason":null,"delta":{"content":"张"}}]}
+data:{"type":"vision","choices":[{"finish_reason":null,"delta":{"content":"图"}}]}
+...
+data:{"type":"content","choices":[{"finish_reason":null,"delta":{"content":"根"}}]}
+data:{"type":"content","choices":[{"finish_reason":null,"delta":{"content":"据"}}]}
+...
+data:[DONE]
+```
 
 ### 工作原理
 

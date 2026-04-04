@@ -4,6 +4,7 @@ import com.example.demo.dto.MultimodalChatRequest;
 import com.example.demo.dto.MultimodalChatResponse;
 import com.example.demo.service.AgentService;
 import com.example.demo.service.MultimodalAgentService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -14,12 +15,15 @@ import reactor.core.scheduler.Schedulers;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 多模态聊天控制器
  * 支持图片和音频上传，结合文本进行多模态对话
  *
  * 核心设计：复用现有的 AgentService，保留所有能力（RAG、Skills、记忆等）
+ * SSE 格式：兼容 OpenAI 标准格式，支持多模态扩展（通过 type 字段区分）
  */
 @RestController
 @RequestMapping("/api/chat")
@@ -27,11 +31,14 @@ public class MultimodalChatController {
 
     private final MultimodalAgentService multimodalAgentService;
     private final AgentService agentService;
+    private final ObjectMapper objectMapper;
 
     public MultimodalChatController(MultimodalAgentService multimodalAgentService,
-                                   AgentService agentService) {
+                                   AgentService agentService,
+                                   ObjectMapper objectMapper) {
         this.multimodalAgentService = multimodalAgentService;
         this.agentService = agentService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -165,7 +172,26 @@ public class MultimodalChatController {
                 .subscribe(
                     token -> {
                         try {
-                            emitter.send(SseEmitter.event().data(token));
+                            // 使用 OpenAI SSE 格式，兼容多模态扩展
+                            // type 字段区分内容来源：
+                            // - "vision": 视觉模型识别结果
+                            // - "content": LLM 生成内容
+                            String type = token.startsWith("【图片识别】") ? "vision" : "content";
+                            String content = token.startsWith("【图片识别】")
+                                ? token.substring(7)  // 去掉前缀
+                                : token;
+
+                            // 使用 HashMap 允许 null 值
+                            Map<String, Object> delta = new java.util.HashMap<>();
+                            delta.put("content", content);
+                            Map<String, Object> choice = new java.util.HashMap<>();
+                            choice.put("delta", delta);
+                            choice.put("finish_reason", null);
+                            Map<String, Object> chunk = new java.util.HashMap<>();
+                            chunk.put("type", type);
+                            chunk.put("choices", List.of(choice));
+                            emitter.send(SseEmitter.event()
+                                .data(objectMapper.writeValueAsString(chunk)));
                         } catch (IOException e) {
                             emitter.completeWithError(e);
                         }

@@ -2,6 +2,7 @@ package com.example.demo.controller;
 
 import com.example.demo.model.ChatMessage;
 import com.example.demo.service.AgentService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -13,6 +14,7 @@ import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -20,9 +22,11 @@ import java.util.Map;
 public class ChatController {
 
     private final AgentService agentService;
+    private final ObjectMapper objectMapper;
 
-    public ChatController(AgentService agentService) {
+    public ChatController(AgentService agentService, ObjectMapper objectMapper) {
         this.agentService = agentService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -91,7 +95,16 @@ public class ChatController {
             .subscribe(
                 token -> {
                     try {
-                        emitter.send(SseEmitter.event().data(token));
+                        // 使用 HashMap 序列化为 OpenAI SSE 格式
+                        Map<String, Object> delta = new java.util.HashMap<>();
+                        delta.put("content", token);
+                        Map<String, Object> choice = new java.util.HashMap<>();
+                        choice.put("delta", delta);
+                        choice.put("finish_reason", null);
+                        Map<String, Object> chunk = new java.util.HashMap<>();
+                        chunk.put("choices", List.of(choice));
+                        emitter.send(SseEmitter.event()
+                            .data(objectMapper.writeValueAsString(chunk)));
                     } catch (IOException e) {
                         emitter.completeWithError(e);
                     }
