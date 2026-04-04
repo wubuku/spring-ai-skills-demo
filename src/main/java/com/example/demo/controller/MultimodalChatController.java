@@ -2,6 +2,7 @@ package com.example.demo.controller;
 
 import com.example.demo.dto.MultimodalChatRequest;
 import com.example.demo.dto.MultimodalChatResponse;
+import com.example.demo.model.MultimodalToken;
 import com.example.demo.service.AgentService;
 import com.example.demo.service.MultimodalAgentService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -150,7 +151,7 @@ public class MultimodalChatController {
             final File finalImageTemp = imageTemp;
             final File finalAudioTemp = audioTemp;
 
-            Flux<String> tokenFlux = multimodalAgentService.streamChat(
+            Flux<MultimodalToken> tokenFlux = multimodalAgentService.streamChat(
                     query,
                     conversationId,
                     imageResource,
@@ -158,7 +159,6 @@ public class MultimodalChatController {
                     audioResource
             );
 
-            // 使用 Reactor 的 Schedulers.boundedElastic() 在独立线程中订阅 Flux
             tokenFlux
                 .subscribeOn(Schedulers.boundedElastic())
                 .doFinally(signalType -> {
@@ -170,16 +170,12 @@ public class MultimodalChatController {
                     }
                 })
                 .subscribe(
-                    token -> {
+                    mt -> {
                         try {
-                            String content = token.startsWith("【图片识别】")
-                                ? token.substring(7)  // 去掉前缀
-                                : token;
-                            String type = token.startsWith("【图片识别】") ? "vision" : "content";
-
-                            Map<String, Object> chunk = new java.util.HashMap<>();
-                            chunk.put("type", type);
-                            chunk.put("choices", List.of(Map.of("delta", Map.of("content", content))));
+                            Map<String, Object> chunk = Map.of(
+                                "type", mt.type(),
+                                "choices", List.of(Map.of("delta", Map.of("content", mt.content())))
+                            );
                             emitter.send(SseEmitter.event()
                                 .data(objectMapper.writeValueAsString(chunk)));
                         } catch (IOException e) {

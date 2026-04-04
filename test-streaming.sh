@@ -221,8 +221,8 @@ test_multimodal_stream_with_image() {
             full_response="${full_response}${data}"
             event_count=$((event_count + 1))
 
-            # 检查是否是视觉识别流
-            if [[ "$data" == *"【图片识别】"* ]]; then
+            # 检查是否是视觉识别流（现在使用 type 字段）
+            if [[ "$data" == *'"type":"vision"'* ]]; then
                 vision_events=$((vision_events + 1))
             else
                 llm_events=$((llm_events + 1))
