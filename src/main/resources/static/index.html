@@ -362,11 +362,80 @@
             font-family: monospace;
             min-width: 35px;
         }
+        /* 流式模式开关样式 */
+        .stream-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 20px;
+            font-size: 12px;
+            color: white;
+        }
+        .stream-toggle .toggle-switch {
+            position: relative;
+            width: 40px;
+            height: 20px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .stream-toggle .toggle-switch.active {
+            background: #4CAF50;
+        }
+        .stream-toggle .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            transition: left 0.3s;
+        }
+        .stream-toggle .toggle-switch.active::after {
+            left: 22px;
+        }
+        .stream-toggle .stream-icon {
+            font-size: 14px;
+        }
+        /* 打字机光标效果 */
+        .typing-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1em;
+            background: #667eea;
+            margin-left: 2px;
+            animation: blink 0.7s infinite;
+            vertical-align: text-bottom;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        /* 不同类型 token 的样式 */
+        .token-vision {
+            color: #27ae60;
+            font-style: italic;
+        }
+        .token-transcribed {
+            color: #e67e22;
+        }
     </style>
 </head>
 <body>
     <!-- 认证栏 -->
     <div class="auth-bar">
+        <!-- 流式模式切换 -->
+        <div class="stream-toggle" title="开启后 AI 回复会以打字机效果展示">
+            <span class="stream-icon">📡</span>
+            <span id="streamModeLabel">同步</span>
+            <div class="toggle-switch" id="streamToggle" onclick="toggleStreamMode()"></div>
+            <span id="streamModeLabelEnd" style="display:none;">流式</span>
+        </div>
         <span class="user-info" id="userInfo" style="display: none;">
             欢迎，<strong id="displayName"></strong>
         </span>
@@ -451,6 +520,38 @@
         // 认证状态
         let authToken = localStorage.getItem('auth_token');
         let authUsername = localStorage.getItem('auth_username');
+
+        // 流式模式状态
+        let isStreamMode = localStorage.getItem('stream_mode') === 'true';
+
+        // 页面加载时初始化流式模式开关状态
+        // (onload 已在上面定义)
+
+        // 更新流式模式开关UI
+        function updateStreamToggleUI() {
+            const toggle = document.getElementById('streamToggle');
+            const labelStart = document.getElementById('streamModeLabel');
+            const labelEnd = document.getElementById('streamModeLabelEnd');
+            if (isStreamMode) {
+                toggle.classList.add('active');
+                labelStart.style.display = 'none';
+                labelEnd.style.display = 'inline';
+            } else {
+                toggle.classList.remove('active');
+                labelStart.style.display = 'inline';
+                labelEnd.style.display = 'none';
+            }
+        }
+
+        // 切换流式/同步模式
+        function toggleStreamMode() {
+            isStreamMode = !isStreamMode;
+            localStorage.setItem('stream_mode', isStreamMode);
+            updateStreamToggleUI();
+            // 显示提示
+            const tip = isStreamMode ? '已切换到流式模式，AI回复将显示打字机效果' : '已切换到同步模式';
+            appendMessage('assistant', '💡 ' + tip);
+        }
 
         // 页面加载时检查登录状态
         window.onload = function() {
@@ -972,7 +1073,7 @@
             updatePreviewVisibility();
         }
 
-        // ==================== 发送消息（支持多模态） ====================
+        // ==================== 发送消息（支持多模态 + 流式） ====================
 
         async function sendMessage() {
             const input = document.getElementById('userInput');
@@ -1006,15 +1107,31 @@
             input.value = '';
             sendBtn.disabled = true;
 
-            // 显示加载中
+            // 判断是否需要使用多模态接口（上传了图片或音频）
+            const hasAttachments = selectedImages.length > 0 || recordedAudio;
+
+            // 判断是否使用流式模式
+            if (isStreamMode) {
+                // 使用流式 SSE 模式
+                await sendMessageStream(userMessage, hasAttachments, messages, sendBtn);
+            } else {
+                // 使用同步模式
+                await sendMessageSync(userMessage, hasAttachments, messages, sendBtn);
+            }
+
+            // 清理附件
+            clearAttachments();
+            sendBtn.disabled = false;
+            input.focus();
+        }
+
+        // 同步模式发送消息
+        async function sendMessageSync(userMessage, hasAttachments, messages, sendBtn) {
             const loadingDiv = appendMessage('assistant', '<span class="loading"></span> 正在处理...');
 
             try {
                 let response;
                 let data;
-
-                // 判断是否需要使用多模态接口（上传了图片或音频）
-                const hasAttachments = selectedImages.length > 0 || recordedAudio;
 
                 if (hasAttachments) {
                     // 使用 FormData 发送多模态请求
@@ -1024,12 +1141,10 @@
                     }
                     formData.append('conversationId', 'default');
 
-                    // 添加图片
                     selectedImages.forEach(file => {
                         formData.append('image', file);
                     });
 
-                    // 添加音频
                     if (recordedAudio) {
                         formData.append('audio', recordedAudio);
                     }
@@ -1047,7 +1162,7 @@
                     });
                     data = await response.json();
                 } else {
-                    // 使用 JSON 发送纯文本请求（保持向后兼容）
+                    // 使用 JSON 发送纯文本请求
                     response = await fetch('/api/chat/text', {
                         method: 'POST',
                         headers: getAuthHeaders(),
@@ -1066,15 +1181,245 @@
                     appendMessage('assistant', data.response);
                 }
 
-                // 清理附件
-                clearAttachments();
-
             } catch (error) {
                 messages.removeChild(loadingDiv);
                 appendMessage('assistant', '抱歉，服务出问题了：' + error.message);
-            } finally {
-                sendBtn.disabled = false;
-                input.focus();
+            }
+        }
+
+        // 流式模式发送消息（SSE + 打字机效果）
+        async function sendMessageStream(userMessage, hasAttachments, messages, sendBtn) {
+            // 创建带打字机效果的容器
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+            messages.appendChild(messageDiv);
+
+            // 用于收集最终的完整文本（用于解析确认操作）
+            let fullText = '';
+
+            try {
+                let endpoint = '/api/chat/multimodal/stream';
+                let body;
+                let headers = {};
+
+                const token = localStorage.getItem('auth_token');
+                if (token) {
+                    headers['Authorization'] = 'Bearer ' + token;
+                }
+
+                if (hasAttachments) {
+                    // 多模态流式请求使用 FormData
+                    const formData = new FormData();
+                    if (userMessage) {
+                        formData.append('query', userMessage);
+                    }
+                    formData.append('conversationId', 'default');
+
+                    selectedImages.forEach(file => {
+                        formData.append('image', file);
+                    });
+
+                    if (recordedAudio) {
+                        formData.append('audio', recordedAudio);
+                    }
+
+                    headers['Accept'] = 'text/event-stream';
+                    body = formData;
+                } else {
+                    // 纯文本也使用 SSE 端点
+                    const formData = new FormData();
+                    formData.append('query', userMessage);
+                    formData.append('conversationId', 'default');
+                    headers['Accept'] = 'text/event-stream';
+                    body = formData;
+                }
+
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: headers,
+                    body: body
+                });
+
+                if (!response.ok) {
+                    throw new Error('请求失败: ' + response.status);
+                }
+
+                // 读取 SSE 流
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // SSE 事件用 \n\n 分隔
+                    while (buffer.includes('\n\n')) {
+                        const eventEnd = buffer.indexOf('\n\n');
+                        const eventData = buffer.slice(0, eventEnd);
+                        buffer = buffer.slice(eventEnd + 2);
+
+                        // 解析并处理事件
+                        const tokens = parseSSEEvent(eventData);
+                        for (const token of tokens) {
+                            fullText += token.content;
+                            if (token.type === 'vision') {
+                                // vision 类型：立即显示
+                                const cursor = messageDiv.querySelector('.typing-cursor');
+                                if (cursor) cursor.remove();
+                                const span = document.createElement('span');
+                                span.className = 'token-vision';
+                                span.textContent = token.content;
+                                messageDiv.insertBefore(span, messageDiv.lastChild);
+                                messages.scrollTop = messages.scrollHeight;
+                            } else {
+                                // content：打字机效果
+                                await typewriterAppend(messageDiv, token.content);
+                            }
+                        }
+                    }
+                }
+
+                // 处理剩余的 buffer
+                if (buffer.trim() && !buffer.includes('[DONE]')) {
+                    const tokens = parseSSEEvent(buffer);
+                    for (const token of tokens) {
+                        fullText += token.content;
+                    }
+                }
+
+                // 检测是否包含需要用户确认的操作
+                const confirmAction = parseConfirmAction(fullText);
+                if (confirmAction) {
+                    // 替换消息内容为确认操作
+                    messageDiv.innerHTML = '';
+                    showConfirmAction(confirmAction, messageDiv);
+                }
+
+            } catch (error) {
+                messageDiv.innerHTML = '抱歉，服务出问题了：' + error.message;
+            }
+        }
+
+        // 解析单个 SSE 事件，返回 token 数组
+        function parseSSEEvent(eventData) {
+            const tokens = [];
+            const lines = eventData.split('\n');
+            for (const line of lines) {
+                if (line.startsWith('data:')) {
+                    const data = line.slice(5).trim();
+                    if (data === '[DONE]') continue;
+                    try {
+                        const json = JSON.parse(data);
+                        const type = json.type;
+                        const content = json.choices && json.choices[0] && json.choices[0].delta && json.choices[0].delta.content;
+                        if (content) {
+                            tokens.push({ type: type, content: content });
+                        }
+                    } catch (e) {
+                        // 忽略解析错误
+                    }
+                }
+            }
+            return tokens;
+        }
+
+        // 打字机效果：逐字添加内容（带光标）
+        async function typewriterAppend(element, text) {
+            // 确保有光标
+            let cursor = element.querySelector('.typing-cursor');
+            if (!cursor) {
+                cursor = document.createElement('span');
+                cursor.className = 'typing-cursor';
+                element.appendChild(cursor);
+            }
+
+            for (const char of text) {
+                const span = document.createElement('span');
+                span.textContent = char;
+                element.insertBefore(span, cursor);
+                // 滚动到底部
+                element.parentElement.scrollTop = element.parentElement.scrollHeight;
+                // 添加小延迟以实现打字机效果
+                await new Promise(resolve => setTimeout(resolve, 15));
+            }
+        }
+
+        // 显示确认操作（支持自定义消息容器）
+        function showConfirmAction(action, messageDiv) {
+            const messages = document.getElementById('messages');
+            const descHtml = action.description.replace(/\n/g, '<br>');
+
+            if (messageDiv) {
+                messageDiv.innerHTML = descHtml;
+                const btnContainer = document.createElement('div');
+                btnContainer.className = 'confirm-buttons';
+
+                const confirmBtn = document.createElement('button');
+                confirmBtn.textContent = '确定';
+                confirmBtn.className = 'confirm-btn';
+                confirmBtn.onclick = async () => {
+                    btnContainer.remove();
+                    const loading = appendMessage('assistant',
+                        '<span class="loading"></span> 正在执行...');
+                    try {
+                        const result = await executeHttpRequest(action.requestMeta);
+                        messages.removeChild(loading);
+                        appendMessage('assistant', '✅ 操作结果：' + result);
+                    } catch (e) {
+                        messages.removeChild(loading);
+                        appendMessage('assistant', '❌ 操作失败：' + e.message);
+                    }
+                };
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.textContent = '取消';
+                cancelBtn.className = 'cancel-btn';
+                cancelBtn.onclick = () => {
+                    btnContainer.remove();
+                    appendMessage('assistant', '已取消该操作。');
+                };
+
+                btnContainer.appendChild(confirmBtn);
+                btnContainer.appendChild(cancelBtn);
+                messageDiv.appendChild(btnContainer);
+                messages.scrollTop = messages.scrollHeight;
+            } else {
+                const msgDiv = appendMessage('assistant', descHtml);
+                const btnContainer = document.createElement('div');
+                btnContainer.className = 'confirm-buttons';
+
+                const confirmBtn = document.createElement('button');
+                confirmBtn.textContent = '确定';
+                confirmBtn.className = 'confirm-btn';
+                confirmBtn.onclick = async () => {
+                    btnContainer.remove();
+                    const loading = appendMessage('assistant',
+                        '<span class="loading"></span> 正在执行...');
+                    try {
+                        const result = await executeHttpRequest(action.requestMeta);
+                        messages.removeChild(loading);
+                        appendMessage('assistant', '✅ 操作结果：' + result);
+                    } catch (e) {
+                        messages.removeChild(loading);
+                        appendMessage('assistant', '❌ 操作失败：' + e.message);
+                    }
+                };
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.textContent = '取消';
+                cancelBtn.className = 'cancel-btn';
+                cancelBtn.onclick = () => {
+                    btnContainer.remove();
+                    appendMessage('assistant', '已取消该操作。');
+                };
+
+                btnContainer.appendChild(confirmBtn);
+                btnContainer.appendChild(cancelBtn);
+                msgDiv.appendChild(btnContainer);
+                messages.scrollTop = messages.scrollHeight;
             }
         }
 
