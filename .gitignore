@@ -21,3 +21,4 @@ data/
 .playwright-mcp
 CLAUDE.md
 .env_openai
+beebox-openapi-v1
