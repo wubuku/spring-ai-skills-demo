@@ -142,14 +142,13 @@ public class SkillsAdvisor implements BaseAdvisor {
                - **禁止**使用 httpRequest 工具直接执行（会返回 403 错误）
                - **必须**通过 buildHttpRequest 构建请求，让前端确认后执行
 
-               **正确示例**（以下从标签 `<RETURN_TO_FRONTEND>` 起，到标签 `</RETURN_TO_FRONTEND>` 为止，之间的内容都是需要返回的——注意返回内容**不包含**这两个标签）：
-               <RETURN_TO_FRONTEND>
+               **正确示例**（从下一行开始直到 `---` 为止，之间的内容都是需返回的内容的示例)：
                我现在帮你添加 iPhone15 到购物车：
 
                ```http-request
                {"method":"POST","url":"/api/products/cart","queryParams":{"productId":"1"}}
                ```
-               </RETURN_TO_FRONTEND>
+               ---
 
             9. 【错误示例 - 绝对禁止这样做】
                ❌ 错误做法：直接调用 httpRequest 工具添加购物车
