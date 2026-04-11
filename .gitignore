@@ -20,3 +20,4 @@ Thumbs.db
 data/
 .playwright-mcp
 CLAUDE.md
+.env_openai

@@ -40,6 +40,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/chat/**").permitAll()
                 .requestMatchers("/api/explain-result").permitAll()
                 .requestMatchers("/api/agui/**").permitAll()
+                .requestMatchers("/api/transcribe/**").permitAll()
                 // PetStore API 公开端点
                 .requestMatchers("/api/v3/store/inventory").permitAll()
                 .requestMatchers("/api/v3/pet/**").permitAll()

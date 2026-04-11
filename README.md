@@ -203,6 +203,7 @@ services:
 | `/api/chat/stream` | POST | `application/json` | ✅ | 纯文本流式聊天 |
 | `/api/chat` | POST | `multipart/form-data` | ❌ | 多模态同步聊天（图片+语音） |
 | `/api/chat/multimodal/stream` | POST | `multipart/form-data` | ✅ | 多模态流式聊天（图片+语音） |
+| `/api/transcribe/stream` | POST | `multipart/form-data` | ✅ | **纯语音流式转写**（2026-04-11 新增） |
 
 ### 端点对比
 
