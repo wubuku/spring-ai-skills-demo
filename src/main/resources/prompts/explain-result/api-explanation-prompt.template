@@ -1,0 +1,29 @@
+用户刚刚执行了一个 API 操作，请用简洁友好的中文解释发生了什么。
+
+## 操作信息
+- **端点**: {{METHOD}} {{URL}}
+
+{{QUERY_PARAMS}}
+
+## 响应状态
+HTTP {{STATUS_CODE}} ({{STATUS_TEXT}})
+
+{{ERROR_NOTE}}
+
+## 响应数据
+```json
+{{RESPONSE_BODY}}
+```
+
+{{API_DESCRIPTION}}
+
+{{SKILL_HINT}}
+
+---
+
+**输出要求:**
+1. 使用 Markdown 格式
+2. 用 ✅ 或 ❌ 开头表示成功或失败
+3. 简洁说明执行了什么操作
+4. 提取并展示关键数据
+5. 控制在 2-3 句话以内(除非有列表数据)

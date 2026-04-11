@@ -8,8 +8,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * API 结果解释服务
@@ -21,11 +22,13 @@ public class ExplainResultService {
 
     private final ChatClient chatClient;
     private final SkillRegistry skillRegistry;
+    private final PromptLoader promptLoader;
 
-    public ExplainResultService(ChatClient.Builder builder, SkillRegistry skillRegistry) {
+    public ExplainResultService(ChatClient.Builder builder, SkillRegistry skillRegistry, PromptLoader promptLoader) {
         // 创建带有 Skills 工具的 ChatClient,让 AI 可以自己探索 Skills
         this.chatClient = builder.build();
         this.skillRegistry = skillRegistry;
+        this.promptLoader = promptLoader;
     }
 
     /**
@@ -96,48 +99,43 @@ public class ExplainResultService {
      * 构建 Prompt
      */
     private String buildPrompt(ExplainRequest request, String apiDescription) {
-        StringBuilder prompt = new StringBuilder();
-        prompt.append("用户刚刚执行了一个 API 操作，请用简洁友好的中文解释发生了什么。\n\n");
-
-        prompt.append("## 操作信息\n");
-        prompt.append("- **端点**: ").append(request.getMethod()).append(" ").append(request.getUrl()).append("\n");
-
+        // 构建查询参数字符串
+        StringBuilder queryParamsBuilder = new StringBuilder();
         if (request.getQueryParams() != null && !request.getQueryParams().isEmpty()) {
-            prompt.append("- **查询参数**:\n");
+            queryParamsBuilder.append("- **查询参数**:\n");
             request.getQueryParams().forEach((k, v) ->
-                prompt.append("  - ").append(k).append(": ").append(v).append("\n")
+                queryParamsBuilder.append("  - ").append(k).append(": ").append(v).append("\n")
             );
         }
 
-        prompt.append("\n## 响应状态\n");
-        prompt.append("HTTP ").append(request.getStatusCode());
-        prompt.append(request.getStatusCode() >= 200 && request.getStatusCode() < 300 ? " (成功)" : " (失败)");
-        prompt.append("\n");
+        // 构建状态文本
+        String statusText = request.getStatusCode() >= 200 && request.getStatusCode() < 300 ? " (成功)" : " (失败)";
 
+        // 构建错误备注
+        String errorNote = "";
         if (request.getStatusCode() >= 400) {
-            prompt.append("\n**注意：这是一个错误响应。**\n");
+            errorNote = "\n**注意：这是一个错误响应。**\n";
         }
 
-        prompt.append("\n## 响应数据\n");
-        prompt.append("```json\n").append(request.getResponseBody()).append("\n```\n");
-
+        // 构建 API 描述
+        String apiDescriptionSection = "";
         if (apiDescription != null) {
-            // 找到了 API 描述
-            prompt.append("\n## API 描述文档\n");
-            prompt.append("```markdown\n").append(apiDescription).append("\n```\n");
+            apiDescriptionSection = "\n## API 描述文档\n```markdown\n" + apiDescription + "\n```\n";
         } else {
-            // 没找到,让 AI 自己探索
-            prompt.append("\n**提示**: 请使用 `loadSkill` 工具查找相关的 Skill 文档。\n");
-            prompt.append("可用的技能包括: product-store, swagger-petstore-openapi-3-0 等。\n");
+            apiDescriptionSection = "\n**提示**: 请使用 `loadSkill` 工具查找相关的 Skill 文档。\n可用的技能包括: product-store, swagger-petstore-openapi-3-0 等。\n";
         }
 
-        prompt.append("\n---\n\n**输出要求:**\n");
-        prompt.append("1. 使用 Markdown 格式\n");
-        prompt.append("2. 用 ✅ 或 ❌ 开头表示成功或失败\n");
-        prompt.append("3. 简洁说明执行了什么操作\n");
-        prompt.append("4. 提取并展示关键数据\n");
-        prompt.append("5. 控制在 2-3 句话以内(除非有列表数据)\n");
+        Map<String, String> placeholders = new HashMap<>();
+        placeholders.put("{{METHOD}}", request.getMethod());
+        placeholders.put("{{URL}}", request.getUrl());
+        placeholders.put("{{QUERY_PARAMS}}", queryParamsBuilder.toString());
+        placeholders.put("{{STATUS_CODE}}", String.valueOf(request.getStatusCode()));
+        placeholders.put("{{STATUS_TEXT}}", statusText);
+        placeholders.put("{{ERROR_NOTE}}", errorNote);
+        placeholders.put("{{RESPONSE_BODY}}", request.getResponseBody() != null ? request.getResponseBody() : "");
+        placeholders.put("{{API_DESCRIPTION}}", apiDescriptionSection);
+        placeholders.put("{{SKILL_HINT}}", "");
 
-        return prompt.toString();
+        return promptLoader.getPrompt("prompts/explain-result/api-explanation-prompt.template", placeholders);
     }
 }

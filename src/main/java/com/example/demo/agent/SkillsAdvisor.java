@@ -1,5 +1,6 @@
 package com.example.demo.agent;
 
+import com.example.demo.service.PromptLoader;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.AdvisorChain;
@@ -9,6 +10,9 @@ import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.HashMap;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component
@@ -18,6 +22,7 @@ public class SkillsAdvisor implements BaseAdvisor {
 
     private final SkillRegistry registry;
     private final SkillTools skillTools;
+    private final PromptLoader promptLoader;
     private final String apiBaseUrl;
 
     /**
@@ -25,10 +30,11 @@ public class SkillsAdvisor implements BaseAdvisor {
      * 原因：AG-UI + SSE + Spring AI 场景不支持用户态 Token 透传
      * 后端不再试图"代表用户调用API"，任何需要用户 access token 的操作都推到前端
      */
-    public SkillsAdvisor(SkillRegistry registry, SkillTools skillTools,
+    public SkillsAdvisor(SkillRegistry registry, SkillTools skillTools, PromptLoader promptLoader,
                          @Value("${app.api.base-url}") String apiBaseUrl) {
         this.registry = registry;
         this.skillTools = skillTools;
+        this.promptLoader = promptLoader;
         this.apiBaseUrl = apiBaseUrl;
     }
 
@@ -60,28 +66,6 @@ public class SkillsAdvisor implements BaseAdvisor {
         return response;
     }
 
-    /**
-     * 系统提示词模板 - 使用可读性占位符
-     */
-    private static final String SYSTEM_PROMPT_TEMPLATE = """
-        你是一个智能助手。可用技能如下：
-
-        <available_skills>
-        {{SKILL_LIST}}
-        </available_skills>
-
-        **重要规则：**
-        1. 使用某个技能前，必须先调用 `loadSkill` 工具加载它的完整指令
-        2. 不要凭记忆猜测 API 参数，必须先加载技能查看文档
-        3. 加载技能后，注意其 links 字段提示的关联技能
-        4. API 基础 URL 是 {{API_BASE_URL}}（技能文档中的路径都是相对路径，调用 {{HTTP_TOOL_NAME}} 时只需传相对路径）
-        5. 部分技能具有分层结构（如 OpenAPI 生成的技能），其 SKILL.md 中会列出 references 目录下的参考文件路径，
-           需要调用 `readSkillReference` 工具读取具体的资源/操作文档，再据此调用 {{HTTP_TOOL_NAME}} 工具
-        {{LOADED_CONTEXT}}
-
-        {{MODE_RULES}}
-        """;
-
     private String buildSystemPrompt() {
         String skillList = registry.all().values().stream()
             .map(s -> "- `" + s.getMeta().getName() + "`：" + s.getMeta().getDescription())
@@ -96,70 +80,16 @@ public class SkillsAdvisor implements BaseAdvisor {
             .collect(Collectors.joining());
 
         String httpToolName = getHttpToolName();
-        String modeRules = buildModeSpecificRules();
+        String modeRules = promptLoader.getPrompt("prompts/skills-advisor/mode-rules.template");
 
-        // 使用 replace 替换占位符，确保 modeRules 被包含
-        String systemPrompt = SYSTEM_PROMPT_TEMPLATE
-            .replace("{{SKILL_LIST}}", skillList)
-            .replace("{{API_BASE_URL}}", apiBaseUrl)
-            .replace("{{HTTP_TOOL_NAME}}", httpToolName)
-            .replace("{{LOADED_CONTEXT}}", loadedContext)
-            .replace("{{MODE_RULES}}", modeRules);
+        Map<String, String> placeholders = new HashMap<>();
+        placeholders.put("{{SKILL_LIST}}", skillList);
+        placeholders.put("{{API_BASE_URL}}", apiBaseUrl);
+        placeholders.put("{{HTTP_TOOL_NAME}}", httpToolName);
+        placeholders.put("{{LOADED_CONTEXT}}", loadedContext);
+        placeholders.put("{{MODE_RULES}}", modeRules);
 
-        return systemPrompt;
-    }
-
-    /**
-     * HTTP 工具调用规则
-     * 后端不再试图"代表用户调用API"，任何可能需要用户 access token 的操作都推到前端
-     * 重要：SSE 端点无法稳定实现 token 透传！任何涉及当前用户数据的操作都必须交给前端执行
-     */
-    private String buildModeSpecificRules() {
-        return """
-            6. 【强制规则 - 必须严格遵守】
-               - **httpRequest 工具**：仅用于调用**完全公开的、无需认证的外部 API**（如公开的天气 API，商品搜索 API 等）
-               - **buildHttpRequest 工具**：用于构建所有需要认证的 API 调用的请求元数据（如方法、路径、查询参数、请求头、请求体）
-               - **任何涉及当前用户数据的操作**（如查看购物车、查询订单、添加购物车、结算）：**必须使用 buildHttpRequest**
-               - **绝对禁止**：对需要认证的 API 使用 httpRequest 工具（会失败并返回 403 错误）
-
-            7. 【用户确认模式 - 核心流程】
-               步骤1：调用 buildHttpRequest 工具，传入 method、url、body 等参数；
-               步骤2：工具会返回 JSON 格式的请求元数据；
-               步骤3：在你的回复中先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据、预期结果），然后**必须**输出 http-request 代码块，原样包含工具返回的 JSON。
-
-               **【关键格式要求 - 必须严格遵守】**：
-               - http-request（JSON）代码块的格式必须是：
-                 ```http-request
-                 {"method":"POST","url":"/api/xxx",...}
-                 ```
-               - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
-               - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
-
-            8. 【用户认证状态 - 重要说明】
-               - 用户已通过前端登录，前端会携带用户的 access token
-               - 当你在回复中输出 http-request 代码块后，前端会使用用户的 token 执行请求
-               - **禁止**说"需要认证"、"无法访问"、"需要用户登录"之类的话
-               - **禁止**使用 httpRequest 工具直接执行（会返回 403 错误）
-               - **必须**通过 buildHttpRequest 构建请求，让前端确认后执行
-
-               **正确示例**（从下一行开始直到 `---` 为止，之间的内容都是需返回的内容的示例)：
-               我现在帮你添加 iPhone15 到购物车：
-
-               ```http-request
-               {"method":"POST","url":"/api/products/cart","queryParams":{"productId":"1"}}
-               ```
-               ---
-
-            9. 【错误示例 - 绝对禁止这样做】
-               ❌ 错误做法：直接调用 httpRequest 工具添加购物车
-                  结果：返回 403 错误，因为后端无法透传用户 token
-               ❌ 错误做法：告诉用户"需要登录"、"无法访问"、"需要认证"
-                  结果：违反规则，前端已携带用户 token
-               ❌ 错误做法：不调用 buildHttpRequest 就直接输出 http-request 代码块
-                  结果：必须先调用工具获取元数据
-
-               ✅ 正确做法：先调用 buildHttpRequest 工具 → 获取 JSON → 输出 http-request 代码块
-            """;
+        return promptLoader.getPrompt("prompts/skills-advisor/system-prompt.template", placeholders);
     }
 
     /**
