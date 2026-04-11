@@ -7,7 +7,6 @@ import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
-import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -31,22 +30,12 @@ public class PromptLoader {
 
     private static final Logger log = LoggerFactory.getLogger(PromptLoader.class);
 
-    private final ResourceLoader resourceLoader;
-    private final Map<String, String> templateCache = new ConcurrentHashMap<>();
-    private final Map<String, String> defaultPrompts = new HashMap<>();
+    // =========================================================================
+    // Default Prompt Templates (fallback when resource files are not found)
+    // =========================================================================
 
-    public PromptLoader(ResourceLoader resourceLoader) {
-        this.resourceLoader = resourceLoader;
-        initializeDefaultPrompts();
-    }
-
-    /**
-     * Initialize hardcoded default prompts
-     * These are used when resource files are not found
-     */
-    private void initializeDefaultPrompts() {
-        // P1: SkillsAdvisor System Prompt Template
-        defaultPrompts.put("prompts/skills-advisor/system-prompt.template", """
+    /** P1: SkillsAdvisor System Prompt Template */
+    private static final String DEFAULT_SKILLS_ADVISOR_SYSTEM_PROMPT = """
             你是一个智能助手。可用技能如下：
 
             <available_skills>
@@ -63,10 +52,10 @@ public class PromptLoader {
             {{LOADED_CONTEXT}}
 
             {{MODE_RULES}}
-            """);
+            """;
 
-        // P2: SkillsAdvisor Mode Rules
-        defaultPrompts.put("prompts/skills-advisor/mode-rules.template", """
+    /** P2: SkillsAdvisor Mode Rules */
+    private static final String DEFAULT_SKILLS_ADVISOR_MODE_RULES = """
             6. 【强制规则 - 必须严格遵守】
                - **httpRequest 工具**：仅用于调用**完全公开的、无需认证的外部 API**（如公开的天气 API，商品搜索 API 等）
                - **buildHttpRequest 工具**：用于构建所有需要认证的 API 调用的请求元数据（如方法、路径、查询参数、请求头、请求体）
@@ -110,18 +99,16 @@ public class PromptLoader {
                   结果：必须先调用工具获取元数据
 
                ✅ 正确做法：先调用 buildHttpRequest 工具 → 获取 JSON → 输出 http-request 代码块
-            """);
+            """;
 
-        // P3: Vision Prompt with hint
-        defaultPrompts.put("prompts/multimodal/vision-prompt-with-hint.template",
-            "用户问题是：{{USER_QUERY}}\n请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。");
+    /** P3: Vision Prompt with hint */
+    private static final String DEFAULT_VISION_PROMPT_WITH_HINT = "用户问题是：{{USER_QUERY}}\n请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
 
-        // P4: Vision Prompt without hint
-        defaultPrompts.put("prompts/multimodal/vision-prompt.template",
-            "请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。");
+    /** P4: Vision Prompt without hint */
+    private static final String DEFAULT_VISION_PROMPT = "请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
 
-        // P7: Enterprise Agent System Prompt
-        defaultPrompts.put("prompts/enterprise-agent/system-prompt.template", """
+    /** P5: Enterprise Agent System Prompt */
+    private static final String DEFAULT_ENTERPRISE_AGENT_SYSTEM_PROMPT = """
             你是企业智能助手，帮助员工解答业务问题、查询数据、执行操作。
 
             你可以使用以下能力：
@@ -142,10 +129,10 @@ public class PromptLoader {
             - 使用列表（- 或 1.）组织多个要点
             - 使用代码块（```）展示代码或技术内容
             - 确保表格列对齐，增强可读性
-            """);
+            """;
 
-        // P6: API Explanation Prompt (ExplainResultService)
-        defaultPrompts.put("prompts/explain-result/api-explanation-prompt.template", """
+    /** P6: API Explanation Prompt */
+    private static final String DEFAULT_API_EXPLANATION_PROMPT = """
             用户刚刚执行了一个 API 操作，请用简洁友好的中文解释发生了什么。
 
             ## 操作信息
@@ -175,10 +162,28 @@ public class PromptLoader {
             3. 简洁说明执行了什么操作
             4. 提取并展示关键数据
             5. 控制在 2-3 句话以内(除非有列表数据)
-            """);
+            """;
 
-        log.info("[PromptLoader] Initialized {} default prompts", defaultPrompts.size());
+    // =========================================================================
+    // Instance Fields
+    // =========================================================================
+
+    private final ResourceLoader resourceLoader;
+    private final Map<String, String> templateCache = new ConcurrentHashMap<>();
+    private final Map<String, String> defaultPrompts = new HashMap<>();
+
+    // =========================================================================
+    // Constructor
+    // =========================================================================
+
+    public PromptLoader(ResourceLoader resourceLoader) {
+        this.resourceLoader = resourceLoader;
+        initializeDefaultPrompts();
     }
+
+    // =========================================================================
+    // Public Methods
+    // =========================================================================
 
     /**
      * Load prompt template from resources, with fallback to default
@@ -245,6 +250,33 @@ public class PromptLoader {
     }
 
     /**
+     * Clear the template cache (useful for testing)
+     */
+    public void clearCache() {
+        templateCache.clear();
+        log.info("[PromptLoader] Template cache cleared");
+    }
+
+    // =========================================================================
+    // Private Methods
+    // =========================================================================
+
+    /**
+     * Initialize hardcoded default prompts
+     * These are used when resource files are not found
+     */
+    private void initializeDefaultPrompts() {
+        defaultPrompts.put("prompts/skills-advisor/system-prompt.template", DEFAULT_SKILLS_ADVISOR_SYSTEM_PROMPT);
+        defaultPrompts.put("prompts/skills-advisor/mode-rules.template", DEFAULT_SKILLS_ADVISOR_MODE_RULES);
+        defaultPrompts.put("prompts/multimodal/vision-prompt-with-hint.template", DEFAULT_VISION_PROMPT_WITH_HINT);
+        defaultPrompts.put("prompts/multimodal/vision-prompt.template", DEFAULT_VISION_PROMPT);
+        defaultPrompts.put("prompts/enterprise-agent/system-prompt.template", DEFAULT_ENTERPRISE_AGENT_SYSTEM_PROMPT);
+        defaultPrompts.put("prompts/explain-result/api-explanation-prompt.template", DEFAULT_API_EXPLANATION_PROMPT);
+
+        log.info("[PromptLoader] Initialized {} default prompts", defaultPrompts.size());
+    }
+
+    /**
      * Load template from classpath resources
      */
     private String loadTemplate(String resourcePath) {
@@ -277,13 +309,5 @@ public class PromptLoader {
             }
         }
         return result;
-    }
-
-    /**
-     * Clear the template cache (useful for testing)
-     */
-    public void clearCache() {
-        templateCache.clear();
-        log.info("[PromptLoader] Template cache cleared");
     }
 }
