@@ -37,8 +37,8 @@ SSE 返回 (type="vision" + type="content")
 ### 1.2 问题分析
 **核心缺陷**：当前实现**未区分**"有会话历史"和"无会话历史"两种场景。
 
-- **无会话历史时**：直接使用通用视图提示词是合理的
-- **有会话历史时**：应该先调用语言模型，根据上下文生成**情境化的视图提示词**
+- **无会话历史时**：直接使用通用视觉提示词是合理的
+- **有会话历史时**：应该先调用语言模型，根据上下文生成**情境化的视觉提示词**
 
 现有代码问题（`MultimodalAgentService.java:135-167`）：
 1. 直接使用固定模板，未检查会话历史
@@ -54,7 +54,7 @@ SSE 返回 (type="vision" + type="content")
     ↓
 [检测] conversationId 无历史消息（消息数=0）
     ↓
-[组合] 默认视图提示词 + 用户 query hint
+[组合] 默认视觉提示词 + 用户 query hint
     ↓
 调用视觉模型 → 流式返回 type="vision"
     ↓
@@ -69,14 +69,14 @@ SSE 返回 (type="vision" + type="content")
     ↓
 [检测] conversationId 有历史消息（消息数>0）
     ↓
-[第一步] 调用语言模型生成情境化视图提示词
+[第一步] 调用语言模型生成情境化视觉提示词
          输入信息：
          - 用户的附带文本（query）是什么
-         - 默认视图提示词内容
+         - 默认视觉提示词内容
          - 会话历史摘要（最近 N 条消息）
-         输出：情境化的视图提示词（通过 SSE type="prompt" 返回前端）
+         输出：情境化的视觉提示词（通过 SSE type="prompt" 返回前端）
     ↓
-[第二步] 使用生成的视图提示词调用视觉模型
+[第二步] 使用生成的视觉提示词调用视觉模型
     ↓
 [第三步] 组合 "【图片内容】描述 + 【用户输入】query"
     ↓
@@ -207,7 +207,7 @@ CREATE TABLE SPRING_AI_CHAT_MEMORY (
 
 **内容**：
 ```
-你是一个图像理解助手。你的任务是根据当前对话上下文，为识别用户上传的图片生成一个**情境化的视图提示词**。
+你是一个图像理解助手。你的任务是根据当前对话上下文，为识别用户上传的图片生成一个**情境化的视觉提示词**。
 
 ## 当前对话上下文（最近的消息）
 {{CONVERSATION_HISTORY}}
@@ -215,11 +215,11 @@ CREATE TABLE SPRING_AI_CHAT_MEMORY (
 ## 用户当前附带的文本
 {{USER_COMMENT}}
 
-## 默认视图提示词（供参考）
+## 默认视觉提示词（供参考）
 {{DEFAULT_VISION_PROMPT}}
 
 ## 任务
-请根据以上上下文，生成一个适合当前情境的视图提示词。这个提示词应该：
+请根据以上上下文，生成一个适合当前情境的视觉提示词。这个提示词应该：
 1. 承接之前的对话主题（如果有）
 2. 呼应用户当前的问题或需求
 3. 引导视觉模型关注与当前任务相关的图片细节
@@ -320,7 +320,7 @@ private Flux<MultimodalToken> streamImageOnly(
 /**
  * 公共方法：使用指定提示词调用视觉模型，然后调用语言模型
  *
- * @param visionPrompt     视图提示词
+ * @param visionPrompt     视觉提示词
  * @param image           图片资源
  * @param imageContentType 图片 Content-Type
  * @param query           用户附带的文本（可为 null）
@@ -417,7 +417,7 @@ private Flux<MultimodalToken> streamWithPromptEnhancement(
     // 1. 获取会话历史摘要
     String historySummary = conversationHistoryService.getRecentHistorySummary(conversationId, 6);
 
-    // 2. 获取默认视图提示词
+    // 2. 获取默认视觉提示词
     String defaultPrompt = promptLoader.getPrompt("prompts/multimodal/vision-prompt.template");
 
     // 3. 构建生成提示词的 prompt
