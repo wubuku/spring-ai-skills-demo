@@ -334,6 +334,16 @@ public class SpringAiConfig {
     }
 
     /**
+     * 用于提示词生成的独立 ChatClient（不经过 AgentService 的 advisors）
+     * 这样可以避免提示词生成过程污染会话历史
+     */
+    @Bean("promptGenerationChatClient")
+    public ChatClient promptGenerationChatClient(@Qualifier("chatModel") ChatModel chatModel) {
+        log.info("Creating promptGenerationChatClient (without advisors)");
+        return ChatClient.create(chatModel);
+    }
+
+    /**
      * 视觉模型 ChatClient Bean（用于图片理解）
      * 使用火山方舟/豆包视觉 API
      */

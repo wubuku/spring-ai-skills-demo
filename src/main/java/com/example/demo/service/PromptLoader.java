@@ -107,7 +107,32 @@ public class PromptLoader {
     /** P4: Vision Prompt without hint */
     private static final String DEFAULT_VISION_PROMPT = "请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
 
-    /** P5: Enterprise Agent System Prompt */
+    /** P5: Vision Prompt Generator for Contextual Enhancement */
+    private static final String DEFAULT_VISION_PROMPT_GENERATOR = """
+            你是一个图像理解助手。你的任务是根据当前对话上下文，为识别用户上传的图片生成一个**情境化的视图提示词**。
+
+            ## 当前对话上下文（最近的消息）
+            {{CONVERSATION_HISTORY}}
+
+            ## 用户当前附带的文本
+            {{USER_COMMENT}}
+
+            ## 默认视图提示词（供参考）
+            {{DEFAULT_VISION_PROMPT}}
+
+            ## 任务
+            请根据以上上下文，生成一个适合当前情境的视图提示词。这个提示词应该：
+            1. 承接之前的对话主题（如果有）
+            2. 呼应用户当前的问题或需求
+            3. 引导视觉模型关注与当前任务相关的图片细节
+            4. 保持简洁，通常 1-3 句话即可
+
+            ## 输出要求
+            - 直接输出生成的提示词，不要添加解释
+            - 如果用户没有附带文本或没有历史，可以返回默认提示词的微调版本
+            """;
+
+    /** P6: Enterprise Agent System Prompt */
     private static final String DEFAULT_ENTERPRISE_AGENT_SYSTEM_PROMPT = """
             你是企业智能助手，帮助员工解答业务问题、查询数据、执行操作。
 
@@ -270,6 +295,7 @@ public class PromptLoader {
         defaultPrompts.put("prompts/skills-advisor/mode-rules.template", DEFAULT_SKILLS_ADVISOR_MODE_RULES);
         defaultPrompts.put("prompts/multimodal/vision-prompt-with-hint.template", DEFAULT_VISION_PROMPT_WITH_HINT);
         defaultPrompts.put("prompts/multimodal/vision-prompt.template", DEFAULT_VISION_PROMPT);
+        defaultPrompts.put("prompts/multimodal/vision-prompt-generator.template", DEFAULT_VISION_PROMPT_GENERATOR);
         defaultPrompts.put("prompts/enterprise-agent/system-prompt.template", DEFAULT_ENTERPRISE_AGENT_SYSTEM_PROMPT);
         defaultPrompts.put("prompts/explain-result/api-explanation-prompt.template", DEFAULT_API_EXPLANATION_PROMPT);
 

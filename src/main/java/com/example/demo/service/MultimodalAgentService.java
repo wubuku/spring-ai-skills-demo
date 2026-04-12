@@ -32,16 +32,22 @@ public class MultimodalAgentService {
     private final ChatClient visionChatClient;
     private final TranscriptionModel transcriptionModel;
     private final PromptLoader promptLoader;
+    private final ConversationHistoryService conversationHistoryService;
+    private final ChatClient promptGenerationChatClient;
 
     public MultimodalAgentService(
             AgentService agentService,
             @Qualifier("visionChatClient") ChatClient visionChatClient,
             @Autowired(required = false) TranscriptionModel transcriptionModel,
-            PromptLoader promptLoader) {
+            PromptLoader promptLoader,
+            ConversationHistoryService conversationHistoryService,
+            @Qualifier("promptGenerationChatClient") ChatClient promptGenerationChatClient) {
         this.agentService = agentService;
         this.visionChatClient = visionChatClient;
         this.transcriptionModel = transcriptionModel;
         this.promptLoader = promptLoader;
+        this.conversationHistoryService = conversationHistoryService;
+        this.promptGenerationChatClient = promptGenerationChatClient;
     }
 
     /**
@@ -134,36 +140,143 @@ public class MultimodalAgentService {
 
     private Flux<MultimodalToken> streamImageOnly(String query, String conversationId,
                                                   Resource image, String imageContentType) {
-        MediaType mt = parseMediaType(imageContentType, MediaType.IMAGE_JPEG);
-        Media media = new Media(mt, image);
+        // 检查是否有会话历史
+        boolean hasHistory = conversationHistoryService.hasHistory(conversationId);
+
+        if (hasHistory) {
+            // 提示词增强流程
+            return streamWithPromptEnhancement(query, conversationId, image, imageContentType);
+        } else {
+            // 直接使用默认提示词流程
+            return streamWithDefaultPrompt(query, conversationId, image, imageContentType);
+        }
+    }
+
+    /**
+     * 无会话历史时的默认提示词流程
+     */
+    private Flux<MultimodalToken> streamWithDefaultPrompt(
+            String query, String conversationId,
+            Resource image, String imageContentType) {
 
         String visionPromptTemplate;
         if (query != null && !query.isBlank()) {
             Map<String, String> placeholders = new HashMap<>();
             placeholders.put("{{USER_QUERY}}", query);
-            visionPromptTemplate = promptLoader.getPrompt("prompts/multimodal/vision-prompt-with-hint.template", placeholders);
+            visionPromptTemplate = promptLoader.getPrompt(
+                "prompts/multimodal/vision-prompt-with-hint.template", placeholders);
         } else {
-            visionPromptTemplate = promptLoader.getPrompt("prompts/multimodal/vision-prompt.template");
+            visionPromptTemplate = promptLoader.getPrompt(
+                "prompts/multimodal/vision-prompt.template");
         }
 
-        Flux<String> visionTokens = visionChatClient.prompt()
-                .user(user -> user.text(visionPromptTemplate).media(media))
+        return streamVisionToLlm(visionPromptTemplate, image, imageContentType,
+                                query, conversationId);
+    }
+
+    /**
+     * 有会话历史时的提示词增强流程
+     */
+    private Flux<MultimodalToken> streamWithPromptEnhancement(
+            String query, String conversationId,
+            Resource image, String imageContentType) {
+
+        // 1. 获取会话历史摘要
+        String historySummary = conversationHistoryService.getRecentHistorySummary(conversationId, 6);
+
+        // 2. 获取默认视图提示词
+        String defaultPrompt = promptLoader.getPrompt("prompts/multimodal/vision-prompt.template");
+
+        // 3. 构建生成提示词的 prompt
+        Map<String, String> placeholders = new HashMap<>();
+        placeholders.put("{{CONVERSATION_HISTORY}}", historySummary);
+        placeholders.put("{{USER_COMMENT}}", query != null ? query : "（无）");
+        placeholders.put("{{DEFAULT_VISION_PROMPT}}", defaultPrompt);
+
+        String generatorPrompt = promptLoader.getPrompt(
+            "prompts/multimodal/vision-prompt-generator.template", placeholders);
+
+        // 4. 调用语言模型生成情境化提示词（流式）
+        // 使用独立的 promptGenerationChatClient，不经过 AgentService 的 advisors
+        // 注意：必须使用 .cache() 否则会因为 cold source 导致 LLM 被调用两次
+        Flux<String> generatedPromptFlux = promptGenerationChatClient.prompt()
+                .user(generatorPrompt)
                 .stream()
                 .content()
                 .cache();
 
-        Flux<MultimodalToken> visionStage = visionTokens.map(token -> MultimodalToken.vision(token));
+        // 5. 流式返回生成的提示词（type="prompt"）
+        // 提示词生成过程实时返回给前端（用于调试/可读性）
+        Flux<MultimodalToken> promptStage = generatedPromptFlux
+                .map(token -> MultimodalToken.prompt(token));
 
+        // 6. 等待提示词生成完成后，调用公共的 streamVisionToLlm 方法
+        Flux<MultimodalToken> visionAndLlmStage = generatedPromptFlux
+                .reduce("", String::concat)  // 等待所有提示词 token
+                .flatMapMany(generatedPrompt ->
+                    streamVisionToLlm(generatedPrompt, image, imageContentType,
+                                      query, conversationId));
+
+        // 7. 合并：promptStage (生成过程) + visionAndLlmStage (实际处理)
+        return Flux.concat(promptStage, visionAndLlmStage);
+    }
+
+    /**
+     * 公共方法：使用指定提示词调用视觉模型，然后调用语言模型
+     *
+     * @param visionPrompt     视图提示词
+     * @param image           图片资源
+     * @param imageContentType 图片 Content-Type
+     * @param query           用户附带的文本（可为 null）
+     * @param conversationId  会话 ID
+     * @return 包含 vision 和 content 事件的 Flux
+     */
+    private Flux<MultimodalToken> streamVisionToLlm(
+            String visionPrompt,
+            Resource image,
+            String imageContentType,
+            String query,
+            String conversationId) {
+
+        MediaType mt = parseMediaType(imageContentType, MediaType.IMAGE_JPEG);
+        Media media = new Media(mt, image);
+
+        // 调用视觉模型（流式）
+        Flux<String> visionTokens = visionChatClient.prompt()
+                .user(user -> user.text(visionPrompt).media(media))
+                .stream()
+                .content()
+                .cache();
+
+        // 视觉模型输出（type="vision"）
+        Flux<MultimodalToken> visionStage = visionTokens
+                .map(token -> MultimodalToken.vision(token));
+
+        // 等待视觉模型完成，组合输入并调用语言模型
         Flux<MultimodalToken> llmStage = visionTokens
                 .reduce("", String::concat)
-                .flatMapMany(imageDescription -> {
-                    String finalInput = promptLoader.getLabel("label.image.content", "【图片内容】") + imageDescription + "\n\n"
-                            + (query != null && !query.isBlank() ? promptLoader.getLabel("label.user.input", "【用户输入】") + query : "");
+                .flatMapMany(visionDescription -> {
+                    String finalInput = buildFinalInput(visionDescription, query);
                     return agentService.streamChat(finalInput, conversationId)
                             .map(token -> MultimodalToken.content(token));
                 });
 
         return Flux.concat(visionStage, llmStage);
+    }
+
+    /**
+     * 构建最终输入文本
+     */
+    private String buildFinalInput(String visionDescription, String query) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(promptLoader.getLabel("label.image.content", "【图片内容】"))
+          .append(visionDescription)
+          .append("\n\n");
+        if (query != null && !query.isBlank()) {
+            sb.append(promptLoader.getLabel("label.user.input", "【用户输入】"))
+              .append(query);
+        }
+        return sb.toString();
     }
 
     private Flux<MultimodalToken> streamAudioOnly(String query, String conversationId, Resource audio) {

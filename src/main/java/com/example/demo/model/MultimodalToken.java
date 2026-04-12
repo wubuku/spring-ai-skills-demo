@@ -12,4 +12,8 @@ public record MultimodalToken(String type, String content) {
     public static MultimodalToken transcribed(String content) {
         return new MultimodalToken("transcribed", content);
     }
+
+    public static MultimodalToken prompt(String content) {
+        return new MultimodalToken("prompt", content);
+    }
 }
