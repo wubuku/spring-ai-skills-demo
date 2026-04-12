@@ -13,6 +13,9 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * 多模态代理服务
  *
@@ -28,14 +31,17 @@ public class MultimodalAgentService {
     private final AgentService agentService;
     private final ChatClient visionChatClient;
     private final TranscriptionModel transcriptionModel;
+    private final PromptLoader promptLoader;
 
     public MultimodalAgentService(
             AgentService agentService,
             @Qualifier("visionChatClient") ChatClient visionChatClient,
-            @Autowired(required = false) TranscriptionModel transcriptionModel) {
+            @Autowired(required = false) TranscriptionModel transcriptionModel,
+            PromptLoader promptLoader) {
         this.agentService = agentService;
         this.visionChatClient = visionChatClient;
         this.transcriptionModel = transcriptionModel;
+        this.promptLoader = promptLoader;
     }
 
     /**
@@ -56,25 +62,27 @@ public class MultimodalAgentService {
         // 1. 如果有图片，先获取图片的文字描述
         if (image != null) {
             String imageDescription = describeImage(image, imageContentType, query);
-            enrichedInput.append("【图片内容】").append(imageDescription).append("\n\n");
+            enrichedInput.append(promptLoader.getLabel("label.image.content", "【图片内容】"))
+                    .append(imageDescription).append("\n\n");
         }
 
         // 2. 如果有音频，转写为文字
         if (audio != null && transcriptionModel != null) {
             String transcription = transcriptionModel.transcribe(audio);
-            enrichedInput.append("【语音转写】").append(transcription).append("\n\n");
+            enrichedInput.append(promptLoader.getLabel("label.audio.transcribed", "【语音转写】"))
+                    .append(transcription).append("\n\n");
         } else if (audio != null && transcriptionModel == null) {
-            enrichedInput.append("【语音转写】语音转写功能未配置，无法处理音频。\n\n");
+            enrichedInput.append(promptLoader.getLabel("label.audio.not.configured", "【语音转写】语音转写功能未配置，无法处理音频。")).append("\n\n");
         }
 
         // 3. 如果有用户文本，追加
         if (query != null && !query.isBlank()) {
-            enrichedInput.append("【用户输入】").append(query);
+            enrichedInput.append(promptLoader.getLabel("label.user.input", "【用户输入】")).append(query);
         }
 
         String finalInput = enrichedInput.toString();
         if (finalInput.isBlank()) {
-            finalInput = "用户未提供有效输入。";
+            finalInput = promptLoader.getLabel("label.no.input", "用户未提供有效输入。");
         }
 
         // 4. 交给 AgentService 处理（保留所有能力：Skills、RAG、记忆等）
@@ -119,7 +127,7 @@ public class MultimodalAgentService {
         }
 
         // 场景 4：纯文字
-        String finalInput = (query != null && !query.isBlank()) ? query : "用户未提供有效输入。";
+        String finalInput = (query != null && !query.isBlank()) ? query : promptLoader.getLabel("label.no.input", "用户未提供有效输入。");
         return agentService.streamChat(finalInput, conversationId)
                 .map(token -> MultimodalToken.content(token));
     }
@@ -128,12 +136,18 @@ public class MultimodalAgentService {
                                                   Resource image, String imageContentType) {
         MediaType mt = parseMediaType(imageContentType, MediaType.IMAGE_JPEG);
         Media media = new Media(mt, image);
-        String visionPrompt = (query != null && !query.isBlank())
-                ? "用户问题是：" + query + "\n请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。"
-                : "请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
+
+        String visionPromptTemplate;
+        if (query != null && !query.isBlank()) {
+            Map<String, String> placeholders = new HashMap<>();
+            placeholders.put("{{USER_QUERY}}", query);
+            visionPromptTemplate = promptLoader.getPrompt("prompts/multimodal/vision-prompt-with-hint.template", placeholders);
+        } else {
+            visionPromptTemplate = promptLoader.getPrompt("prompts/multimodal/vision-prompt.template");
+        }
 
         Flux<String> visionTokens = visionChatClient.prompt()
-                .user(user -> user.text(visionPrompt).media(media))
+                .user(user -> user.text(visionPromptTemplate).media(media))
                 .stream()
                 .content()
                 .cache();
@@ -143,8 +157,8 @@ public class MultimodalAgentService {
         Flux<MultimodalToken> llmStage = visionTokens
                 .reduce("", String::concat)
                 .flatMapMany(imageDescription -> {
-                    String finalInput = "【图片内容】" + imageDescription + "\n\n"
-                            + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
+                    String finalInput = promptLoader.getLabel("label.image.content", "【图片内容】") + imageDescription + "\n\n"
+                            + (query != null && !query.isBlank() ? promptLoader.getLabel("label.user.input", "【用户输入】") + query : "");
                     return agentService.streamChat(finalInput, conversationId)
                             .map(token -> MultimodalToken.content(token));
                 });
@@ -154,9 +168,9 @@ public class MultimodalAgentService {
 
     private Flux<MultimodalToken> streamAudioOnly(String query, String conversationId, Resource audio) {
         if (transcriptionModel == null) {
-            return Flux.just(MultimodalToken.transcribed("【语音转写】语音转写功能未配置，无法处理音频。\n\n"))
+            return Flux.just(MultimodalToken.transcribed(promptLoader.getLabel("label.audio.not.configured", "【语音转写】语音转写功能未配置，无法处理音频。") + "\n\n"))
                     .concatWith(query != null && !query.isBlank()
-                            ? agentService.streamChat("【用户输入】" + query, conversationId)
+                            ? agentService.streamChat(promptLoader.getLabel("label.user.input", "【用户输入】") + query, conversationId)
                                     .map(token -> MultimodalToken.content(token))
                             : Flux.empty());
         }
@@ -164,8 +178,8 @@ public class MultimodalAgentService {
         return Mono.fromCallable(() -> transcriptionModel.transcribe(audio))
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMapMany(transcript -> {
-                    String finalInput = "【语音转写】" + transcript + "\n\n"
-                            + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
+                    String finalInput = promptLoader.getLabel("label.audio.transcribed", "【语音转写】") + transcript + "\n\n"
+                            + (query != null && !query.isBlank() ? promptLoader.getLabel("label.user.input", "【用户输入】") + query : "");
                     return agentService.streamChat(finalInput, conversationId)
                             .map(token -> MultimodalToken.content(token));
                 });
@@ -176,11 +190,11 @@ public class MultimodalAgentService {
                                                        Resource audio) {
         MediaType mt = parseMediaType(imageContentType, MediaType.IMAGE_JPEG);
         Media media = new Media(mt, image);
-        String visionPrompt = "请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
+        String visionPromptTemplate = promptLoader.getPrompt("prompts/multimodal/vision-prompt.template");
 
         // Vision 流式处理
         Flux<String> visionTokens = visionChatClient.prompt()
-                .user(user -> user.text(visionPrompt).media(media))
+                .user(user -> user.text(visionPromptTemplate).media(media))
                 .stream()
                 .content()
                 .cache();
@@ -191,7 +205,7 @@ public class MultimodalAgentService {
         Mono<String> asrMono = transcriptionModel != null
                 ? Mono.fromCallable(() -> transcriptionModel.transcribe(audio))
                         .subscribeOn(Schedulers.boundedElastic())
-                : Mono.just("【语音转写】语音转写功能未配置，无法处理音频。");
+                : Mono.just(promptLoader.getLabel("label.audio.not.configured", "【语音转写】语音转写功能未配置，无法处理音频。"));
 
         // LLM 需要等 vision 和 ASR 都完成
         Flux<MultimodalToken> llmStage = visionTokens
@@ -200,9 +214,9 @@ public class MultimodalAgentService {
                 .flatMapMany(tuple -> {
                     String imageDescription = tuple.getT1();
                     String transcript = tuple.getT2();
-                    String finalInput = "【图片内容】" + imageDescription + "\n\n"
-                            + "【语音转写】" + transcript + "\n\n"
-                            + (query != null && !query.isBlank() ? "【用户输入】" + query : "");
+                    String finalInput = promptLoader.getLabel("label.image.content", "【图片内容】") + imageDescription + "\n\n"
+                            + promptLoader.getLabel("label.audio.transcribed", "【语音转写】") + transcript + "\n\n"
+                            + (query != null && !query.isBlank() ? promptLoader.getLabel("label.user.input", "【用户输入】") + query : "");
                     return agentService.streamChat(finalInput, conversationId)
                             .map(token -> MultimodalToken.content(token));
                 });
@@ -224,12 +238,17 @@ public class MultimodalAgentService {
         MediaType mt = parseMediaType(imageContentType, MediaType.IMAGE_JPEG);
         Media media = new Media(mt, image);
 
-        String visionPrompt = (hint != null && !hint.isBlank())
-                ? "用户问题是：" + hint + "\n请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。"
-                : "请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
+        String visionPromptTemplate;
+        if (hint != null && !hint.isBlank()) {
+            Map<String, String> placeholders = new HashMap<>();
+            placeholders.put("{{USER_QUERY}}", hint);
+            visionPromptTemplate = promptLoader.getPrompt("prompts/multimodal/vision-prompt-with-hint.template", placeholders);
+        } else {
+            visionPromptTemplate = promptLoader.getPrompt("prompts/multimodal/vision-prompt.template");
+        }
 
         return visionChatClient.prompt()
-                .user(user -> user.text(visionPrompt).media(media))
+                .user(user -> user.text(visionPromptTemplate).media(media))
                 .call()
                 .content();
     }
