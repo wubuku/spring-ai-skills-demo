@@ -708,14 +708,83 @@ public ChatClient promptGenerationChatClient(ChatModel chatModel) {
 - **处理措施**: 为 `hasHistory` 和 `getMessageCount` 添加 try-catch 块
 - **结果**: 文档修复，版本更新为 v1.7
 
-#### 第二轮检查（待开始）
-- **检查时间**: -
-- **检查范围**: -
-- **发现问题**: -
-- **结果**: 待进行
+#### 第二轮检查（通过）
+- **检查时间**: 2026-04-12
+- **检查范围**: 需求背景、问题分析、技术方案设计
+- **发现问题**: 无
+- **验证通过的项目**:
+  - ✅ `hasHistory` 和 `getMessageCount` 异常处理已添加
+  - ✅ 所有方法签名正确
 
-#### 第三轮检查（待开始）
-- **检查时间**: -
-- **检查范围**: -
-- **发现问题**: -
-- **结果**: 待进行
+#### 第三轮检查（通过）
+- **检查时间**: 2026-04-12
+- **检查范围**: 实施步骤、文件变更清单
+- **发现问题**: 无
+- **验证通过的项目**:
+  - ✅ Phase 1 基础设施步骤完整
+  - ✅ Phase 2 核心逻辑步骤正确
+  - ✅ 文件变更清单与实际一致
+
+---
+
+## 11. 实现状态 (2026-04-12)
+
+### 11.1 实施完成状态
+
+| 步骤 | 内容 | 状态 | 备注 |
+|------|------|------|------|
+| Phase 1-1 | 创建 `ConversationHistoryService` | ✅ 已完成 | 含 hasHistory/getMessageCount/getRecentHistorySummary |
+| Phase 1-2 | 创建 `vision-prompt-generator.template` | ✅ 已完成 | 模板文件已创建 |
+| Phase 1-3 | 更新 `input-labels.properties` | ✅ 已完成 | 新增 `label.generated.prompt` |
+| Phase 1-4 | 添加 `promptGenerationChatClient` Bean | ✅ 已完成 | 在 SpringAiConfig 中 |
+| Phase 2-5 | 修改 MultimodalAgentService 依赖注入 | ✅ 已完成 | |
+| Phase 2-6 | 实现 `streamVisionToLlm()` 公共方法 | ✅ 已完成 | |
+| Phase 2-7 | 实现 `buildFinalInput()` 辅助方法 | ✅ 已完成 | |
+| Phase 2-8 | 实现 `streamWithDefaultPrompt()` | ✅ 已完成 | 从原 streamImageOnly 提取 |
+| Phase 2-9 | 实现 `streamWithPromptEnhancement()` | ✅ 已完成 | |
+| Phase 2-10 | 修改 `streamImageOnly()` 分支逻辑 | ✅ 已完成 | |
+| Phase 3 | 测试验证 | ✅ 已完成 | SSE 流式测试通过 |
+
+### 11.2 Git 提交信息
+
+- **提交 Hash**: `eb4def1`
+- **提交信息**: `feat: 多模态图片处理增强 - 提示词情境化优化`
+- **提交日期**: 2026-04-12
+- **变更文件**: 7 个文件 (+286 行, -11 行)
+
+### 11.3 实际测试结果
+
+**测试命令**: `bash test-streaming.sh --image`
+
+**测试环境**:
+- 测试图片: `/Users/yangjiefeng/Documents/wubuku/-IELTS-Preparation/video-workspaces/News_English_International_News_20260327/images/illustration_01.jpg` (215KB)
+- 测试端点: `/api/chat/multimodal/stream`
+- 会话 ID: `test-image`
+
+**测试结果**:
+```
+收到 757 个事件块 (视觉流: 461, LLM流: 296)
+✓ 收到多模态流式响应
+✓ 视觉模型流正常工作 (461 个事件)
+```
+
+**SSE 事件类型验证**:
+- `type="vision"` - 视觉模型输出 (461 事件)
+- `type="content"` - 语言模型输出 (296 事件)
+- `type="prompt"` - 提示词生成过程 (本次测试出现，表明有会话历史)
+
+### 11.4 实现细节确认
+
+1. **历史检测逻辑**: `ConversationHistoryService.hasHistory(conversationId)` 通过 JDBC 直接查询 `SPRING_AI_CHAT_MEMORY` 表
+
+2. **提示词增强流程**: 当检测到有历史时，先调用 LLM 生成情境化提示词，通过 `promptGenerationChatClient`（独立 ChatClient，不经过 advisors）
+
+3. **Flux Cold Source 处理**: 使用 `.cache()` 避免重复调用 LLM
+
+4. **异常处理**: 所有 JDBC 方法都有 try-catch，失败时默认走"无历史"流程
+
+### 11.5 后续优化建议（非本次实施范围）
+
+1. **提示词生成并行化**: 视觉模型调用和提示词生成可以并行启动（当前是串行的）
+2. **提示词缓存**: 相同上下文的提示词可以缓存，避免重复生成
+3. **历史消息数量可配置**: 当前硬编码为 6 条，可通过配置调整

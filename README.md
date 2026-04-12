@@ -346,29 +346,72 @@ data:{"type":"content","choices":[{"delta":{"content":"据"}}]}
 data:[DONE]
 ```
 
-### 工作原理
+### 图片输入处理逻辑
 
+图片上传时，系统会先检测该会话是否有历史消息，然后选择不同的处理流程：
+
+**无会话历史（冷启动）**：
+```
+用户上传图片 + 附带文本(query)
+    ↓
+直接使用默认视图提示词（如果 query 存在则添加 hint）
+    ↓
+调用视觉模型 → 流式返回 type="vision"
+    ↓
+组合 "【图片内容】描述 + 【用户输入】query"
+    ↓
+调用语言模型 → 流式返回 type="content"
+```
+
+**有会话历史（提示词增强）**：
+```
+用户上传图片 + 附带文本(query)
+    ↓
+检测到会话有历史消息
+    ↓
+[第一步] 调用语言模型生成情境化视图提示词
+         输入：用户 query + 会话历史摘要（最近6条）+ 默认视图提示词
+         输出：生成的提示词（通过 SSE type="prompt" 返回）
+    ↓
+[第二步] 使用生成的视图提示词调用视觉模型
+    ↓
+[第三步] 组合 "【图片内容】描述 + 【用户输入】query"
+    ↓
+[第四步] 调用语言模型 → 流式返回 type="content"
+```
+
+**完整处理流程（含音频）**：
 ```
 用户上传（图片/音频）
        │
        ▼
-MultimodalAgentService.chat()
+MultimodalAgentService.streamChat()
        │
-       ├─── 图片 ──→ Vision ChatClient ──→ 图片描述
-       │              (doubao-1-5-vision)
+       ├─── 历史检测 ──→ ConversationHistoryService.hasHistory()
        │
-       ├─── 音频 ──→ TranscriptionModel ──→ 语音转写
-       │              (glm-asr-2512)
+       ├─── 图片处理 ──→ 视觉模型 (doubao-1-5-vision)
+       │                    │
+       │                    ├── 有历史 → 提示词增强流程
+       │                    └── 无历史 → 默认提示词流程
+       │
+       ├─── 音频处理 ──→ TranscriptionModel (glm-asr-2512)
+       │                    │
+       │                    └── 流式返回 type="transcribed"
        │
        ▼
-合并【图片描述】+【语音转写】+【用户文本】
+合并所有输入 → AgentService.streamChat()
        │
        ▼
-AgentService.chat() ──→ 保留所有能力（Skills、RAG、记忆等）
-       │
-       ▼
-返回 AI 回复
+流式返回 type="content"
 ```
+
+**SSE 事件类型**：
+| type | 来源 | 说明 |
+|------|------|------|
+| `vision` | 视觉模型 | 图片描述内容 |
+| `content` | 语言模型 | AI 最终回复 |
+| `transcribed` | 语音转写 | 音频转文字 |
+| `prompt` | 提示词生成 | 仅在有会话历史时出现（用于调试） |
 
 ### 配置要求
 
