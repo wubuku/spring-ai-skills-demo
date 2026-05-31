@@ -659,9 +659,9 @@ public class MultiModelRegistry {
      * 使用实际 API 协议名称，便于扩展和维护
      */
     public enum ProtocolType {
-        OPENAI_CHAT_COMPLETIONS,  // OpenAI Chat Completions API（也适用于 DeepSeek、GLM 等兼容服务）
+        OPENAI_CHAT_COMPLETIONS,  // OpenAI Chat Completions API（DeepSeek、GLM、火山方舟等兼容服务使用）
         OPENAI_RESPONSES,         // OpenAI Responses API（较新）
-        ANTHROPIC_MESSAGES,       // Anthropic Messages API（Anthropic 唯一支持的 API）
+        ANTHROPIC_MESSAGES,       // Anthropic Messages API（DeepSeek 也支持此端点，仅 base_url 不同）
         MINIMAX_NATIVE,           // MiniMax 自有协议
         CUSTOM                     // 自定义协议，需要额外实现
     }
@@ -1123,12 +1123,23 @@ app:
   # ==================== 第2层：供应商配置（app.providers.*） ====================
   # 定义如何连接到每个供应商的 API
   providers:
-    # DeepSeek 供应商
+    # DeepSeek 供应商（OpenAI API 兼容端点）
     deepseek:
-      name: "DeepSeek"
+      name: "DeepSeek (OpenAI)"
       base_url: "https://api.deepseek.com"
       api_key: "${DEEPSEEK_API_KEY}"
       protocol: "openai-chat-completions"  # OpenAI Chat Completions API 兼容
+      offers:
+        - model: deepseek-v4-pro
+        - model: deepseek-v4-flash
+
+    # DeepSeek 供应商（Anthropic API 兼容端点）
+    # DeepSeek 同时支持 OpenAI API 和 Anthropic API，仅 base_url 不同
+    deepseek-anthropic:
+      name: "DeepSeek (Anthropic)"
+      base_url: "https://api.deepseek.com/anthropic"
+      api_key: "${DEEPSEEK_API_KEY}"
+      protocol: "anthropic-messages"  # Anthropic Messages API 兼容
       offers:
         - model: deepseek-v4-pro
         - model: deepseek-v4-flash
