@@ -6,13 +6,146 @@
 
 ---
 
-## 📋 目录
+## 目录
 
-1. [典型架构](#典型架构)
-2. [快速集成](#快速集成)
-3. [关键配置](#关键配置)
-4. [常见问题](#常见问题)
-5. [最佳实践](#最佳实践)
+1. [背景知识：四个包的关系与区别](#背景知识四个包的关系与区别)
+2. [典型架构](#典型架构)
+3. [快速集成](#快速集成)
+4. [关键配置](#关键配置)
+5. [常见问题](#常见问题)
+6. [最佳实践](#最佳实践)
+
+---
+
+## 背景知识：四个包的关系与区别
+
+### 概述
+
+这四个包属于两个**相关但独立**的项目：
+
+| 包 | 所属项目 | 职责 |
+|----|----------|------|
+| `@ag-ui/client` | AG-UI Protocol | AG-UI 协议的 TypeScript 客户端 SDK |
+| `@copilotkit/react-core` | CopilotKit | React 核心包（Hooks 和上下文） |
+| `@copilotkit/react-ui` | CopilotKit | React UI 组件库 |
+| `@copilotkit/runtime` | CopilotKit | 后端运行时（连接前端与 AI 模型） |
+
+### AG-UI Protocol（重要：独立于 CopilotKit）
+
+**AG-UI 是一个独立的开放协议**，用于解决 AI Agent 与前端应用之间的通信交互问题。它不是由 CopilotKit 团队创建的，而是作为一个开放标准被多个项目采用。
+
+**官网**: https://ag-ui.com
+**GitHub**: https://github.com/ag-ui-protocol/ag-ui
+**许可证**: Apache-2.0（JS/TS SDK）
+
+#### 核心功能
+
+- 提供 `HttpAgent` 等实现，用于连接到 AG-UI 协议服务器
+- 支持 SSE（Server-Sent Events）和 protobuf 流式传输
+- 自动处理 AG-UI 事件的完整生命周期：连接、事件处理、状态变更和错误管理
+- 内置响应式状态管理，自动跟踪消息和 Agent 状态并提供实时更新
+- 支持中间件系统（日志记录、持久化、自定义逻辑处理）
+- 提供 `AbstractAgent` 基类，允许开发者构建自己的传输层实现
+
+#### Java 实现
+
+本项目使用 `ag-ui-4j`（MIT License）：
+- **GitHub**: https://github.com/Work-m8/ag-ui-4j (本项目子模块)
+- **协议规范**: https://github.com/ag-ui-protocol/ag-ui
+- **许可证**: MIT（与 JS SDK 的 Apache-2.0 不同）
+
+> ⚠️ **注意**：AI 助手回复中关于 AG-UI 许可证的说法不准确。AG-UI Protocol 的 JS/TS SDK 使用 Apache-2.0，而 Java 实现（ag-ui-4j）使用 MIT 许可证。
+
+### CopilotKit
+
+**官网**: https://copilotkit.ai
+**GitHub**: https://github.com/CopilotKit/CopilotKit
+**许可证**: MIT
+
+CopilotKit 是一个全栈框架，使用 AG-UI 协议作为其底层通信机制。
+
+#### 核心组件
+
+**@copilotkit/react-core** - React 核心包
+- 提供 `CopilotKit` 上下文提供者，用于全局配置和状态管理
+- 导出核心 hooks：
+  - `useCopilotChat()`：管理聊天会话、消息历史和流式输出
+  - `useCopilotAction()`：定义 AI 可以调用的前端函数
+  - `useAgent()`：连接到 AG-UI Agent，获取其实时状态、消息和工具调用信息
+- 处理与 CopilotKit 运行时的通信
+- 支持多 Agent 管理和会话持久化
+
+**@copilotkit/react-ui** - React UI 组件包
+- 提供完整的聊天界面组件：
+  - `CopilotSidebar`：侧边栏式 AI 助手
+  - `CopilotPopup`：弹出式 AI 助手
+  - `CopilotChat`：独立的聊天窗口组件
+- 内置消息气泡、输入框、加载状态、工具调用展示等 UI 元素
+- 支持深度自定义：可以通过 CSS 覆盖样式，也可以替换子组件
+
+**@copilotkit/runtime** - 后端运行时包
+- 接收来自前端的请求，调用 LLM 并将结果流式返回给客户端
+- 提供与主流 AI 模型提供商的适配器：OpenAI、Anthropic、Google Gemini 等
+- 内置与主流 Agent 框架的集成：LangGraph、CrewAI、Mastra、AG-UI 等
+- 提供身份验证、请求验证和 API 密钥安全管理
+- 处理 AG-UI 协议的事件流转换和传输
+
+### 它们之间的关系（关键纠正）
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  前端应用                                                     │
+│  ├── @copilotkit/react-ui (UI组件)                           │
+│  └── @copilotkit/react-core (React hooks和状态管理)            │
+│                           ↓                                   │
+│  @ag-ui/client (AG-UI协议客户端)                              │
+│                           ↓                                   │
+│  网络通信 (HTTP/SSE)                                           │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│  @copilotkit/runtime (后端运行时)                             │
+│  ├── 连接到 CopilotKit 前端                                    │
+│  └── 连接到 AI 模型 / Agent 框架                               │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│  AG-UI 协议 (独立项目，非 CopilotKit 专有)                      │
+│  ├── Java 实现: ag-ui-4j (本项目使用)                          │
+│  ├── TS/JS 实现: @ag-ui/client                               │
+│  └── Python/Dart/Rust 等多语言 SDK                            │
+└───────────────────────────────────────────────────────────────┘
+```
+
+**关键纠正**：
+
+1. ❌ AI 助手说 "AG-UI 是 CopilotKit 的底层协议" - **部分正确但不准确**
+   - AG-UI 是一个独立开放的协议，不是 CopilotKit 创建的
+   - CopilotKit 采用了 AG-UI 作为其通信协议
+
+2. ❌ AI 助手说 "CopilotKit 是 AG-UI 的实现和扩展" - **不准确**
+   - CopilotKit 是独立的项目，它使用 AG-UI 协议
+   - AG-UI 有自己的多语言实现（Java、Python、TypeScript 等）
+
+3. ✅ 正确的描述：
+   - AG-UI 是一个独立的协议规范（类似 WebSocket 或 HTTP）
+   - CopilotKit 是基于 AG-UI 协议的全栈框架
+   - 本项目使用 ag-ui-4j（Java 实现）来支持 AG-UI 协议
+
+### 版本信息（AI 助手提供的版本已过时）
+
+**当前项目实际使用的版本**（2026-05）：
+
+```json
+{
+  "@ag-ui/client": "^0.0.47",
+  "@copilotkit/react-core": "^1.54.0",
+  "@copilotkit/react-ui": "^1.54.0",
+  "@copilotkit/runtime": "^1.54.0"
+}
+```
+
+> ⚠️ AI 助手回复中提到的版本（^0.0.35, ^1.10.1）已经过时，请使用上述版本。
 
 ---
 
@@ -37,7 +170,7 @@
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Java 后端（Spring AI）                                       │
+│  Java 后端（Spring AI + ag-ui-4j）                           │
 │  ├── /api/products   - 业务 API                              │
 │  └── /api/agui       - AG-UI 协议端点 🆕                      │
 └─────────────────────────────────────────────────────────────┘
@@ -279,6 +412,10 @@ public String loadSkill(String name) {
 
 ## 参考资源
 
+- **CopilotKit GitHub**: https://github.com/CopilotKit/CopilotKit
+- **AG-UI Protocol GitHub**: https://github.com/ag-ui-protocol/ag-ui
+- **AG-UI-4J (Java 实现)**: https://github.com/Work-m8/ag-ui-4j
+- **AG-UI 官网**: https://ag-ui.com
 - **完整指南**: `docs/drafts/enterprise-agent-frontend-guide-v4.md`
 - **AG-UI 协议**: `docs/drafts/spring-ai-agui-guide.md`
 - **测试报告**: `TEST_REPORT.md`
