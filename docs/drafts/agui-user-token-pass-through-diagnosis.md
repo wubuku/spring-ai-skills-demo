@@ -95,7 +95,7 @@
 | OpenAI 流式工具执行 | `OpenAiChatModel.java` (1.1.2) | 366-401（`flatMap` + `executeToolCalls` + `subscribeOn(boundedElastic)`） |
 | `DefaultToolCallingManager.buildToolContext` | `DefaultToolCallingManager.java` | 155-167 |
 | `DefaultToolCallingManager.executeToolCalls` | 同上 | 126（主入口） |
-| `MethodToolCallback.call` 注入 ToolContext | `MethodToolCallback.java` | 100-119（`call` 主方法） + 121-128（`validateToolContextSupport`） + 144-150（`buildMethodArguments`） |
+| `MethodToolCallback.call` 注入 ToolContext | `MethodToolCallback.java` | 100-119（`call` 主方法） + 121-128（`validateToolContextSupport`） + 144-152（`buildMethodArguments`） |
 | `DefaultChatClientUtils.toChatClientRequest` 懒创建 options | `DefaultChatClientUtils.java` | 107-148（options 处理整段） |
 | `ChatClientRequestSpec.tools` / `toolContext` | `DefaultChatClient.java` | （未单独验证行号） |
 
@@ -999,7 +999,7 @@ log.info("[JWT] extract source={}, thread={}, jwtPresent={}",
 1. `ReactorBoundedElasticHookConfig` —— 一旦 `ToolContext` 路径稳定，可移除
 2. `SecurityContextHolder` 在 `AgUiController` 里的双重设置（行 81-93）—— 不再需要
 3. `SkillTools.extractJwt` 里的 `UserContextHolder` 兜底 —— 不再需要
-4. `SkillTools` 构造函数上方注释 "AG-UI + SSE + Spring AI 场景不支持用户态 Token 透传" —— **可以删掉这句误导性注释**
+4. `SkillTools` 和 `SkillsAdvisor` 构造函数上方注释 "AG-UI + SSE + Spring AI 场景不支持用户态 Token 透传"（两处）—— **可以删掉这句误导性注释**
 
 ---
 
