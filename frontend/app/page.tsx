@@ -2,160 +2,23 @@
 
 import React from "react";
 import { CopilotPopup } from "@copilotkit/react-ui";
-import {
-  AssistantMessage as DefaultAssistantMessage,
-} from "@copilotkit/react-ui";
-import { useCopilotContext } from "@copilotkit/react-core";
-import { ConfirmDialogContainer, HttpRequestMeta } from "@/components/ConfirmDialogContainer";
+import { useHttpRequestTool } from "@/hooks/useHttpRequestTool";
 import { AuthProvider, useAuth } from "@/components/AuthProvider";
 
 /**
- * 模块级状态缓存：存储已确认的 requestMeta，避免重复显示
+ * HTTP 请求工具 Provider
+ *
+ * 在 CopilotKit 子树中注册 `httpRequest` 工具。
+ * - GET 请求自动执行（无确认）
+ * - POST/PUT/DELETE/PATCH 请求显示确认对话框
+ *
+ * 重构说明（2026-06-02）：
+ * - 替换了原 CustomAssistantMessage + extractHttpRequestMeta + ConfirmDialogContainer 链路
+ * - 现在通过 CopilotKit 原生 useCopilotAction 工具调用实现
  */
-const confirmedRequests = new Set<string>();
-
-/**
- * 从消息内容中提取 http-request 代码块
- * 支持两种格式：
- * 1. 标准格式：```http-request\n{...}\n```
- * 2. 不完整格式（LLM 可能生成）：```http-request{...}（缺少结束 ```）
- */
-function extractHttpRequestMeta(content: string): {
-  cleanedContent: string;
-  requestMeta?: HttpRequestMeta;
-} {
-  // 优先尝试标准格式（有闭合的 ```）
-  let pattern = /```http-request\s*\n?([\s\S]*?)```/g;
-  let matches = [...content.matchAll(pattern)];
-
-  // 如果没有匹配到，尝试不完整格式（没有闭合的 ```）
-  // 匹配 ```http-request 后面跟着 JSON 内容，直到行尾
-  if (matches.length === 0) {
-    pattern = /```http-request\s*\n?(\{[\s\S]*)/g;
-    matches = [...content.matchAll(pattern)];
-  }
-
-  if (matches.length === 0) {
-    return { cleanedContent: content };
-  }
-
-  const lastMatch = matches[matches.length - 1];
-  let jsonContent = (lastMatch[1] || '').trim();
-
-  // 尝试修复不完整的 JSON（如果没有闭合的 }）
-  if (jsonContent && !jsonContent.endsWith('}')) {
-    // 找到最后一个 } 并截断
-    const lastBraceIndex = jsonContent.lastIndexOf('}');
-    if (lastBraceIndex > 0) {
-      jsonContent = jsonContent.substring(0, lastBraceIndex + 1);
-    }
-  }
-
-  let requestMeta: HttpRequestMeta | undefined;
-
-  if (jsonContent) {
-    try {
-      const raw = JSON.parse(jsonContent);
-      requestMeta = {
-        method: raw.method || 'POST',
-        url: raw.url || '',
-        params: raw.params || raw.queryParams || {},
-        body: raw.body,
-        headers: raw.headers,
-      };
-    } catch (e) {
-      console.log('[extractHttpRequestMeta] JSON parse error:', e);
-    }
-  }
-
-  // 移除 http-request 代码块（支持完整和不完整格式）
-  let cleanedContent = content
-    .replace(/```http-request[\s\S]*?```/g, '')  // 完整格式
-    .replace(/```http-request[\s\S]*/g, '')      // 不完整格式（没有闭合 ```）
-    .trim();
-
-  return { cleanedContent, requestMeta };
-}
-
-/**
- * 生成唯一的请求 key（包含参数）
- */
-function getRequestKey(requestMeta: HttpRequestMeta | undefined): string | null {
-  if (!requestMeta) return null;
-  const paramsStr = requestMeta.params ? JSON.stringify(requestMeta.params) : '';
-  return `${requestMeta.method}-${requestMeta.url}-${paramsStr}`;
-}
-
-/**
- * 自定义 AssistantMessage - 使用 DefaultAssistantMessage 渲染消息
- * 通过 markdownTagRenderers 的 pre 标签拦截来显示确认对话框
- */
-function CustomAssistantMessage(props: any) {
-  const { isLoading } = useCopilotContext();
-  const messageId = props.message?.id;
-
-  const content = props.message?.content || props.message?.text || '';
-
-  // 提取 requestMeta
-  const { cleanedContent, requestMeta } = extractHttpRequestMeta(content);
-
-  // 始终显示确认对话框
-  // 每次用户发送新消息时，如果有 http-request，都会显示确认对话框
-  // 这是更安全的做法，避免用户错过确认重要操作
-  const requestKey = requestMeta ? getRequestKey(requestMeta) : null;
-
-  // 只有在流完成后、有 requestMeta 时才显示确认对话框
-  // 不缓存确认状态，确保每次都让用户确认（安全优先）
-  const showConfirm = !isLoading && requestMeta;
-
-  // 创建标准化消息
-  const normalizedMessage = props.message
-    ? { ...props.message, content: cleanedContent }
-    : props.message;
-
-  // 创建一个 ref 来存储确认对话框的回调
-  const confirmRef = React.useRef<{
-    resolve: (confirmed: boolean) => void;
-  } | null>(null);
-
-  // 当用户点击确认时的处理
-  const handleConfirm = React.useCallback(() => {
-    if (requestKey) {
-      confirmedRequests.add(requestKey);
-    }
-    if (confirmRef.current) {
-      confirmRef.current.resolve(true);
-      confirmRef.current = null;
-    }
-  }, [requestKey]);
-
-  // 当用户点击取消时的处理
-  const handleCancel = React.useCallback(() => {
-    if (confirmRef.current) {
-      confirmRef.current.resolve(false);
-      confirmRef.current = null;
-    }
-  }, []);
-
-  // 创建一个 Promise 来等待用户确认
-  // 这里我们不使用阻塞，而是让 ConfirmDialogContainer 自己处理
-
-  return (
-    <>
-      <DefaultAssistantMessage
-        {...props}
-        message={normalizedMessage}
-      />
-      {showConfirm && (
-        <div className="mt-2">
-          <ConfirmDialogContainer
-            key={requestKey}
-            requestMeta={requestMeta}
-          />
-        </div>
-      )}
-    </>
-  );
+function HttpRequestToolProvider({ children }: { children: React.ReactNode }) {
+  useHttpRequestTool();
+  return <>{children}</>;
 }
 
 function AuthBar() {
@@ -340,51 +203,52 @@ function HomeContent() {
           </ul>
         </div>
 
-        {/* CopilotKit Popup Component */}
-        <CopilotPopup
-          instructions="你是企业智能助手，帮助员工解答业务问题、查询数据、执行操作。"
-          labels={{
-            title: "企业智能助手",
-            initial: "你好！我是企业智能助手，有什么可以帮助你的吗？",
-            placeholder: "输入你的问题...",
-          }}
-          AssistantMessage={CustomAssistantMessage}
-          markdownTagRenderers={{
-            // 表格渲染，确保 Markdown 表格正确显示
-            table: ({ children, ...props }: any) => (
-              <div className="overflow-x-auto my-4">
-                <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600" {...props}>
+        {/* CopilotKit Popup Component - 注册 httpRequest 工具（替代旧的 CustomAssistantMessage + ConfirmDialogContainer 链路） */}
+        <HttpRequestToolProvider>
+          <CopilotPopup
+            instructions="你是企业智能助手，帮助员工解答业务问题、查询数据、执行操作。"
+            labels={{
+              title: "企业智能助手",
+              initial: "你好！我是企业智能助手，有什么可以帮助你的吗？",
+              placeholder: "输入你的问题...",
+            }}
+            markdownTagRenderers={{
+              // 表格渲染，确保 Markdown 表格正确显示
+              table: ({ children, ...props }: any) => (
+                <div className="overflow-x-auto my-4">
+                  <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600" {...props}>
+                    {children}
+                  </table>
+                </div>
+              ),
+              thead: ({ children, ...props }: any) => (
+                <thead className="bg-gray-100 dark:bg-gray-700" {...props}>
                   {children}
-                </table>
-              </div>
-            ),
-            thead: ({ children, ...props }: any) => (
-              <thead className="bg-gray-100 dark:bg-gray-700" {...props}>
-                {children}
-              </thead>
-            ),
-            tbody: ({ children, ...props }: any) => (
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700" {...props}>
-                {children}
-              </tbody>
-            ),
-            tr: ({ children, ...props }: any) => (
-              <tr className="hover:bg-gray-50 dark:hover:bg-gray-800" {...props}>
-                {children}
-              </tr>
-            ),
-            th: ({ children, ...props }: any) => (
-              <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100" {...props}>
-                {children}
-              </th>
-            ),
-            td: ({ children, ...props }: any) => (
-              <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-gray-700 dark:text-gray-300" {...props}>
-                {children}
-              </td>
-            ),
-          }}
-        />
+                </thead>
+              ),
+              tbody: ({ children, ...props }: any) => (
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700" {...props}>
+                  {children}
+                </tbody>
+              ),
+              tr: ({ children, ...props }: any) => (
+                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800" {...props}>
+                  {children}
+                </tr>
+              ),
+              th: ({ children, ...props }: any) => (
+                <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100" {...props}>
+                  {children}
+                </th>
+              ),
+              td: ({ children, ...props }: any) => (
+                <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-gray-700 dark:text-gray-300" {...props}>
+                  {children}
+                </td>
+              ),
+            }}
+          />
+        </HttpRequestToolProvider>
       </main>
     </div>
   );

@@ -21,7 +21,7 @@ public class SkillsAdvisor implements BaseAdvisor {
     private static final Logger log = LoggerFactory.getLogger(SkillsAdvisor.class);
 
     private final SkillRegistry registry;
-    private final SkillTools skillTools;
+    private final SkillCoreTools skillCoreTools;
     private final PromptLoader promptLoader;
     private final String apiBaseUrl;
 
@@ -29,11 +29,14 @@ public class SkillsAdvisor implements BaseAdvisor {
      * confirm-before-mutate 配置已移除
      * 原因：AG-UI + SSE + Spring AI 场景不支持用户态 Token 透传
      * 后端不再试图"代表用户调用API"，任何需要用户 access token 的操作都推到前端
+     *
+     * 注意：使用 SkillCoreTools 而非 SkillTools，保证已加载技能列表的可见性，
+     * 同时不依赖 SkillTools 的 HTTP 工具（避免与前端 httpRequest 工具冲突）。
      */
-    public SkillsAdvisor(SkillRegistry registry, SkillTools skillTools, PromptLoader promptLoader,
+    public SkillsAdvisor(SkillRegistry registry, SkillCoreTools skillCoreTools, PromptLoader promptLoader,
                          @Value("${app.api.base-url}") String apiBaseUrl) {
         this.registry = registry;
-        this.skillTools = skillTools;
+        this.skillCoreTools = skillCoreTools;
         this.promptLoader = promptLoader;
         this.apiBaseUrl = apiBaseUrl;
     }
@@ -73,7 +76,7 @@ public class SkillsAdvisor implements BaseAdvisor {
 
         log.info("[SkillsAdvisor] 所有技能列表: {}", registry.all().keySet());
 
-        String loadedContext = skillTools.getLoadedSkills().stream()
+        String loadedContext = skillCoreTools.getLoadedSkills().stream()
             .map(name -> registry.get(name)
                 .map(s -> "\n\n## 已激活技能：" + name + "\n" + s.getBody())
                 .orElse(""))
@@ -93,9 +96,13 @@ public class SkillsAdvisor implements BaseAdvisor {
     }
 
     /**
-     * 返回 HTTP 工具名称（默认使用 buildHttpRequest，因为不确定时使用这个更安全）
+     * 返回 HTTP 工具名称
+     *
+     * 历史：原本返回 "buildHttpRequest"（后端工具），但 mode-rules.template 已经统一为前端
+     * "httpRequest"，且 AG-UI 模式下后端 SkillTools 不再注册 HTTP 工具（由 SkillCoreTools 替代），
+     * 因此这里也改为 "httpRequest" 保持一致。
      */
     private String getHttpToolName() {
-        return "buildHttpRequest";
+        return "httpRequest";
     }
 }

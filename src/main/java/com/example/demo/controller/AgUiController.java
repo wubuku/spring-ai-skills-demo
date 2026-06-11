@@ -3,7 +3,7 @@ package com.example.demo.controller;
 import com.agui.server.spring.AgUiParameters;
 import com.agui.server.spring.AgUiService;
 import com.agui.spring.ai.SpringAIAgent;
-import com.example.demo.agent.SkillTools;
+import com.example.demo.agent.SkillCoreTools;
 import com.example.demo.auth.UserContextHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,12 +36,12 @@ public class AgUiController {
 
     private final AgUiService agUiService;
     private final SpringAIAgent enterpriseAgent;
-    private final SkillTools skillTools;
+    private final SkillCoreTools skillCoreTools;
 
-    public AgUiController(AgUiService agUiService, SpringAIAgent enterpriseAgent, SkillTools skillTools) {
+    public AgUiController(AgUiService agUiService, SpringAIAgent enterpriseAgent, SkillCoreTools skillCoreTools) {
         this.agUiService = agUiService;
         this.enterpriseAgent = enterpriseAgent;
-        this.skillTools = skillTools;
+        this.skillCoreTools = skillCoreTools;
     }
 
     /**
@@ -105,7 +105,7 @@ public class AgUiController {
         }
         agUiParameters.setForwardedProps(toolContext);
 
-        skillTools.reset();
+        skillCoreTools.reset();
 
         // 注意：UserContextHolder 现在由 AuthFilter 在 HTTP 入口处设置
         // Reactor hook 会在 boundedElastic 线程中自动捕获并设置用户上下文

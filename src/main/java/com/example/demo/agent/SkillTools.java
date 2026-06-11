@@ -43,6 +43,7 @@ public class SkillTools {
 
     public void reset() { loadedSkills.clear(); }
     public List<String> getLoadedSkills() { return loadedSkills; }
+    public void markSkillLoaded(String skillName) { loadedSkills.add(skillName); }
 
     @Tool(description = "加载指定技能的完整操作指令。在使用任何技能前必须先调用此工具。")
     public String loadSkill(
