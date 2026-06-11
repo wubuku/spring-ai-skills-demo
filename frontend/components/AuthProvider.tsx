@@ -176,12 +176,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         onClose={() => setShowLogin(false)}
         onLogin={login}
       />
-      {/* 提供一个全局方法用于显示登录弹窗 */}
-      <script dangerouslySetInnerHTML={{__html: `
-        window.showLoginModal = function() {
-          document.querySelector('[data-login-modal]')?.classList?.add('show');
-        };
-      `}} />
     </AuthContext.Provider>
   );
 }

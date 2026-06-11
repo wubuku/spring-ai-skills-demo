@@ -249,6 +249,9 @@ function HomeContent() {
               // 推理模型（MiniMax-M3 等）的 <think> 标签渲染为可折叠区域
               // 后端 StreamingTagFilter 已放行 <think> 标签，让前端做折叠显示
               // 初始展开（open），让用户实时看到思考过程；最终结果出来后可手动折叠
+              // 注意：HTML5 规范禁止 <p> 作为 <details> 的直接子元素
+              // （markdown 解析器会把多行内容包成 <p>），所以这里把 children 用
+              // 纯 div 包裹后再渲染，并确保不会再次被包成 <p>
               think: ({ children, ...props }: any) => (
                 <details
                   open
@@ -258,10 +261,18 @@ function HomeContent() {
                   <summary className="cursor-pointer px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 select-none">
                     思考过程
                   </summary>
-                  <div className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-pre-wrap text-xs leading-relaxed">
+                  <div className="think-content px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-pre-wrap text-xs leading-relaxed">
                     {children}
                   </div>
                 </details>
+              ),
+              // 兼容：避免 React 19 的 p-in-details 嵌套警告
+              // 把 <p> 重写为 <div class="copilotKitMarkdownElement">，让 block-level
+              // 内容在 <details> 内也是合法 HTML
+              p: ({ children, ...props }: any) => (
+                <div className="copilotKitMarkdownElement" {...props}>
+                  {children}
+                </div>
               ),
             }}
           />
