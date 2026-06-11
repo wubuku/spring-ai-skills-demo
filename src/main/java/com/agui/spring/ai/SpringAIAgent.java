@@ -15,9 +15,13 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.PromptChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.util.StringUtils;
 
@@ -68,7 +72,7 @@ public class SpringAIAgent extends LocalAgent {
      * Spring AI 1.1.2 的 ToolCallingChatOptions 没有 maxToolCalls 选项，
      * 因此这里在应用层强制限制。
      */
-    public static final int DEFAULT_MAX_TOOL_CALLS = 5;
+    public static final int DEFAULT_MAX_TOOL_CALLS = 1;
 
     /**
      * 匹配推理模型（DeepSeek-R1、MiniMax-M3、Claude w/ extended thinking 等）泄漏到正文中的
@@ -91,7 +95,7 @@ public class SpringAIAgent extends LocalAgent {
      *        并在 normal state 单独 strip 悬空闭标签（见 findOrphanCloseTag）
      */
     private static final Pattern THINK_TAG_PATTERN = Pattern.compile(
-        "<\\s*(think(?:ing)?|parameter|invoke|tool_call|function_calls|antml_thinking|antml_call)\\b[^>]*>"
+        "<\\s*(parameter|invoke|tool_call|function_calls|antml_call)\\b[^>]*>"
             + "[\\s\\S]*?"
             + "<\\s*/\\s*\\1\\s*>",
         Pattern.CASE_INSENSITIVE
@@ -102,7 +106,7 @@ public class SpringAIAgent extends LocalAgent {
      * 命中后返回该标签的规范小写名（用于在 STATE 闭合时找对应闭标签）。
      */
     private static final Pattern KNOWN_OPEN_TAG_AT = Pattern.compile(
-        "<\\s*(think(?:ing)?|parameter|invoke|tool_call|function_calls|antml_thinking|antml_call)\\b",
+        "<\\s*(parameter|invoke|tool_call|function_calls|antml_call)\\b",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -114,9 +118,14 @@ public class SpringAIAgent extends LocalAgent {
      *
      * 与 KNOWN_OPEN_TAG_AT 同步更新（增删标签时两个一起改）。
      */
+    /**
+     * 只过滤工具调用草稿标签（parameter / invoke / tool_call / function_calls / antml_call），
+     * 不再过滤 think / thinking / antml_thinking——这些推理过程标签应实时推送到前端，
+     * 由前端渲染为可折叠区域，让用户看到 AI 的思考进度。
+     */
     private static final java.util.Set<String> KNOWN_TAG_NAMES = java.util.Set.of(
-        "think", "thinking", "parameter", "invoke", "tool_call",
-        "function_calls", "antml_thinking", "antml_call"
+        "parameter", "invoke", "tool_call",
+        "function_calls", "antml_call"
     );
 
     /**
@@ -126,7 +135,7 @@ public class SpringAIAgent extends LocalAgent {
      * 与 KNOWN_TAG_NAMES 同步更新。
      */
     private static final Pattern ORPHAN_CLOSE_TAG_PATTERN = Pattern.compile(
-        "<\\s*/\\s*(think(?:ing)?|parameter|invoke|tool_call|function_calls|antml_thinking|antml_call)\\s*>",
+        "<\\s*/\\s*(parameter|invoke|tool_call|function_calls|antml_call)\\s*>",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -237,6 +246,21 @@ public class SpringAIAgent extends LocalAgent {
     private final int maxToolCalls;
 
     /**
+     * 用于手动执行工具调用的 ToolCallback 列表。
+     * 当 internalToolExecutionEnabled=false 时，Spring AI 不会在内部执行工具，
+     * 而是将原始 tool calls 透传到 subscriber。SpringAIAgent 在 onComplete() 中
+     * 使用此列表查找并执行匹配的工具，发射 AG-UI 事件，然后 re-run。
+     */
+    private final List<ToolCallback> toolCallbacksForExecution;
+
+    /**
+     * 是否禁用 Spring AI 的内部工具执行。
+     * 当为 false 时，OpenAiChatModel 会将原始 tool calls 透传到 subscriber，
+     * 由 SpringAIAgent 手动执行工具并发射 AG-UI 事件。
+     */
+    private final boolean internalToolExecutionEnabled;
+
+    /**
      * Protected constructor that initializes the SpringAIAgent using the builder pattern.
      *
      * @param builder the Builder instance containing all configuration parameters
@@ -264,6 +288,9 @@ public class SpringAIAgent extends LocalAgent {
             ? builder.maxToolCalls
             : DEFAULT_MAX_TOOL_CALLS;
 
+        this.toolCallbacksForExecution = builder.toolCallbacksForExecution;
+        this.internalToolExecutionEnabled = builder.internalToolExecutionEnabled;
+
         this.toolMapper = new ToolMapper();
     }
 
@@ -283,6 +310,14 @@ public class SpringAIAgent extends LocalAgent {
      * Events are emitted throughout the process to provide real-time updates to subscribers.
      */
     protected void run(RunAgentInput input, AgentSubscriber subscriber) {
+        run(input, subscriber, 0);
+    }
+
+    /**
+     * 带工具执行计数的 run 方法。
+     * @param toolExecutionCount 当前 run 中已执行的工具轮次（用于防止无限循环）
+     */
+    private void run(RunAgentInput input, AgentSubscriber subscriber, int toolExecutionCount) {
         var messageId = UUID.randomUUID().toString();
         var threadId = input.threadId();
         var runId = input.runId();
@@ -303,27 +338,29 @@ public class SpringAIAgent extends LocalAgent {
             subscriber
         );
 
-        this.emitEvent(
-            textMessageStartEvent(messageId, "assistant"),
-            subscriber
-        );
-
         final List<BaseEvent> deferredEvents = new ArrayList<>();
         // 单次 run 中的工具调用计数器（线程安全）
         // 用于防御推理模型（MiniMax-M3 等）的"无限工具调用"循环
         final AtomicInteger toolCallCounter = new AtomicInteger(0);
         // 标记是否已因工具调用超限而强制停止
         final boolean[] forceStopped = { false };
-        // 单次 run 中跨 chunk 的标签过滤器（用于剥离 <think> / <parameter> / <invoke> / <function_calls> 等
-        // 推理模型在正文里泄漏的 XML/JSX 风格标签）
+        // 单次 run 中跨 chunk 的标签过滤器（只剥离工具调用草稿标签如 <parameter> / <invoke> / <function_calls> 等）
+        // 不再过滤 <think> / <thinking> 标签——这些推理过程标签实时推送到前端做折叠显示
         final StreamingTagFilter tagFilter = new StreamingTagFilter();
+        // 标记 TEXT_MESSAGE_START 是否已发射
+        final boolean[] textStarted = { false };
+        // 跨 chunk 的已见工具调用去重集合（key = "name:arguments"）
+        // 用于防御 MiniMax-M3 等模型在单次 response 中发出多个完全相同的 tool_call
+        final java.util.Set<String> seenToolKeys = new java.util.HashSet<>();
+        // 保存当前 toolExecutionCount 供 onComplete 使用
+        final int currentToolExecutionCount = toolExecutionCount;
 
         try {
             getChatRequest(input, content, messageId, deferredEvents, this.createSystemMessage(state, input.context()), subscriber)
                 .stream()
                 .chatResponse()
                 .subscribe(
-                    evt -> onEvent(subscriber, evt, messageId, deferredEvents, toolCallCounter, forceStopped, tagFilter),
+                    evt -> onEvent(subscriber, evt, messageId, deferredEvents, toolCallCounter, forceStopped, tagFilter, textStarted, seenToolKeys),
                     err -> {
                         if (!forceStopped[0]) {
                             this.emitEvent(runErrorEvent(err.getMessage()), subscriber);
@@ -331,12 +368,14 @@ public class SpringAIAgent extends LocalAgent {
                     },
                     () -> {
                         if (forceStopped[0]) {
-                            // 强制停止：额外发出明确的结束事件
-                            this.emitEvent(textMessageEndEvent(messageId), subscriber);
+                            // 强制停止：如果有文本已发射，发出结束事件
+                            if (textStarted[0]) {
+                                this.emitEvent(textMessageEndEvent(messageId), subscriber);
+                            }
                             this.emitEvent(runFinishedEvent(input.threadId(), input.runId()), subscriber);
                             log.info("[SpringAIAgent] run 已强制停止 - 工具调用超限 (limit={})", this.maxToolCalls);
                         } else {
-                            onComplete(input, subscriber, messageId, deferredEvents);
+                            onComplete(input, subscriber, messageId, deferredEvents, textStarted, currentToolExecutionCount);
                         }
                     }
                 );
@@ -355,8 +394,13 @@ public class SpringAIAgent extends LocalAgent {
      * @param evt the chat response event from Spring AI
      * @param messageId the unique identifier for the current message
      * @param deferredEvents Events that will be deferred and emitted later
+     * @param toolCallCounter Counter for tool calls in this run
+     * @param forceStopped Whether the run has been force-stopped
+     * @param tagFilter Streaming tag filter for think/parameter/invoke tags
+     * @param textBuffer Buffer for text content (emitted only if no tool calls)
+     * @param textStarted Whether TEXT_MESSAGE_START has been emitted
      */
-    private void onEvent(AgentSubscriber subscriber, ChatResponse evt, String messageId, List<BaseEvent> deferredEvents, AtomicInteger toolCallCounter, boolean[] forceStopped, StreamingTagFilter tagFilter) {
+    private void onEvent(AgentSubscriber subscriber, ChatResponse evt, String messageId, List<BaseEvent> deferredEvents, AtomicInteger toolCallCounter, boolean[] forceStopped, StreamingTagFilter tagFilter, boolean[] textStarted, java.util.Set<String> seenToolKeys) {
         // 已被强制停止，不再处理后续事件
         if (forceStopped[0]) {
             return;
@@ -374,6 +418,11 @@ public class SpringAIAgent extends LocalAgent {
                             .collect(Collectors.joining(", ")));
 
                     // 通过 text message content event 向用户发出明确的停止消息
+                    // 注意：这里需要直接发射（不经过缓冲），因为是强制停止的提示
+                    if (!textStarted[0]) {
+                        this.emitEvent(textMessageStartEvent(messageId, "assistant"), subscriber);
+                        textStarted[0] = true;
+                    }
                     String stopMsg = "\n\n⚠️ [系统提示] 已达到单次响应最大工具调用次数 ("
                         + this.maxToolCalls + ")，强制停止。请基于已收到的工具结果给出最终回答，避免继续调用工具。";
                     this.emitEvent(
@@ -386,6 +435,15 @@ public class SpringAIAgent extends LocalAgent {
             }
             evt.getResult().getOutput().getToolCalls()
                 .forEach(toolCall -> {
+                    // 去重：同名同参数的工具调用只保留第一个
+                    // 解决 MiniMax-M3 等模型在单次 response 中发出多个完全相同 tool_call 的问题
+                    String toolKey = toolCall.name() + ":" + toolCall.arguments();
+                    if (seenToolKeys.contains(toolKey)) {
+                        log.warn("[SpringAIAgent] 跳过重复工具调用: {} ({})", toolCall.name(), toolCall.arguments());
+                        return;
+                    }
+                    seenToolKeys.add(toolKey);
+
                     var toolCallId = toolCall.id();
                     deferredEvents.add(toolCallStartEvent(messageId, toolCall.name(), toolCallId));
                     deferredEvents.add(toolCallArgsEvent(toolCall.arguments(), toolCallId));
@@ -398,14 +456,18 @@ public class SpringAIAgent extends LocalAgent {
         }
         if (StringUtils.hasText(evt.getResult().getOutput().getText())) {
             String text = evt.getResult().getOutput().getText();
+            log.debug("[SpringAIAgent] LLM raw text chunk ({} chars): {}", text.length(),
+                text.length() > 200 ? text.substring(0, 200) + "..." : text);
             // 跨 chunk 过滤 <think>...</think> / <parameter>...</parameter> 等泄漏的 XML/JSX 风格标签
             // （v3 状态机版：仅依赖 per-chunk 正则会在跨 chunk 边界时漏掉 <tag>...<tag> 这种 split 情况）
             String filtered = tagFilter.process(text);
             if (StringUtils.hasText(filtered)) {
-                this.emitEvent(
-                    textMessageContentEvent(messageId, filtered),
-                    subscriber
-                );
+                // 实时发射文本（真流式）——不做缓冲
+                if (!textStarted[0]) {
+                    this.emitEvent(textMessageStartEvent(messageId, "assistant"), subscriber);
+                    textStarted[0] = true;
+                }
+                this.emitEvent(textMessageContentEvent(messageId, filtered), subscriber);
             }
         }
     }
@@ -767,6 +829,7 @@ public class SpringAIAgent extends LocalAgent {
      * <ul>
      * <li>Emitting the text message end event</li>
      * <li>Processing any deferred tool call events</li>
+     * <li>Executing tools manually when internalToolExecutionEnabled=false</li>
      * <li>Emitting the run finished event</li>
      * <li>Finalizing the agent run with updated state</li>
      * </ul>
@@ -775,14 +838,194 @@ public class SpringAIAgent extends LocalAgent {
      * @param subscriber the event subscriber to notify
      * @param messageId the unique identifier for the current message
      * @param deferredEvents list of tool call events to process after message completion
+     * @param textStarted whether TEXT_MESSAGE_START has been emitted
+     * @param toolExecutionCount current tool execution round count (for loop prevention)
      */
-    private void onComplete(RunAgentInput input, AgentSubscriber subscriber, String messageId, List<BaseEvent> deferredEvents) {
-        this.emitEvent(textMessageEndEvent(messageId), subscriber);
-        deferredEvents.forEach(deferredEvent ->
-            this.emitEvent(deferredEvent, subscriber)
-        );
+    private void onComplete(RunAgentInput input, AgentSubscriber subscriber, String messageId, List<BaseEvent> deferredEvents, boolean[] textStarted, int toolExecutionCount) {
+        boolean hasToolCalls = !deferredEvents.isEmpty();
+
+        log.info("[SpringAIAgent] onComplete: hasToolCalls={}, textStarted={}, internalToolExecutionEnabled={}, toolExecutionCount={}",
+            hasToolCalls, textStarted[0], this.internalToolExecutionEnabled, toolExecutionCount);
+
+        // 兜底：stream 完成但既没有文本也没有工具调用（例如 LLM 只输出了被全部过滤的内容）
+        if (!hasToolCalls && !textStarted[0]) {
+            log.warn("[SpringAIAgent] Run completed with no text and no tool calls");
+            this.emitEvent(textMessageStartEvent(messageId, "assistant"), subscriber);
+            textStarted[0] = true;
+            this.emitEvent(textMessageContentEvent(messageId, "抱歉，模型未能生成有效回复，请重试。"), subscriber);
+        }
+
+        // 发射 TEXT_MESSAGE_END（如果 TEXT_MESSAGE_START 已发射）
+        if (textStarted[0]) {
+            this.emitEvent(textMessageEndEvent(messageId), subscriber);
+        }
+
+        // 当 internalToolExecutionEnabled=false 时，手动执行工具并 re-run
+        if (hasToolCalls && !this.internalToolExecutionEnabled
+                && !this.toolCallbacksForExecution.isEmpty()
+                && toolExecutionCount < this.maxToolCalls) {
+            try {
+                boolean executed = executeToolCallsAndReRun(input, subscriber, messageId, deferredEvents, toolExecutionCount);
+                if (executed) {
+                    // 工具已执行并 re-run，不发射 RUN_FINISHED（由 re-run 负责）
+                    return;
+                }
+            } catch (Exception e) {
+                log.error("[SpringAIAgent] 工具执行失败: {}", e.getMessage(), e);
+                // 发射错误事件，然后继续发射 RUN_FINISHED
+                this.emitEvent(runErrorEvent("工具执行失败: " + e.getMessage()), subscriber);
+            }
+        } else if (hasToolCalls && !this.internalToolExecutionEnabled && toolExecutionCount >= this.maxToolCalls) {
+            log.warn("[SpringAIAgent] 工具执行轮次超限 ({}), 跳过工具执行", toolExecutionCount);
+        }
+
+        // 发射延迟的工具调用事件（当 internalToolExecutionEnabled=true 或工具执行超限时）
+        if (this.internalToolExecutionEnabled || toolExecutionCount >= this.maxToolCalls) {
+            deferredEvents.forEach(deferredEvent ->
+                this.emitEvent(deferredEvent, subscriber)
+            );
+        }
         this.emitEvent(runFinishedEvent(input.threadId(), input.runId()), subscriber);
         subscriber.onRunFinalized(new AgentSubscriberParams(input.messages(), state, this, input));
+    }
+
+    /**
+     * 手动执行工具调用并 re-run。
+     * 当 internalToolExecutionEnabled=false 时，Spring AI 不会自动执行工具，
+     * 而是将原始 tool calls 透传到 subscriber。本方法：
+     * 1. 从 deferredEvents 中提取工具调用信息
+     * 2. 通过 toolCallbacksForExecution 查找并执行匹配的工具
+     * 3. 发射 AG-UI 工具事件（TOOL_CALL_START/ARGS/END/RESULT）
+     * 4. 构建包含工具结果的新消息列表
+     * 5. 重新调用 run() 让模型基于工具结果生成回复
+     *
+     * @return true 如果成功执行工具并 re-run，false 如果没有可执行的工具
+     */
+    private boolean executeToolCallsAndReRun(RunAgentInput input, AgentSubscriber subscriber, String messageId, List<BaseEvent> deferredEvents, int toolExecutionCount) {
+        // 从 deferredEvents 中提取工具调用信息
+        // 先收集 TOOL_CALL_START 事件的工具名和 ID
+        Map<String, String> toolCallNames = new HashMap<>();  // toolCallId -> toolName
+        for (BaseEvent event : deferredEvents) {
+            if (event instanceof com.agui.core.event.ToolCallStartEvent startEvent) {
+                toolCallNames.put(startEvent.getToolCallId(), startEvent.getToolCallName());
+            }
+        }
+
+        // 收集 TOOL_CALL_ARGS 事件的参数
+        Map<String, String> toolCallArgs = new HashMap<>();  // toolCallId -> arguments
+        for (BaseEvent event : deferredEvents) {
+            if (event instanceof com.agui.core.event.ToolCallArgsEvent argsEvent) {
+                toolCallArgs.put(argsEvent.getToolCallId(), argsEvent.getDelta());
+            }
+        }
+
+        // 构建 ToolCall 列表
+        List<AssistantMessage.ToolCall> toolCalls = new ArrayList<>();
+        for (Map.Entry<String, String> entry : toolCallNames.entrySet()) {
+            String toolCallId = entry.getKey();
+            String toolName = entry.getValue();
+            String arguments = toolCallArgs.getOrDefault(toolCallId, "{}");
+            toolCalls.add(new AssistantMessage.ToolCall(toolCallId, "function", toolName, arguments));
+        }
+
+        if (toolCalls.isEmpty()) {
+            log.warn("[SpringAIAgent] executeToolCallsAndReRun: 没有找到工具调用");
+            return false;
+        }
+
+        log.info("[SpringAIAgent] executeToolCallsAndReRun: 执行 {} 个工具调用 (轮次 {}/{})",
+            toolCalls.size(), toolExecutionCount + 1, this.maxToolCalls);
+
+        // 发射 AG-UI 工具事件
+        for (BaseEvent event : deferredEvents) {
+            this.emitEvent(event, subscriber);
+        }
+
+        // 执行工具并收集结果
+        List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
+        boolean allToolsFound = true;  // 跟踪是否所有工具都在本地找到
+        for (AssistantMessage.ToolCall toolCall : toolCalls) {
+            String toolName = toolCall.name();
+            String toolArguments = toolCall.arguments();
+
+            // 在 toolCallbacksForExecution 中查找匹配的工具
+            ToolCallback toolCallback = this.toolCallbacksForExecution.stream()
+                .filter(cb -> toolName.equals(cb.getToolDefinition().name()))
+                .findFirst()
+                .orElse(null);
+
+            String result;
+            if (toolCallback != null) {
+                try {
+                    log.info("[SpringAIAgent] 执行工具: {} ({})", toolName, toolArguments);
+                    result = toolCallback.call(toolArguments != null ? toolArguments : "{}");
+                    log.info("[SpringAIAgent] 工具 {} 返回结果 ({} chars)", toolName, result != null ? result.length() : 0);
+                } catch (Exception e) {
+                    log.error("[SpringAIAgent] 工具 {} 执行失败: {}", toolName, e.getMessage());
+                    result = "工具执行失败: " + e.getMessage();
+                }
+            } else {
+                // 工具不在本地注册（如 httpRequest 由前端 useCopilotAction 处理）。
+                // 标记为未找到，不发射 TOOL_CALL_RESULT——让前端 CopilotKit 的
+                // useCopilotAction 处理该工具调用并返回结果。
+                log.info("[SpringAIAgent] 工具 {} 未在后端注册，跳过执行（由前端处理）", toolName);
+                allToolsFound = false;
+                continue;
+            }
+
+            // 发射 TOOL_CALL_RESULT 事件（仅限本地已注册的工具）
+            this.emitEvent(toolCallResultEvent(toolCall.id(), result, messageId, Role.tool), subscriber);
+
+            toolResponses.add(new ToolResponseMessage.ToolResponse(toolCall.id(), toolName, result != null ? result : ""));
+        }
+
+        // 如果有工具未在后端注册（如 httpRequest），不执行 re-run。
+        // 前端 CopilotKit 的 useCopilotAction 会处理这些工具调用。
+        // 仅发射已执行工具的结果，然后结束当前 run。
+        if (!allToolsFound) {
+            if (!toolResponses.isEmpty()) {
+                // 部分工具已执行，保存到 ChatMemory
+                if (this.chatMemory != null) {
+                    AssistantMessage assistantMessage = AssistantMessage.builder()
+                        .toolCalls(toolCalls.stream()
+                            .filter(tc -> toolResponses.stream().anyMatch(tr -> tr.id().equals(tc.id())))
+                            .collect(Collectors.toList()))
+                        .build();
+                    ToolResponseMessage toolResponseMessage = ToolResponseMessage.builder()
+                        .responses(toolResponses)
+                        .build();
+                    this.chatMemory.add(input.threadId(), List.of(assistantMessage, toolResponseMessage));
+                }
+            }
+            // 发射 RUN_FINISHED 结束当前 run，前端会处理剩余的工具调用
+            log.info("[SpringAIAgent] 部分工具由前端处理，结束当前 run");
+            this.emitEvent(runFinishedEvent(input.threadId(), input.runId()), subscriber);
+            return true;
+        }
+
+        // 将工具调用和结果保存到 ChatMemory，这样 re-run 时 ChatMemory advisor 会将它们注入上下文。
+        // 注意：不修改 ag-ui messages（List<BaseMessage>），因为 ag-ui 和 Spring AI 的消息类型不兼容。
+        if (this.chatMemory != null && !toolResponses.isEmpty()) {
+            // 助手的工具调用消息
+            AssistantMessage assistantMessage = AssistantMessage.builder()
+                .toolCalls(toolCalls)
+                .build();
+            // 工具响应消息
+            ToolResponseMessage toolResponseMessage = ToolResponseMessage.builder()
+                .responses(toolResponses)
+                .build();
+            this.chatMemory.add(input.threadId(), List.of(assistantMessage, toolResponseMessage));
+            log.info("[SpringAIAgent] 已保存工具调用和结果到 ChatMemory (conversationId={})", input.threadId());
+        }
+
+        // re-run（递归调用，增加工具执行计数）
+        // 使用原始 ag-ui messages（不包含 Spring AI 消息），ChatMemory advisor 会注入完整历史
+        log.info("[SpringAIAgent] 工具执行完成，re-run (轮次 {})", toolExecutionCount + 1);
+        // 先发射 RUN_FINISHED 结束当前 run，再启动新的 run（发射 RUN_STARTED）
+        // 否则 EventVerifier 会报 "Cannot send multiple RUN_STARTED" 错误
+        this.emitEvent(runFinishedEvent(input.threadId(), input.runId()), subscriber);
+        run(input, subscriber, toolExecutionCount + 1);
+        return true;
     }
 
     /**
@@ -813,33 +1056,86 @@ public class SpringAIAgent extends LocalAgent {
             .system(systemMessage.getContent()
         );
 
+        // 当 internalToolExecutionEnabled=false 时，使用 ToolCallingChatOptions 注册工具并禁用内部执行。
+        // 这样 OpenAiChatModel 会将原始 tool calls 透传到 subscriber，由 SpringAIAgent 手动执行。
+        if (!this.internalToolExecutionEnabled && !this.toolCallbacksForExecution.isEmpty()) {
+            try {
+                ToolCallingChatOptions toolOptions = ToolCallingChatOptions.builder()
+                    .toolCallbacks(this.toolCallbacksForExecution)
+                    .internalToolExecutionEnabled(false)
+                    .build();
+                chatRequest = chatRequest.options(toolOptions);
+                log.info("[SpringAIAgent] 注册 {} 个工具 (internalToolExecutionEnabled=false): {}",
+                    this.toolCallbacksForExecution.size(),
+                    this.toolCallbacksForExecution.stream()
+                        .map(cb -> cb.getToolDefinition().name())
+                        .collect(Collectors.joining(", ")));
+            } catch (RuntimeException e) {
+                throw new AGUIException("Could not add ToolCallingChatOptions", e);
+            }
+        }
+
         if (!this.tools.isEmpty()) {
             try {
+                log.info("[SpringAIAgent] Registering {} tools via chatRequest.tools(): {}",
+                    this.tools.size(),
+                    this.tools.stream().map(t -> t.getClass().getSimpleName()).collect(Collectors.joining(", ")));
                 chatRequest = chatRequest.tools(this.tools.toArray(new Object[0]));
             } catch (RuntimeException e) {
                 throw new AGUIException("Could not add tools", e);
             }
         }
 
+        // 关键：必须合并两处 toolCallbacks 来源，不能用 setter 覆盖！
+        // Spring AI 的 ChatClient.toolCallbacks() 是 setter 而非 appender，
+        // 原代码在两处分别调用，会导致第二次调用覆盖第一次：
+        //   - input.tools()：前端 CopilotKit 注入的 httpRequest（带 user token）
+        //   - this.toolCallbacks：后端注册的工具（loadSkill / readSkillReference / httpRequest 等）
+        // 如果不合并，LLM 只能看到其中一组：要么丢失前端 httpRequest（公开 API 也得让 LLM 重新走前端，体验差），
+        // 要么丢失后端 loadSkill（system prompt 强制要求先 loadSkill，LLM 返回空响应）。
+        // 合并策略：先转 Spring ToolCallback（input.tools 是 ag-ui 格式），再包装 AgUiFunctionToolCallback（后端工具走 AG-UI 事件），
+        // 最终一次性传给 chatRequest.toolCallbacks()。
+        //
+        // 2026-06-12 重要修复：input.tools() 中的工具名如果与 this.toolCallbacks 重复（典型情况：
+        // 前端 useCopilotAction 注入了 httpRequest，后端 SkillTools 也有 httpRequest），会导致
+        // LLM 收到两个同名工具而无法选择，进而 hanging 不返回任何内容。
+        // 解决：合并时按"工具名"去重，保留后端版本（后端版本是 Spring AI 原生可执行的，前端版本是
+        // 需要前端确认 UI 的，对 LLM 来说后端是更优解）。
+        // 同时记录被跳过的前端工具供诊断。
+        List<ToolCallback> mergedToolCallbacks = new java.util.ArrayList<>();
+        java.util.Set<String> backendToolNames = this.toolCallbacks.stream()
+            .map(cb -> cb.getToolDefinition().name())
+            .collect(Collectors.toSet());
+        java.util.List<String> skippedDuplicateNames = new java.util.ArrayList<>();
+
+        // 1. 前端/CopilotKit 注入的工具（如 httpRequest）→ 转成 Spring AI ToolCallback
+        //    注意：跳过与后端 toolCallbacks 同名的工具（去重）
         if (!input.tools().isEmpty()) {
             try {
-                chatRequest = chatRequest.toolCallbacks(
-                    input.tools()
-                        .stream()
-                        .map((tool) -> this.toolMapper.toSpringTool(
-                            tool,
-                            messageId,
-                            deferredEvents::add
-                        )).toList()
-                );
+                for (var tool : input.tools()) {
+                    String toolName = tool.name();
+                    if (backendToolNames.contains(toolName)) {
+                        // 与后端同名 → 跳过，使用后端版本（避免 LLM 看到两个同名工具而 hanging）
+                        skippedDuplicateNames.add(toolName);
+                        continue;
+                    }
+                    mergedToolCallbacks.add(
+                        this.toolMapper.toSpringTool(tool, messageId, deferredEvents::add)
+                    );
+                }
             } catch (RuntimeException e) {
                 throw new AGUIException("Could not add Tools", e);
             }
         }
 
-        if (!this.toolCallbacks.isEmpty()) {
+        // 2. 后端注册的工具（SkillCoreTools/SkillTools）→ 用 AgUiFunctionToolCallback 包装发射 AG-UI 事件
+        if (!this.toolCallbacks.isEmpty() && this.internalToolExecutionEnabled) {
+            // 只在 internalToolExecutionEnabled=true 时使用 AgUiFunctionToolCallback 包装
+            // （因为此时工具由 Spring AI 内部执行，需要通过包装器发射 AG-UI 事件）
+            // 当 internalToolExecutionEnabled=false 时，工具已在 ToolCallingChatOptions 中注册，
+            // 由 SpringAIAgent 在 onComplete() 中手动执行并发射 AG-UI 事件。
             try {
-                chatRequest = chatRequest.toolCallbacks(
+                mergedToolCallbacks.addAll(
                     this.toolCallbacks
                         .stream()
                         .map(toolCallback -> new AgUiFunctionToolCallback(toolCallback, (AgUiToolCallbackParams params) -> {
@@ -854,6 +1150,25 @@ public class SpringAIAgent extends LocalAgent {
             } catch (RuntimeException e) {
                 throw new AGUIException("Could not add Tool Callbacks", e);
             }
+        }
+
+        // 3. 一次性传给 chatRequest（替换原本两处 setter 调用）
+        if (!mergedToolCallbacks.isEmpty()) {
+            String skipInfo = skippedDuplicateNames.isEmpty() ? "" :
+                " [skipped " + skippedDuplicateNames.size() + " duplicate frontend tool(s) by name: " +
+                String.join(", ", skippedDuplicateNames) + "]";
+            log.info("[SpringAIAgent] Merged {} toolCallbacks for LLM (frontend input.tools + backend this.toolCallbacks): {}{}",
+                mergedToolCallbacks.size(),
+                mergedToolCallbacks.stream()
+                    .map(cb -> cb.getToolDefinition().name())
+                    .collect(Collectors.joining(", ")),
+                skipInfo);
+            chatRequest = chatRequest.toolCallbacks(mergedToolCallbacks);
+        } else if (!skippedDuplicateNames.isEmpty()) {
+            // 特殊情况：所有 input.tools 都被去重跳过（这其实意味着 this.toolCallbacks 仍然在下面被加入）
+            // 这里 log 一条让诊断能看到
+            log.info("[SpringAIAgent] All {} frontend input.tools were skipped as duplicates of backend tools: {}",
+                skippedDuplicateNames.size(), String.join(", ", skippedDuplicateNames));
         }
 
         if (!this.advisors.isEmpty()) {
@@ -947,6 +1262,18 @@ public class SpringAIAgent extends LocalAgent {
          * 0 或负数表示使用 DEFAULT_MAX_TOOL_CALLS 默认值。
          */
         private int maxToolCalls = 0;
+
+        /**
+         * 用于手动执行工具调用的 ToolCallback 列表。
+         * 当 internalToolExecutionEnabled=false 时，SpringAIAgent 使用此列表查找并执行工具。
+         */
+        private final List<ToolCallback> toolCallbacksForExecution = new ArrayList<>();
+
+        /**
+         * 是否禁用 Spring AI 的内部工具执行。
+         * 默认为 true（Spring AI 内部执行工具）。
+         */
+        private boolean internalToolExecutionEnabled = true;
 
         /**
          * Sets the ChatModel for the agent.
@@ -1106,6 +1433,42 @@ public class SpringAIAgent extends LocalAgent {
         public Builder maxToolCalls(final int maxToolCalls) {
             this.maxToolCalls = maxToolCalls;
 
+            return this;
+        }
+
+        /**
+         * 添加用于手动执行工具调用的 ToolCallback。
+         * 当 internalToolExecutionEnabled=false 时，SpringAIAgent 使用此列表查找并执行工具。
+         *
+         * @param toolCallback the ToolCallback to add
+         * @return this builder instance for method chaining
+         */
+        public Builder toolCallbackForExecution(final ToolCallback toolCallback) {
+            this.toolCallbacksForExecution.add(toolCallback);
+            return this;
+        }
+
+        /**
+         * 设置用于手动执行工具调用的 ToolCallback 列表。
+         *
+         * @param toolCallbacks the list of ToolCallbacks
+         * @return this builder instance for method chaining
+         */
+        public Builder toolCallbacksForExecution(final List<ToolCallback> toolCallbacks) {
+            this.toolCallbacksForExecution.addAll(toolCallbacks);
+            return this;
+        }
+
+        /**
+         * 设置是否禁用 Spring AI 的内部工具执行。
+         * 当为 false 时，OpenAiChatModel 会将原始 tool calls 透传到 subscriber，
+         * 由 SpringAIAgent 手动执行工具并发射 AG-UI 事件。
+         *
+         * @param enabled true 表示 Spring AI 内部执行（默认），false 表示透传到 subscriber
+         * @return this builder instance for method chaining
+         */
+        public Builder internalToolExecutionEnabled(final boolean enabled) {
+            this.internalToolExecutionEnabled = enabled;
             return this;
         }
 

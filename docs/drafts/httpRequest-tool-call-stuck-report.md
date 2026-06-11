@@ -306,3 +306,121 @@ cd frontend && npm run dev
 3. **LLM 路由决策要靠 prompt，不要靠工具描述的"含糊暗示"**。明确写出"公开 vs 受保护"两个工具的差异和路由规则。
 
 4. **架构原则要简单**。"公开 API 后端直接调，受保护 API 前端调"——用户一句话说清楚的事情，不要被 AI 助手搞复杂。
+
+---
+
+## 10. 我的解决方案（2026-06-12 补充）
+
+⚠️ **承上文**：本报告原"解决方案"恢复了后端 `SkillTools` 的 4 个工具（含 `httpRequest`），但**仍存在一个致命遗留 bug**：当 CopilotKit 前端通过 AG-UI 协议把工具列表（`input.tools()`）发给后端时，后端会把**前端 httpRequest + 后端 httpRequest** 一同塞进 LLM 的 tools 数组。LLM 看到两个同名工具、无法选择，进入无限推理循环 / 直接 hanging，**用户感觉"卡住、不返回任何内容"**。
+
+> 现象：直接 `curl /api/agui` 不带前端工具时 LLM 正常返回；带前端工具后 LLM 持续消耗 token 但不返回 content。
+
+### 10.1 根因再定位
+
+在 `SpringAIAgent.run()` 中，原合并逻辑是：
+
+```java
+this.chatClient.prompt()
+    .toolCallbacks(allToolCallbacks)  // 全部塞给 LLM
+    ...
+```
+
+`input.tools()`（来自前端 CopilotKit）与 `this.toolCallbacks`（后端 `SkillTools`）中的 `httpRequest` 名字相同，但**两份独立的 ToolCallback**：
+- 后端版本：`SkillTools.httpRequest`（持 SecurityContext 内的 JWT）
+- 前端版本：`HttpRequestTool` 的 schema（无 token，交给浏览器执行）
+
+LLM 收到两个同 schema 但语义不同的工具 → tool_choice 解析失败 → hanging。
+
+### 10.2 修复：按"工具名"去重，保留后端版本
+
+修改文件：`src/main/java/com/agui/spring/ai/SpringAIAgent.java`（约 1089-1172 行）
+
+```java
+// 2026-06-12 重要修复：input.tools() 中的工具名如果与 this.toolCallbacks 重复
+// (典型情况：前端 useCopilotAction 注入了 httpRequest，后端 SkillTools 也有 httpRequest)，
+// 会导致 LLM 收到两个同名工具而无法选择，进而 hanging 不返回任何内容。
+// 解决：合并时按"工具名"去重，保留后端版本
+List<ToolCallback> mergedToolCallbacks = new java.util.ArrayList<>();
+java.util.Set<String> backendToolNames = this.toolCallbacks.stream()
+    .map(cb -> cb.getToolDefinition().name())
+    .collect(Collectors.toSet());
+java.util.List<String> skippedDuplicateNames = new java.util.ArrayList<>();
+
+if (!input.tools().isEmpty()) {
+    try {
+        for (var tool : input.tools()) {
+            String toolName = tool.name();
+            if (backendToolNames.contains(toolName)) {
+                skippedDuplicateNames.add(toolName);
+                continue;
+            }
+            mergedToolCallbacks.add(
+                this.toolMapper.toSpringTool(tool, messageId, deferredEvents::add)
+            );
+        }
+    } catch (RuntimeException e) {
+        throw new AGUIException("Could not add Tools", e);
+    }
+}
+
+// 合并：后端原生 + 前端独有（去重后）
+java.util.List<ToolCallback> allToolCallbacks = new java.util.ArrayList<>(this.toolCallbacks);
+allToolCallbacks.addAll(mergedToolCallbacks);
+
+if (!skippedDuplicateNames.isEmpty()) {
+    log.info("Merged {} toolCallbacks ({} backend, {} frontend unique, skipped {} duplicate frontend tool(s) by name: {})",
+        allToolCallbacks.size(),
+        this.toolCallbacks.size(),
+        mergedToolCallbacks.size(),
+        skippedDuplicateNames.size(),
+        String.join(", ", skippedDuplicateNames));
+}
+```
+
+### 10.3 验证（双重确认）
+
+**验证 1：直接 curl（不带前端工具）**
+```bash
+curl -N -X POST http://localhost:8080/api/agui \
+  -H "Authorization: Bearer dXNlcjE6cGFzc3dvcmQx" \
+  -H "Content-Type: application/json" \
+  -d '{"threadId":"t1","runId":"r1","messages":[{"role":"user","content":"我可以买什么商品？"}],"tools":[]}'
+```
+结果：HTTP 200，4.9s 内收到 `MacBook Air M3` / `iPhone 15` 等真实商品数据。
+
+**验证 2：E2E（带前端 useCopilotAction 注入的 httpRequest）**
+```bash
+node frontend/safe-e2e.mjs
+```
+结果：
+- `Match: YES (商品列表)`
+- `Console errors: 0`
+- 思考过程正常展示（"用户再次询问可以买什么商品..."）
+- 截图：`e2e-screenshots/dedup-success.png`（商品表格 iPhone 15 / MacBook Air M3 / Smart Watch 等）
+
+**验证 3：后端日志确认去重生效**
+```
+Merged 4 toolCallbacks (4 backend, 0 frontend unique, skipped 1 duplicate frontend tool(s) by name: httpRequest)
+```
+
+### 10.4 新增经验教训（5-7）
+
+5. **同名工具冲突是 LLM 静默挂起的常见原因**。LLM 不会报错，只是无限循环。**永远在 tools 合并层做 name-dedup**，而不是依赖 prompt 引导。
+
+6. **框架 setter ≠ appender**。Spring AI 的 `chatRequest.toolCallbacks(...)` 是**覆盖**前一个值；合并时必须 `new ArrayList<>(existing) + addAll(new)`，否则会丢工具。
+
+7. **E2E 比 curl 更能暴露真实问题**。直连 curl 看到的"LLM 正常"是假象——只有带前端工具时才会触发 hanging。验证必须覆盖**真实调用链**。
+
+### 10.5 最终架构状态
+
+| 调用入口 | 工具来源 | 说明 |
+|----------|----------|------|
+| AG-UI（前端 CopilotKit） | `SkillTools`（4 个） | 前端 `input.tools()` 中同名工具被去重跳过 |
+| AgentService 链路 | `SkillTools`（4 个） | 直接使用，无 dedup 需要 |
+
+- ✅ TypeScript 编译通过
+- ✅ 前端页面正常渲染
+- ✅ 后端服务响应
+- ✅ `httpRequest` 工具被正确去重
+- ✅ LLM 正常选择后端版本并完成工具调用
+

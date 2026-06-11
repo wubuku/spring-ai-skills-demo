@@ -65,10 +65,14 @@ public class SkillTools {
     }
 
     /**
-     * 工具1（模式1）：直接发送 HTTP 请求并返回结果。
-     * 一定程度上支持认证透传机制：通过 SecurityContextHolder 获取 JWT
+     * 工具1（后端 httpRequest）：直接发送 HTTP 请求并返回结果。
+     * 由 Spring AI 在 Java 端执行（不会触发前端 useCopilotAction）。
+     * 适用于<b>公开 API</b>（不需要用户 access token）；
+     * 如果调用受保护 API（需要 token）应该改用前端同名 httpRequest 工具。
      */
-    @Tool(description = "发送 HTTP 请求调用 REST API，并直接返回执行结果。支持 GET/POST/PUT/DELETE 所有方法。")
+    @Tool(description = "【后端 httpRequest】直接在 Java 端发送 HTTP 请求调用 REST API，并立即返回执行结果。支持 GET/POST/PUT/DELETE 所有方法。" +
+        "**仅适用于公开 API**（不需要用户 access token，例如 GET /api/products 浏览商品、GET /api/products/{id} 查看商品详情）。" +
+        "如果接口需要用户登录态（@PreAuthorize 保护，如 POST /api/products/cart 加购物车），请改用前端的同名 httpRequest 工具，浏览器会自动携带用户 token 并弹出确认对话框。")
     public String httpRequest(
         @ToolParam(description = "HTTP 方法：GET/POST/PUT/DELETE") String method,
         @ToolParam(description = "API 路径（相对路径会自动拼接 base URL）") String url,

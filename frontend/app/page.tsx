@@ -246,6 +246,23 @@ function HomeContent() {
                   {children}
                 </td>
               ),
+              // 推理模型（MiniMax-M3 等）的 <think> 标签渲染为可折叠区域
+              // 后端 StreamingTagFilter 已放行 <think> 标签，让前端做折叠显示
+              // 初始展开（open），让用户实时看到思考过程；最终结果出来后可手动折叠
+              think: ({ children, ...props }: any) => (
+                <details
+                  open
+                  className="my-2 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50 text-sm"
+                  {...props}
+                >
+                  <summary className="cursor-pointer px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 select-none">
+                    思考过程
+                  </summary>
+                  <div className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-pre-wrap text-xs leading-relaxed">
+                    {children}
+                  </div>
+                </details>
+              ),
             }}
           />
         </HttpRequestToolProvider>

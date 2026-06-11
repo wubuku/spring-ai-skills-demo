@@ -64,6 +64,32 @@ public class AgUiController {
                 agUiParameters.getMessages() != null ? agUiParameters.getMessages().size() : 0,
                 authHeader != null ? (authHeader.substring(0, Math.min(20, authHeader.length())) + "...") : "null");
 
+        // [DIAG] Dump the tools array that CopilotKit/HTTP agent sent us
+        try {
+            var tools = agUiParameters.getTools();
+            if (tools == null) {
+                log.info("[DIAG-TOOLS] tools=null (前端没有传 tools 字段)");
+            } else {
+                log.info("[DIAG-TOOLS] CopilotKit/前端传过来的工具数量: {}", tools.size());
+                for (int i = 0; i < tools.size(); i++) {
+                    var t = tools.get(i);
+                    String name = null;
+                    String desc = null;
+                    try {
+                        var getName = t.getClass().getMethod("getName");
+                        name = (String) getName.invoke(t);
+                    } catch (Exception e) { name = t.toString(); }
+                    try {
+                        var getDesc = t.getClass().getMethod("getDescription");
+                        desc = (String) getDesc.invoke(t);
+                    } catch (Exception e) { desc = "?"; }
+                    log.info("[DIAG-TOOLS]   [{}] name={}, desc={}", i, name, desc != null ? desc.substring(0, Math.min(80, desc.length())) : "null");
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[DIAG-TOOLS] dump failed: {}", e.getMessage());
+        }
+
         // [STEP2] 在调用 SpringAIAgent 之前，记录当前线程上下文
         var authObj = SecurityContextHolder.getContext().getAuthentication();
         String tokenInUserCtx = UserContextHolder.getToken();
