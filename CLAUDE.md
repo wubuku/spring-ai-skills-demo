@@ -208,6 +208,7 @@ CREATE TABLE SPRING_AI_CHAT_MEMORY (
 ## 文档
 - `docs/CLAUDE.md` - 本记忆文件
 - `docs/README.md` - 主文档
+- **`docs/copilotkit-native-tool-call-lessons-learned.md`** - **CopilotKit 原生工具调用经验教训总结（必读！）**
 - `docs/drafts/` - 设计文档:
   - `multimodal-vision-prompt-enhancement-plan.md`
   - `多模态输入支持规划文档.md`
