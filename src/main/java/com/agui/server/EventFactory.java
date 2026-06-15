@@ -211,7 +211,8 @@ public class EventFactory {
      */
     public static RunErrorEvent runErrorEvent(String message) {
         var event = new RunErrorEvent();
-        event.setError(message);
+        // Ensure message is never null for CopilotKit v2 compatibility
+        event.setError(message != null ? message : "Unknown error");
 
         return event;
     }

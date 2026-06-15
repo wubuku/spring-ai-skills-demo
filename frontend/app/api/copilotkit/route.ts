@@ -28,7 +28,7 @@ const runtime = new CopilotRuntime({
     default: new HttpAgent({
       url: `${JAVA_BACKEND_URL}/api/agui`,
       // headers 会在请求时动态获取
-    }),
+    }) as any,
   },
 });
 

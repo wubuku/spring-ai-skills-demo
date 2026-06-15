@@ -51,4 +51,30 @@ public class RunErrorEvent extends BaseEvent {
     public String getError() {
         return this.error;
     }
+
+    /**
+     * Returns the error message for CopilotKit v2 compatibility.
+     * <p>
+     * CopilotKit v2 expects a "message" field in RUN_ERROR events (Zod validation).
+     * This getter ensures the error message is serialized as both "error" and "message"
+     * fields in the JSON output for backward compatibility.
+     * </p>
+     *
+     * @return the error message, can be null
+     */
+    public String getMessage() {
+        return this.error;
+    }
+
+    /**
+     * Sets the error message for CopilotKit v2 compatibility.
+     * <p>
+     * This setter delegates to {@link #setError(String)} to maintain consistency.
+     * </p>
+     *
+     * @param message the error message. Can be null.
+     */
+    public void setMessage(final String message) {
+        this.error = message;
+    }
 }

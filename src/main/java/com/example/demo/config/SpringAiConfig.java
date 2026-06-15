@@ -118,6 +118,9 @@ public class SpringAiConfig {
     @Bean
     @Primary
     public OkHttpClient okHttpClient() {
+        //
+        // Fixme: 反模式。OkHttp 应该只做传输，retry 放业务层。
+        //
         return new OkHttpClient.Builder()
                 .retryOnConnectionFailure(true)
                 .connectTimeout(30, TimeUnit.SECONDS)

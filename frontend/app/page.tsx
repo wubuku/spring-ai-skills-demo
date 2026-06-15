@@ -1,20 +1,23 @@
 "use client";
 
 import React from "react";
-import { CopilotPopup } from "@copilotkit/react-ui";
+import { CopilotPopup } from "@copilotkit/react-core/v2";
 import { useHttpRequestTool } from "@/hooks/useHttpRequestTool";
 import { AuthProvider, useAuth } from "@/components/AuthProvider";
+import { CopilotChatAssistantMessage } from "@copilotkit/react-core/v2";
+import type { ComponentProps } from "react";
 
 /**
  * HTTP 请求工具 Provider
  *
- * 在 CopilotKit 子树中注册 `httpRequest` 工具。
+ * 在 CopilotKit 子树中注册 `httpRequest` 工具（v2 useHumanInTheLoop 版本）。
  * - GET 请求自动执行（无确认）
  * - POST/PUT/DELETE/PATCH 请求显示确认对话框
  *
- * 重构说明（2026-06-02）：
- * - 替换了原 CustomAssistantMessage + extractHttpRequestMeta + ConfirmDialogContainer 链路
- * - 现在通过 CopilotKit 原生 useCopilotAction 工具调用实现
+ * 重构说明（2026-06-13 B1 — v2 重构）：
+ * - 从 v1 `useCopilotAction.renderAndWaitForResponse`（已 deprecated）迁移到 v2 `useHumanInTheLoop`
+ * - v2 的 render 会被调用 3 次：inProgress → executing → complete
+ * - 由 v2 CopilotKitProvider（在 components/CopilotProvider.tsx 中）创建 v2 context
  */
 function HttpRequestToolProvider({ children }: { children: React.ReactNode }) {
   useHttpRequestTool();
@@ -203,77 +206,18 @@ function HomeContent() {
           </ul>
         </div>
 
-        {/* CopilotKit Popup Component - 注册 httpRequest 工具（替代旧的 CustomAssistantMessage + ConfirmDialogContainer 链路） */}
+        {/* CopilotKit v2 Popup Component - 注册 httpRequest 工具（v2 useHumanInTheLoop） */}
         <HttpRequestToolProvider>
           <CopilotPopup
-            instructions="你是企业智能助手，帮助员工解答业务问题、查询数据、执行操作。"
             labels={{
-              title: "企业智能助手",
-              initial: "你好！我是企业智能助手，有什么可以帮助你的吗？",
-              placeholder: "输入你的问题...",
+              modalHeaderTitle: "企业智能助手",
+              welcomeMessageText: "你好！我是企业智能助手，有什么可以帮助你的吗？",
+              chatInputPlaceholder: "输入你的问题...",
             }}
-            markdownTagRenderers={{
-              // 表格渲染，确保 Markdown 表格正确显示
-              table: ({ children, ...props }: any) => (
-                <div className="overflow-x-auto my-4">
-                  <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600" {...props}>
-                    {children}
-                  </table>
-                </div>
-              ),
-              thead: ({ children, ...props }: any) => (
-                <thead className="bg-gray-100 dark:bg-gray-700" {...props}>
-                  {children}
-                </thead>
-              ),
-              tbody: ({ children, ...props }: any) => (
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700" {...props}>
-                  {children}
-                </tbody>
-              ),
-              tr: ({ children, ...props }: any) => (
-                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800" {...props}>
-                  {children}
-                </tr>
-              ),
-              th: ({ children, ...props }: any) => (
-                <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100" {...props}>
-                  {children}
-                </th>
-              ),
-              td: ({ children, ...props }: any) => (
-                <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-gray-700 dark:text-gray-300" {...props}>
-                  {children}
-                </td>
-              ),
-              // 推理模型（MiniMax-M3 等）的 <think> 标签渲染为可折叠区域
-              // 后端 StreamingTagFilter 已放行 <think> 标签，让前端做折叠显示
-              // 初始展开（open），让用户实时看到思考过程；最终结果出来后可手动折叠
-              // 注意：HTML5 规范禁止 <p> 作为 <details> 的直接子元素
-              // （markdown 解析器会把多行内容包成 <p>），所以这里把 children 用
-              // 纯 div 包裹后再渲染，并确保不会再次被包成 <p>
-              think: ({ children, ...props }: any) => (
-                <details
-                  open
-                  className="my-2 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50 text-sm"
-                  {...props}
-                >
-                  <summary className="cursor-pointer px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 select-none">
-                    思考过程
-                  </summary>
-                  <div className="think-content px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-pre-wrap text-xs leading-relaxed">
-                    {children}
-                  </div>
-                </details>
-              ),
-              // 兼容：避免 React 19 的 p-in-details 嵌套警告
-              // 把 <p> 重写为 <div class="copilotKitMarkdownElement">，让 block-level
-              // 内容在 <details> 内也是合法 HTML
-              p: ({ children, ...props }: any) => (
-                <div className="copilotKitMarkdownElement" {...props}>
-                  {children}
-                </div>
-              ),
+            messageView={{
+              // v2 messageView 插槽：替换 assistantMessage 组件，
+              // 把默认 Markdown 渲染器换成自定义的（Streamdown + 自定义 tag components）
+              assistantMessage: CustomAssistantMessage as any,
             }}
           />
         </HttpRequestToolProvider>
@@ -281,6 +225,147 @@ function HomeContent() {
     </div>
   );
 }
+
+/**
+ * 自定义 AssistantMessage 组件（v2 版）
+ *
+ * 重构说明（2026-06-13 B1）：
+ * - v1 用 `markdownTagRenderers` prop（react-markdown 风格）
+ * - v2 用 `messageView.assistantMessage` 插槽 + Streamdown 的 `components` prop
+ * - 渲染逻辑：默认助手内容走 CopilotChatAssistantMessage 的 MarkdownRenderer 子组件，
+ *   但传入自定义 components 实现 <think> 折叠 + 表格样式
+ *
+ * 保留所有原 v1 自定义渲染：
+ * - table/thead/tbody/tr/th/td 表格样式
+ * - think 标签折叠（关键：后端 StreamingTagFilter 放行 <think> 标签给前端做折叠显示）
+ * - p 标签改 div（避免 React 19 p-in-details 警告）
+ */
+const CustomAssistantMessage: React.FC<
+  ComponentProps<typeof CopilotChatAssistantMessage>
+> = (props) => {
+  // 通过 markdownRenderer 插槽注入自定义 Streamdown components
+  // 这样原 CopilotChatAssistantMessage 的 toolbar/tool calls 仍由 v2 默认组件渲染，
+  // 只有 Markdown 渲染部分被替换
+  return (
+    <CopilotChatAssistantMessage
+      {...props}
+      markdownRenderer={MarkdownRenderer as any}
+    />
+  );
+};
+
+/**
+ * 自定义 Markdown 渲染器（v2 Streamdown + 自定义 components）
+ *
+ * 等价于 v1 的 markdownTagRenderers，但通过 Streamdown 的 `components` prop 传入。
+ */
+const MarkdownRenderer: React.FC<
+  React.ComponentProps<typeof CopilotChatAssistantMessage.MarkdownRenderer>
+> = ({ content, ...rest }) => {
+  // 动态 import Streamdown 以避免 SSR 问题
+  const [Streamdown, setStreamdown] = React.useState<any>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    import("streamdown").then((mod) => {
+      if (!cancelled) setStreamdown(() => mod.Streamdown);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!Streamdown) {
+    // SSR / loading fallback：直接渲染纯文本
+    return <div className="whitespace-pre-wrap">{content}</div>;
+  }
+
+  return (
+    <Streamdown components={markdownComponents} {...rest}>
+      {content}
+    </Streamdown>
+  );
+};
+
+/**
+ * Streamdown components（等价于 v1 markdownTagRenderers）
+ *
+ * 覆盖：
+ * - table/thead/tbody/tr/th/td 表格样式
+ * - think 标签 → 可折叠区域
+ * - p 标签 → div（避免 React 19 p-in-details 警告）
+ */
+const markdownComponents = {
+  table: ({ children, ...props }: any) => (
+    <div className="overflow-x-auto my-4">
+      <table
+        className="min-w-full border-collapse border border-gray-300 dark:border-gray-600"
+        {...props}
+      >
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children, ...props }: any) => (
+    <thead className="bg-gray-100 dark:bg-gray-700" {...props}>
+      {children}
+    </thead>
+  ),
+  tbody: ({ children, ...props }: any) => (
+    <tbody className="divide-y divide-gray-200 dark:divide-gray-700" {...props}>
+      {children}
+    </tbody>
+  ),
+  tr: ({ children, ...props }: any) => (
+    <tr className="hover:bg-gray-50 dark:hover:bg-gray-800" {...props}>
+      {children}
+    </tr>
+  ),
+  th: ({ children, ...props }: any) => (
+    <th
+      className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100"
+      {...props}
+    >
+      {children}
+    </th>
+  ),
+  td: ({ children, ...props }: any) => (
+    <td
+      className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-gray-700 dark:text-gray-300"
+      {...props}
+    >
+      {children}
+    </td>
+  ),
+  // 推理模型（MiniMax-M3 等）的 <think> 标签渲染为可折叠区域
+  // 后端 StreamingTagFilter 已放行 <think> 标签，让前端做折叠显示
+  // 初始展开（open），让用户实时看到思考过程；最终结果出来后可手动折叠
+  // 注意：HTML5 规范禁止 <p> 作为 <details> 的直接子元素
+  // （markdown 解析器会把多行内容包成 <p>），所以这里把 children 用
+  // 纯 div 包裹后再渲染
+  think: ({ children, ...props }: any) => (
+    <details
+      open
+      className="my-2 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50 text-sm"
+      {...props}
+    >
+      <summary className="cursor-pointer px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 select-none">
+        思考过程
+      </summary>
+      <div className="think-content px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-pre-wrap text-xs leading-relaxed">
+        {children}
+      </div>
+    </details>
+  ),
+  // 兼容：避免 React 19 的 p-in-details 嵌套警告
+  // 把 <p> 重写为 <div class="copilotKitMarkdownElement">，让 block-level
+  // 内容在 <details> 内也是合法 HTML
+  p: ({ children, ...props }: any) => (
+    <div className="copilotKitMarkdownElement" {...props}>
+      {children}
+    </div>
+  ),
+};
 
 function FeatureCard({
   icon,

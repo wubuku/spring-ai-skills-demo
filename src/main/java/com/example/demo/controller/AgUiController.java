@@ -5,9 +5,9 @@ import com.agui.server.spring.AgUiService;
 import com.agui.spring.ai.SpringAIAgent;
 import com.example.demo.agent.SkillCoreTools;
 import com.example.demo.auth.UserContextHolder;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -54,10 +54,19 @@ public class AgUiController {
      * @return SSE Emitter
      */
     @PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public ResponseEntity<SseEmitter> run(
+    public SseEmitter run(
             @RequestBody AgUiParameters agUiParameters,
-            @RequestHeader(value = "Authorization", required = false) String authHeader
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            HttpServletResponse response
     ) {
+        // ⚠️ 关键修复 (2026-06-14)：
+        // 不要用 ResponseEntity<SseEmitter> 包装返回——Tomcat 10.1.34 在该组合下
+        // 会触发 MimeHeaders NullPointerException（"this.headers[i] is null"），
+        // 导致 undici/BFF 收到 bytesRead=0，CopilotKit 报 INCOMPLETE_STREAM 错误。
+        // 改用 HttpServletResponse 注入 header，并直接返回 SseEmitter 即可。
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("X-Accel-Buffering", "no");  // 禁止 Nginx 缓冲，确保 SSE 实时
+        response.setHeader("Connection", "keep-alive");
         log.info("[STEP2] 收到 AG-UI 请求: threadId={}, runId={}, messages={}, authHeader={}",
                 agUiParameters.getThreadId(),
                 agUiParameters.getRunId(),
@@ -138,10 +147,7 @@ public class AgUiController {
 
         SseEmitter emitter = agUiService.runAgent(enterpriseAgent, agUiParameters);
 
-        return ResponseEntity.ok()
-                .cacheControl(CacheControl.noCache())
-                .header("X-Accel-Buffering", "no") // 禁止 Nginx 缓冲，确保 SSE 实时
-                .body(emitter);
+        return emitter;
     }
 
     /**

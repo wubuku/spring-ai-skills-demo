@@ -19,3 +19,28 @@ body {
   background: var(--background);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * CopilotKit v2 popup 容器定位覆盖（关键修复 2026-06-14）
+ *
+ * v2 CopilotPopup 的内部容器依赖 `cpk:fixed cpk:inset-0 cpk:z-[1200]` 等
+ * Tailwind v4 utility 类来把 popup 浮在 viewport 上方。但前端项目用的是
+ * Tailwind v3，v2 styles.css 是 v4 输出（@layer properties 语法），
+ * 直接 import 会让 Next.js PostCSS 抛语法错误。
+ *
+ * 临时方案：手工补齐 popup 容器必需的 position / z-index 规则，
+ * 保证 popup 浮在主页内容上方，避免 "使用指南" 卡片遮住 textarea 导致
+ * LLM agent/run 请求无法触发。
+ *
+ * 完整 v2 styles 应在 tailwind 升级到 v4 后再 import。
+ */
+.cpk\:fixed.cpk\:inset-0.cpk\:z-\[1200\] {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 1200 !important;
+  pointer-events: none; /* 让 popup 内部显式 pointer-events: auto */
+}
+
+.cpk\:fixed.cpk\:inset-0.cpk\:z-\[1200\] .copilotKitPopup {
+  pointer-events: auto;
+}
