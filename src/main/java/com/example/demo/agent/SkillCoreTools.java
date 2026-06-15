@@ -1,11 +1,13 @@
 package com.example.demo.agent;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -40,10 +42,23 @@ public class SkillCoreTools {
         return skillTools.getLoadedSkills();
     }
 
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
     @Tool(description = "加载指定技能的完整操作指令。在使用任何技能前必须先调用此工具。")
     public String loadSkill(
         @ToolParam(description = "技能名称，必须来自 available_skills 列表") String skillName
     ) {
+        // DEBUG: 详细日志
+        System.out.println("[DEBUG] loadSkill 被调用，skillName=" + skillName);
+        System.out.println("[DEBUG] skillName 是否为 null: " + (skillName == null));
+        if (skillName != null) {
+            System.out.println("[DEBUG] skillName 是否为空白: " + skillName.isBlank());
+            System.out.println("[DEBUG] skillName 长度: " + skillName.length());
+        }
+
+        if (skillName == null || skillName.isBlank()) {
+            return "✗ 错误：skillName 参数不能为空。请提供技能名称，例如 loadSkill('add-to-cart')。可用技能：search-products, get-product-detail, add-to-cart, checkout, view-cart";
+        }
         return registry.get(skillName)
             .map(skill -> {
                 skillTools.markSkillLoaded(skillName);
@@ -56,7 +71,9 @@ public class SkillCoreTools {
                 return "✓ 技能 `" + skillName + "` 已加载" + linksHint +
                        "\n\n---\n" + skill.getBody();
             })
-            .orElse("✗ 错误：技能 `" + skillName + "` 不存在");
+            .orElse("✗ 错误：技能 `" + skillName + "` 不存在。可用技能：" +
+                    registry.all().keySet().stream().sorted().collect(Collectors.joining(", ")) +
+                    "\n请使用上述技能名称之一重新调用 loadSkill。");
     }
 
     @Tool(description = "读取技能的参考文件（适用于具有分层结构的技能，如 OpenAPI 生成的技能）")

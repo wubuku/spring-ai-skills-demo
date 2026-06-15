@@ -19,7 +19,18 @@ Thumbs.db
 # H2 Database files
 data/
 .playwright-mcp
-CLAUDE.md
 .env_openai
 beebox-openapi-v1
 e2e-screenshots
+
+# Debug/test scripts (temporary)
+frontend/probe-*.mjs
+frontend/repro-*.mjs
+frontend/full-cart-flow.mjs
+frontend/scripts/
+frontend/patches/
+frontend/hooks/useHttpRequestTool.v2-attempt.tsx
+compile
+mvn
+touch
+v2-initial.png
