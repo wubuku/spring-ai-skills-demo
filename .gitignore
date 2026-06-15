@@ -25,6 +25,7 @@ e2e-screenshots
 
 # Debug/test scripts (temporary)
 frontend/probe-*.mjs
+frontend/probe-*.sh
 frontend/repro-*.mjs
 frontend/full-cart-flow.mjs
 frontend/scripts/
