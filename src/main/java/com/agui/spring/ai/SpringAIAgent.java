@@ -378,10 +378,17 @@ public class SpringAIAgent extends LocalAgent {
         // 如果同一轮随后出现工具调用，丢弃这些工具规划文字，避免“用户想要...让我调用...”泄漏到 UI。
         // 如果整轮没有工具调用，则在 onComplete 时一次性发出，避免误删普通回答。
         final StringBuilder pendingTextBeforeToolDecision = new StringBuilder();
+        // 检测是否为 post-tool 轮次（前端工具已执行，input.messages 中包含 ToolMessage）
+        // 在 post-tool 轮次中，不需要缓冲文本，直接实时流式推送
+        // 这解决了"确认执行后用户长时间看不到任何反馈"的核心 UX 问题
+        boolean isPostToolTurn = input.messages().stream()
+            .anyMatch(msg -> msg instanceof com.agui.core.message.ToolMessage);
+
         final boolean bufferPotentialToolPlanningText =
             !this.internalToolExecutionEnabled
                 && toolExecutionCount < this.maxToolCalls
-                && !this.toolCallbacksForExecution.isEmpty();
+                && !this.toolCallbacksForExecution.isEmpty()
+                && !isPostToolTurn;  // post-tool 轮次不缓冲，实时流式输出
         // 跨 chunk 的已见工具调用去重集合（key = "name:arguments"）
         // 用于防御 MiniMax-M3 等模型在单次 response 中发出多个完全相同的 tool_call
         final java.util.Set<String> seenToolKeys = new java.util.HashSet<>();
