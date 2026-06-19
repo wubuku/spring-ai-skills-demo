@@ -2,8 +2,8 @@
 
 > Created: 2026-06-18
 > Purpose: Track the follow-up work for CopilotKit native `httpRequest` chat UI polish.
-> Last updated: 2026-06-19 (v2)
-> Current instruction: core flow verified. Continue UI polish with user approval.
+> Last updated: 2026-06-19 (v3: 手动验收后)
+> Current instruction: 核心流程已通但 UX 极差，需要重新审视流式输出和前端渲染策略。
 
 ## Current Task Boundary
 
@@ -53,29 +53,77 @@ Non-goals / guardrails:
 - Frontend registers `httpRequest` via CopilotKit v2 `useHumanInTheLoop`.
 - Current pain points are not just UI polish: the real shopping flow has not yet been proven end to end.
 
-## Honest Current Status
+## Honest Current Status (2026-06-19 手动验收后更新)
 
-As of 2026-06-19, the **core shopping flow is working end to end**.
+### 核心功能：✅ 购物流程可跑通
 
-### Mandatory Acceptance Flow — E2E Evidence
+登录 → 查商品 → 添加购物车（确认）→ 查询购物车，全链路数据正确。
 
-1. ✅ Login as `user1` via localStorage token
-2. ✅ Ask `我有什么商品可以买？` → HTTP GET /api/products returns 200, product list with 5 items displayed
-3. ✅ Ask `将 iPhone 15 添加到购物车` → confirmation card appears showing `POST /api/products/cart?productId=1`
-4. ✅ Click `确认执行` → HTTP POST returns 200, `{"message":"已添加到购物车","cartSize":1}`
-5. ✅ Ask `查询我的购物车` → HTTP GET /api/products/cart returns 200, cart shows `iPhone 15 × 1, ¥5,999.00`
+关键后端修复：`SpringAIAgent.run()` 从 `input.messages()` 提取前端 ToolMessage，注入 system prompt "前端工具已执行完成" 段落，解决 LLM 看不到工具结果而重复调用 httpRequest 的问题。
 
-### Key Fix Applied
+### 手动验收暴露的严重 UX 问题：❌ 体验极差
 
-**Root cause**: When the frontend executed `httpRequest` and called `respond(result)`, the tool result was saved to ChatMemory as an `AssistantMessage` (workaround for Spring AI 1.1.2 `ToolResponseMessage` serialization bug). However, the LLM did not recognize this as a tool result and generated a **new** `httpRequest` call, creating an infinite loop.
+**问题 1（最严重）：前端长时间无任何反馈**
 
-**Fix**: In `SpringAIAgent.run()`, extract `ToolMessage`s from `input.messages()` and inject them directly into the system prompt as a "前端工具已执行完成" section. This ensures the LLM unconditionally sees the tool results and does not re-call the tool.
+用户发送消息后，前端 chat 界面**完全没有任何视觉反馈**等待很长时间，然后突然出现一大段文本。流式接口（SSE）形同虚设。
 
-### Remaining UI Issues (non-blocking)
+可能原因分析：
+- 后端 `bufferPotentialToolPlanningText` 在首轮缓冲所有文本直到工具调用决策完成，导致流式输出被延迟
+- 工具执行完成后，模型（MiniMax-M2.7-highspeed）生成大量英文规划文本，这些文本虽然通过 SSE 流式传输，但前端 CopilotKit 渲染可能有批量渲染行为
+- 前端 CopilotKit v2 的消息渲染机制可能不支持逐 token 流式显示
 
-1. **Leaked planning text**: The model (MiniMax-M2.7-highspeed) outputs planning meta-narrative in both Chinese and English. The `stripLeakedPlanningLines` function has been updated with more patterns but may need further tuning for different models.
-2. **Confirmation dialog stays visible**: After `respond()` is called, CopilotKit v2 keeps old renders in the DOM for chat history. The "complete" state card (`HTTP 调用完成 (200)`) appears alongside the old dialog. This is a v2 rendering behavior, not a functional bug.
-3. **Duplicate tool calls**: The LLM sometimes calls `loadSkill` multiple times (e.g., `search-products` twice). This is a model behavior issue, not a code bug.
+**问题 2：模型输出海量英文规划文本**
+
+MiniMax-M2.7-highspeed 在工具调用前后输出巨量英文思考过程（"I'm currently figuring out..."、"I've re-examined..."），长度可达数千字符。前端 `stripLeakedPlanningLines` 的行级正则无法匹配这些自由段落。
+
+根本原因：
+- 模型不遵守 system prompt 中"严禁输出无标签推理文本"的规则
+- 后端 `bufferPotentialToolPlanningText` 仅在首轮（`toolExecutionCount < maxToolCalls`）缓冲文本，工具执行后的规划文本直接流式输出
+- 前端过滤器是行级正则，无法识别大段英文规划段落
+
+**问题 3：确认对话框 POST 完成后不消失**
+
+CopilotKit v2 的 `useFrontendTool` 故意不在 unmount 时移除 renderer（为了 chat history）。导致 "HTTP 调用完成 (200)" 和旧的确认对话框同时显示。
+
+**问题 4：用户身份显示错误**
+
+助手回复中显示"用户：admin"而非"user1"。可能是 system prompt 或 ChatMemory 中的用户信息传递问题。
+
+### 本次修改的文件
+
+| 文件 | 修改内容 |
+|------|---------|
+| `src/main/java/com/agui/spring/ai/SpringAIAgent.java` | 核心修复：前端工具结果注入 system prompt |
+| `frontend/app/page.tsx` | stripLeakedPlanningLines 增加过滤模式 |
+| `docs/drafts/copilotkit-chat-ui-polish-progress.md` | 进度文档 |
+| `frontend/e2e-test-fixes.mjs` | E2E 测试脚本（之前遗留） |
+
+### 验证状态
+
+- `git diff --check` ✅
+- `mvn -q -DskipTests compile` ✅
+- `frontend/npm run build` ✅
+- Playwright E2E 全链路 ✅（数据正确，但 UX 差）
+- 手动验收 ❌（UX 体验极差）
+
+## 下一步方向（需要用户确认优先级）
+
+### 方向 A：修复流式体验（优先级最高）
+调查为什么前端看不到实时流式输出：
+1. 检查 CopilotKit v2 是否支持逐 token 流式渲染
+2. 检查后端 SSE 事件是否真正逐 token 发送
+3. 检查 `bufferPotentialToolPlanningText` 是否过度延迟流式输出
+4. 考虑移除首轮文本缓冲，改为实时流式 + 前端过滤
+
+### 方向 B：从根源减少规划文本
+1. 在 system prompt 中更强调"直接回答，不要输出思考过程"
+2. 考虑使用 `maxTokens` 限制模型输出长度
+3. 后端 StreamingTagFilter 增加英文规划文本检测
+
+### 方向 C：修复 UI 细节
+1. 确认对话框完成后自动隐藏
+2. 用户身份显示修复
+3. 表格渲染优化
 
 ## Resume Context
 
