@@ -4,13 +4,17 @@ const path = require("path");
 const nextConfig = {
   reactStrictMode: true,
 
-  // CopilotKit v2 (1.60.1) 自带的 dist/v2/index.css 是 Tailwind v4 输出，
+  // CopilotKit v2 (1.60.x) 自带的 dist/v2/index.css 是 Tailwind v4 输出，
   // 包含 @layer properties / @layer base 等 v4 专属语法，与项目 Tailwind v3
   // 流水线不兼容。scripts/transform-v2-css.mjs 在 postinstall 阶段把它转成
   // v3 兼容副本写到 patches/copilotkit-v2-v3.css。这里用 webpack alias 把
   // 原文件指向转换后的副本（同时覆盖 package.json `exports` 中的 ./v2/styles.css）。
   webpack: (config) => {
     const patched = path.resolve(__dirname, "patches/copilotkit-v2-v3.css");
+    const copilotV2Css = path.resolve(
+      __dirname,
+      "node_modules/@copilotkit/react-core/dist/v2/index.css"
+    );
     // 别名 `dist/v2/index.css` 路径（v2 entry mjs 直接 import 的）
     config.resolve.alias = config.resolve.alias || {};
     // 同时拦截 css 加载请求
@@ -23,6 +27,10 @@ const nextConfig = {
     // 把 path 直接替换为 patched file。Next.js 通过 css-loader 加载 css 时
     // 先走 resolve，alias 生效。
     config.resolve.alias["@copilotkit/react-core/dist/v2/index.css$"] = patched;
+    // v2 index.mjs uses a relative `./index.css` import. In webpack this is
+    // resolved to an absolute path before the package-style alias above can
+    // match, so keep an absolute-path alias too.
+    config.resolve.alias[copilotV2Css] = patched;
 
     // streamdown 1.6.11 (bundled in @copilotkit/react-core 1.60.x) imports
     // `mermaid` (bare specifier) which the mermaid 11.15.0 package's

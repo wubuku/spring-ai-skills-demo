@@ -5,7 +5,6 @@ import { CopilotPopup } from "@copilotkit/react-core/v2";
 import { useHttpRequestTool } from "@/hooks/useHttpRequestTool";
 import { AuthProvider, useAuth } from "@/components/AuthProvider";
 import { CopilotChatAssistantMessage } from "@copilotkit/react-core/v2";
-import type { ComponentProps } from "react";
 
 /**
  * HTTP 请求工具 Provider
@@ -209,15 +208,17 @@ function HomeContent() {
         {/* CopilotKit v2 Popup Component - 注册 httpRequest 工具（v2 useHumanInTheLoop） */}
         <HttpRequestToolProvider>
           <CopilotPopup
+            defaultOpen={false}
             labels={{
               modalHeaderTitle: "企业智能助手",
               welcomeMessageText: "你好！我是企业智能助手，有什么可以帮助你的吗？",
               chatInputPlaceholder: "输入你的问题...",
             }}
             messageView={{
-              // v2 messageView 插槽：替换 assistantMessage 组件，
-              // 把默认 Markdown 渲染器换成自定义的（Streamdown + 自定义 tag components）
-              assistantMessage: CustomAssistantMessage as any,
+              // v2 messageView 插槽：只替换 Markdown 渲染器，保留默认消息壳和工具调用渲染。
+              assistantMessage: {
+                markdownRenderer: MarkdownRenderer as any,
+              },
             }}
           />
         </HttpRequestToolProvider>
@@ -225,34 +226,6 @@ function HomeContent() {
     </div>
   );
 }
-
-/**
- * 自定义 AssistantMessage 组件（v2 版）
- *
- * 重构说明（2026-06-13 B1）：
- * - v1 用 `markdownTagRenderers` prop（react-markdown 风格）
- * - v2 用 `messageView.assistantMessage` 插槽 + Streamdown 的 `components` prop
- * - 渲染逻辑：默认助手内容走 CopilotChatAssistantMessage 的 MarkdownRenderer 子组件，
- *   但传入自定义 components 实现 <think> 折叠 + 表格样式
- *
- * 保留所有原 v1 自定义渲染：
- * - table/thead/tbody/tr/th/td 表格样式
- * - think 标签折叠（关键：后端 StreamingTagFilter 放行 <think> 标签给前端做折叠显示）
- * - p 标签改 div（避免 React 19 p-in-details 警告）
- */
-const CustomAssistantMessage: React.FC<
-  ComponentProps<typeof CopilotChatAssistantMessage>
-> = (props) => {
-  // 通过 markdownRenderer 插槽注入自定义 Streamdown components
-  // 这样原 CopilotChatAssistantMessage 的 toolbar/tool calls 仍由 v2 默认组件渲染，
-  // 只有 Markdown 渲染部分被替换
-  return (
-    <CopilotChatAssistantMessage
-      {...props}
-      markdownRenderer={MarkdownRenderer as any}
-    />
-  );
-};
 
 /**
  * 自定义 Markdown 渲染器（v2 Streamdown + 自定义 components）
@@ -264,6 +237,10 @@ const MarkdownRenderer: React.FC<
 > = ({ content, ...rest }) => {
   // 动态 import Streamdown 以避免 SSR 问题
   const [Streamdown, setStreamdown] = React.useState<any>(null);
+  const sanitizedContent = React.useMemo(
+    () => sanitizeAssistantContent(content),
+    [content]
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -277,15 +254,47 @@ const MarkdownRenderer: React.FC<
 
   if (!Streamdown) {
     // SSR / loading fallback：直接渲染纯文本
-    return <div className="whitespace-pre-wrap">{content}</div>;
+    return <div className="whitespace-pre-wrap">{sanitizedContent}</div>;
   }
 
   return (
     <Streamdown components={markdownComponents} {...rest}>
-      {content}
+      {sanitizedContent}
     </Streamdown>
   );
 };
+
+function sanitizeAssistantContent(content: string) {
+  return stripLeakedPlanningLines((content || "")
+    .replace(/\[\s*TOOL_CALL\s*\][\s\S]*?\[\s*\/\s*TOOL_CALL\s*\]/gi, "")
+    .replace(
+      /<\s*(parameter|invoke|tool_call|function_calls|antml_call)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi,
+      ""
+    )
+    .replace(/<\s*\/\s*(parameter|invoke|tool_call|function_calls|antml_call)\s*>/gi, ""));
+}
+
+function stripLeakedPlanningLines(content: string) {
+  const planningLinePattern =
+    /^(用户想要|用户希望|用户问|用户再次|用户就|根据之前的对话|从对话记忆中|这应该就是|现在我需要|我已经加载了|我已经知道|我需要直接|让我|接下来我|根据工具返回的结果|我刚才已经|我应该|我来|用户想知道|我已经通过)/;
+
+  // English planning patterns from multilingual models (MiniMax, etc.)
+  const englishPlanningPattern =
+    /^\*\*(Checking|Reviewing|Analyzing|Processing|I'm|I've|Looking|Examining|Verifying|Confirming|Preparing|Waiting|Now I|Let me|I need|I'll|I am|I will)\b/i;
+
+  // Also remove lines that are pure planning meta-narrative (bold markdown headers)
+  const metaHeaderPattern = /^\*\*[A-Z][a-z]+(ing|ed|tion)\b.*\*\*$/;
+
+  return content
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !planningLinePattern.test(trimmed) && !englishPlanningPattern.test(trimmed) && !metaHeaderPattern.test(trimmed);
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 /**
  * Streamdown components（等价于 v1 markdownTagRenderers）
@@ -339,13 +348,12 @@ const markdownComponents = {
   ),
   // 推理模型（MiniMax-M3 等）的 <think> 标签渲染为可折叠区域
   // 后端 StreamingTagFilter 已放行 <think> 标签，让前端做折叠显示
-  // 初始展开（open），让用户实时看到思考过程；最终结果出来后可手动折叠
+  // 默认折叠，避免推理过程抢占最终答案；用户需要时可展开。
   // 注意：HTML5 规范禁止 <p> 作为 <details> 的直接子元素
   // （markdown 解析器会把多行内容包成 <p>），所以这里把 children 用
   // 纯 div 包裹后再渲染
   think: ({ children, ...props }: any) => (
     <details
-      open
       className="my-2 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50 text-sm"
       {...props}
     >

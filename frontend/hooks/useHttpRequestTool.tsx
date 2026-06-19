@@ -158,6 +158,8 @@ async function executeHttpRequest(params: {
  */
 type DialogState = "pending" | "executing" | "cancelled";
 
+const completedGetRequests = new Set<string>();
+
 /**
  * v2 useHumanInTheLoop 的 render 组件
  *
@@ -180,20 +182,11 @@ function HttpRequestRender(props: {
 }) {
   const { args, status, result, respond } = props;
 
-  // 调试日志：追踪状态转换
-  console.log('[HttpRequestRender]', {
-    status,
-    args,
-    hasRespond: typeof respond === 'function',
-    resultLength: result?.length,
-    timestamp: new Date().toISOString(),
-  });
-
   // 1) inProgress：LLM 刚决定调工具，参数可能还没到齐
   if (status === "inProgress") {
     return (
-      <div className="text-xs text-gray-500 italic my-2">
-        准备调用 httpRequest...
+      <div className="my-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-400">
+        准备调用 HTTP 接口
       </div>
     );
   }
@@ -208,14 +201,25 @@ function HttpRequestRender(props: {
     }
     const success = parsed?.success ?? true;
     const statusCode = parsed?.status ?? 200;
+    const responseSummary = summarizeResponseBody(parsed?.body);
     return (
       <div
-        className={`text-xs italic my-2 ${
-          success ? "text-green-600" : "text-red-600"
+        className={`my-2 rounded-md border px-3 py-2 text-xs ${
+          success
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-300"
+            : "border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-300"
         }`}
       >
-        ✓ httpRequest 完成 ({statusCode})
-        {parsed?.cancelled ? " — 用户已取消" : ""}
+        <div>
+          {parsed?.cancelled
+            ? "已取消 HTTP 操作"
+            : `HTTP 调用${success ? "完成" : "失败"} (${statusCode})`}
+        </div>
+        {responseSummary && (
+          <div className="mt-1 whitespace-pre-wrap text-gray-600 dark:text-gray-300">
+            {responseSummary}
+          </div>
+        )}
       </div>
     );
   }
@@ -229,7 +233,8 @@ function HttpRequestRender(props: {
       <GetRequestProgress
         method={args.method}
         url={args.url}
-        onComplete={(res) => respond?.(res)}
+        params={args.params}
+        onComplete={(res) => respond?.(JSON.stringify(res))}
       />
     );
   }
@@ -247,19 +252,50 @@ function HttpRequestRender(props: {
           params: args.params,
           body: args.body,
         });
-        respond?.(res);
+        respond?.(JSON.stringify(res));
       }}
       onCancel={() =>
-        respond?.({
-          success: false,
-          status: 0,
-          body: "",
-          cancelled: true,
-          error: "用户取消了该操作",
-        })
+        respond?.(
+          JSON.stringify({
+            success: false,
+            status: 0,
+            body: "",
+            cancelled: true,
+            error: "用户取消了该操作",
+          })
+        )
       }
     />
   );
+}
+
+function summarizeResponseBody(body?: string) {
+  if (!body) return "";
+  try {
+    const parsed = JSON.parse(body);
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 0) return "返回 0 条记录";
+      return parsed
+        .slice(0, 3)
+        .map((item, index) => {
+          if (item && typeof item === "object") {
+            const name = item.name || item.title || item.id || `记录 ${index + 1}`;
+            const price = item.price !== undefined ? `，价格：${item.price}` : "";
+            const stock = item.stock !== undefined ? `，库存：${item.stock}` : "";
+            return `- ${name}${price}${stock}`;
+          }
+          return `- ${String(item)}`;
+        })
+        .join("\n");
+    }
+    if (parsed && typeof parsed === "object") {
+      const name = parsed.name || parsed.title || parsed.id;
+      return name ? `返回：${name}` : "";
+    }
+  } catch {
+    // fall through
+  }
+  return body.length > 160 ? `${body.slice(0, 160)}...` : body;
 }
 
 /**
@@ -275,37 +311,57 @@ function HttpRequestRender(props: {
 function GetRequestProgress({
   method,
   url,
+  params,
   onComplete,
 }: {
   method: string;
   url: string;
+  params?: string;
   onComplete: (result: HttpExecutionResult) => void;
 }) {
   const [done, setDone] = React.useState(false);
+  const requestKey = `${method}:${url}:${params || ""}`;
+  const startedKeyRef = React.useRef<string | null>(null);
+  const onCompleteRef = React.useRef(onComplete);
 
   React.useEffect(() => {
-    let cancelled = false;
-    executeHttpRequest({ method, url }).then((result) => {
-      if (cancelled) return;
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  React.useEffect(() => {
+    if (completedGetRequests.has(requestKey)) {
       setDone(true);
-      // 给一帧时间让 CopilotKit 看到 "complete" 状态再调用 respond
-      setTimeout(() => onComplete(result), 50);
+      return;
+    }
+
+    if (startedKeyRef.current === requestKey) {
+      return;
+    }
+    startedKeyRef.current = requestKey;
+    let mounted = true;
+    setDone(false);
+    executeHttpRequest({ method, url, params }).then((result) => {
+      completedGetRequests.add(requestKey);
+      if (mounted) {
+        setDone(true);
+      }
+      onCompleteRef.current(result);
     });
     return () => {
-      cancelled = true;
+      mounted = false;
     };
-  }, [method, url, onComplete]);
+  }, [method, url, params, requestKey]);
 
   if (done) {
     return (
-      <div className="text-xs text-gray-500 italic my-2">
+      <div className="my-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-400">
         已完成 {method} {url}
       </div>
     );
   }
   return (
-    <div className="text-xs text-gray-500 italic my-2">
-      正在执行 {method} {url} ...
+    <div className="my-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-400">
+      正在执行 {method} {url}
     </div>
   );
 }
@@ -320,13 +376,6 @@ function GetRequestProgress({
  * - v2 的 render 会被调用 3 次（inProgress → executing → complete），组件需处理所有状态
  */
 export function useHttpRequestTool() {
-  // 调试日志：追踪 processAgentResult 调用
-  React.useEffect(() => {
-    if (typeof window !== 'undefined') {
-      (window as any).__DEBUG_PROCESS_AGENT_RESULT = true;
-    }
-  }, []);
-
   useHumanInTheLoop({
     name: "httpRequest",
     description:
@@ -379,107 +428,134 @@ function HttpConfirmationDialog({
     }
   };
 
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-4 max-w-md my-2 pointer-events-auto">
-      {/* 标题 */}
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-2xl">⚠️</span>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          操作确认
-        </h3>
-      </div>
+  const isDelete = method === "DELETE";
+  const methodClass =
+    method === "DELETE"
+      ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-300"
+      : method === "PUT" || method === "PATCH"
+        ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-300"
+        : "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-300";
 
-      {/* 请求详情 */}
-      <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 mb-4 text-sm">
-        <div className="flex items-center gap-2 mb-2">
-          <span
-            className={[
-              "px-2 py-0.5 rounded text-xs font-medium uppercase",
-              method === "POST"
-                ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                : "",
-              method === "PUT"
-                ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                : "",
-              method === "DELETE"
-                ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                : "",
-              method === "PATCH"
-                ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
-                : "",
-              !["POST", "PUT", "DELETE", "PATCH"].includes(method)
-                ? "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200"
-                : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-          >
-            {method}
-          </span>
-          <code className="text-gray-800 dark:text-gray-200 font-mono text-xs break-all">
-            {url}
-          </code>
+  return (
+    <div className="my-2 pointer-events-auto">
+      <div className="max-w-md overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
+        <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-700">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                确认执行接口操作
+              </h3>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                该请求会修改当前账户的数据。
+              </p>
+            </div>
+            <span
+              className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-semibold ${methodClass}`}
+            >
+              {method}
+            </span>
+          </div>
         </div>
 
-        {params && Object.keys(params).length > 0 ? (
-          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            参数：{new URLSearchParams(params).toString()}
+        <div className="space-y-3 p-4">
+          <div>
+            <div className="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+              请求地址
+            </div>
+            <code className="block rounded-md border border-gray-200 bg-gray-50 px-2.5 py-2 font-mono text-xs text-gray-800 break-all dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
+              {url}
+            </code>
           </div>
-        ) : paramsJson ? (
-          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            参数：{paramsJson}
-          </div>
-        ) : null}
 
-        {body && (
-          <details className="mt-2">
-            <summary className="cursor-pointer text-gray-500 dark:text-gray-400 text-xs hover:text-gray-700 dark:hover:text-gray-200">
-              请求体
-            </summary>
-            <pre className="mt-1 text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded overflow-x-auto max-h-32">
-              {body}
-            </pre>
-          </details>
-        )}
-      </div>
-
-      {/* 操作按钮 */}
-      <div className="flex justify-end gap-2">
-        <button
-          onClick={onCancel}
-          disabled={isExecuting}
-          className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          取消
-        </button>
-        <button
-          onClick={handleConfirm}
-          disabled={isExecuting}
-          className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-        >
-          {isExecuting && (
-            <svg
-              className="animate-spin h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              />
-            </svg>
+          {params && Object.keys(params).length > 0 && (
+            <div>
+              <div className="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                参数
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(params).map(([key, value]) => (
+                  <span
+                    key={key}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs dark:border-gray-700 dark:bg-gray-900/60"
+                  >
+                    <span className="text-gray-500 dark:text-gray-400">{key}:</span>
+                    <span className="font-medium text-gray-700 dark:text-gray-200">{value}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
           )}
-          {isExecuting ? "执行中..." : "确认执行"}
-        </button>
+
+          {!params && paramsJson && (
+            <div>
+              <div className="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                参数
+              </div>
+              <div className="rounded-md border border-gray-200 bg-gray-50 px-2.5 py-2 font-mono text-xs text-gray-700 break-all dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-300">
+                {paramsJson}
+              </div>
+            </div>
+          )}
+
+          {body && (
+            <details className="rounded-md border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/60">
+              <summary className="cursor-pointer select-none px-2.5 py-2 text-xs font-medium text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100">
+                查看请求体
+              </summary>
+              <pre className="max-h-36 overflow-x-auto border-t border-gray-200 p-2.5 font-mono text-xs text-gray-700 dark:border-gray-700 dark:text-gray-300">
+                {body}
+              </pre>
+            </details>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={onCancel}
+              disabled={isExecuting}
+              className="flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={isExecuting}
+              className={`flex-1 rounded-md px-3 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                isDelete
+                  ? "bg-red-600 hover:bg-red-700"
+                  : "bg-blue-600 hover:bg-blue-700"
+              }`}
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                {isExecuting && (
+                  <svg
+                    className="h-3.5 w-3.5 animate-spin"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                )}
+                {isExecuting
+                  ? "执行中..."
+                  : isDelete
+                    ? "确认删除"
+                    : "确认执行"}
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

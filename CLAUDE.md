@@ -297,3 +297,24 @@ CREATE TABLE SPRING_AI_CHAT_MEMORY (
 - ✅ `httpRequest` 工具正确注册到 CopilotKit 并发送到后端
 - ✅ 工具描述和参数 Schema 正确（method/url/params/body）
 - ⚠️ 旧版 LLM 响应被 `RUN_ERROR "terminated"` 中断（已通过移除 SkillCoreTools 改用 SkillTools 解决）
+
+## 重要规则（必须遵守！）
+
+### ❌ 绝对禁止使用截图进行确认
+**用户明确要求：绝对不要使用截图方式来进行确认！**
+
+- **不要**在 E2E 测试或验证过程中使用 Playwright 的 `browser_take_screenshot` 工具
+- **不要**使用 `Read` 工具读取截图文件（.png, .jpg 等）来验证 UI 状态
+- **不要**依赖视觉截图来确认功能是否正常工作
+
+**正确的验证方式：**
+- 使用 Playwright 的 `browser_snapshot` 获取页面的可访问性快照（accessibility snapshot）
+- 通过 DOM 结构、文本内容、元素状态来验证功能
+- 使用 `browser_console_messages` 检查控制台错误
+- 使用 `browser_network_requests` 检查网络请求
+- 直接读取源代码文件确认实现
+
+**原因：**
+- 截图验证不可靠，可能因为渲染时机、浏览器差异等原因导致误判
+- 截图无法提供结构化的验证信息
+- 用户多次强调不要使用截图方式

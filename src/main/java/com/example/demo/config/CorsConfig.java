@@ -22,10 +22,12 @@ public class CorsConfig {
         config.addAllowedOrigin("http://localhost:3001");
         config.addAllowedOrigin("http://localhost:3002");
         config.addAllowedOrigin("http://localhost:4000");
+        config.addAllowedOrigin("http://localhost:4001");
         config.addAllowedOrigin("http://127.0.0.1:3000");
         config.addAllowedOrigin("http://127.0.0.1:3001");
         config.addAllowedOrigin("http://127.0.0.1:3002");
         config.addAllowedOrigin("http://127.0.0.1:4000");
+        config.addAllowedOrigin("http://127.0.0.1:4001");
 
         // 允许的 HTTP 方法
         config.addAllowedMethod("*");

@@ -129,6 +129,15 @@ public class SpringAIAgent extends LocalAgent {
     );
 
     /**
+     * 匹配方括号风格的工具调用标签 [TOOL_CALL]...[/TOOL_CALL]
+     * 某些 LLM（如 DeepSeek）会输出这种格式的工具调用草稿
+     */
+    private static final Pattern BRACKET_TOOL_CALL_PATTERN = Pattern.compile(
+        "\\[\\s*TOOL_CALL\\s*\\].*?\\[\\s*/\\s*TOOL_CALL\\s*\\]",
+        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+    );
+
+    /**
      * v3.2 防御性追加：用于在 normal state 单独 strip 悬空闭标签（如 `</invoke>` 无对应开标签）。
      * 解决：Mock LLM / MiniMax-M3 等模型偶尔会输出 "<tool_call></invoke>" 这种孤儿闭标签。
      *
@@ -365,18 +374,77 @@ public class SpringAIAgent extends LocalAgent {
         final StreamingTagFilter tagFilter = new StreamingTagFilter();
         // 标记 TEXT_MESSAGE_START 是否已发射
         final boolean[] textStarted = { false };
+        // 在可能发生工具调用的首轮响应中，先暂存文本。
+        // 如果同一轮随后出现工具调用，丢弃这些工具规划文字，避免“用户想要...让我调用...”泄漏到 UI。
+        // 如果整轮没有工具调用，则在 onComplete 时一次性发出，避免误删普通回答。
+        final StringBuilder pendingTextBeforeToolDecision = new StringBuilder();
+        final boolean bufferPotentialToolPlanningText =
+            !this.internalToolExecutionEnabled
+                && toolExecutionCount < this.maxToolCalls
+                && !this.toolCallbacksForExecution.isEmpty();
         // 跨 chunk 的已见工具调用去重集合（key = "name:arguments"）
         // 用于防御 MiniMax-M3 等模型在单次 response 中发出多个完全相同的 tool_call
         final java.util.Set<String> seenToolKeys = new java.util.HashSet<>();
         // 保存当前 toolExecutionCount 供 onComplete 使用
         final int currentToolExecutionCount = toolExecutionCount;
 
+        // 构建 system message，并将前端工具执行结果（如 httpRequest 的返回值）注入到 system prompt 中。
+        // 这解决了 ChatMemory 中以 AssistantMessage 保存工具结果导致 LLM 无法识别的问题。
+        // 当 CopilotKit 前端执行完 httpRequest 并 respond(result) 后，新一轮 agent/run 的 input.messages()
+        // 中包含 ToolMessage。这里提取这些结果，直接注入 system prompt，确保 LLM 能看到。
+        SystemMessage systemMessage = this.createSystemMessage(state, input.context());
+        {
+            StringBuilder frontendToolResults = new StringBuilder();
+            for (var msg : input.messages()) {
+                if (msg instanceof com.agui.core.message.ToolMessage toolMsg) {
+                    String toolCallId = toolMsg.getToolCallId();
+                    String toolContent = toolMsg.getContent() != null ? toolMsg.getContent() : "";
+                    // 尝试从 input.messages() 中找到对应的 AssistantMessage 获取工具名
+                    String toolName = "httpRequest";
+                    for (var prevMsg : input.messages()) {
+                        if (prevMsg instanceof com.agui.core.message.AssistantMessage am
+                                && am.getToolCalls() != null) {
+                            for (var tc : am.getToolCalls()) {
+                                if (toolCallId.equals(tc.id())) {
+                                    toolName = tc.function().name();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    frontendToolResults.append("- 工具 `").append(toolName).append("` (toolCallId: ")
+                        .append(toolCallId).append(") 执行结果:\n")
+                        .append(toolContent).append("\n\n");
+                }
+            }
+            if (frontendToolResults.length() > 0) {
+                String enhancedContent = systemMessage.getContent()
+                    + "\n\n## 前端工具已执行完成\n"
+                    + "以下工具已由前端执行并返回了结果，请直接基于这些结果回答用户，**不要再次调用这些工具**：\n\n"
+                    + frontendToolResults;
+                systemMessage = new SystemMessage(); systemMessage.setContent(enhancedContent);
+                log.info("[SpringAIAgent] 已将前端工具结果注入 system prompt");
+            }
+        }
+
         try {
-            getChatRequest(input, content, messageId, deferredEvents, this.createSystemMessage(state, input.context()), subscriber)
+            getChatRequest(input, content, messageId, deferredEvents, systemMessage, subscriber)
                 .stream()
                 .chatResponse()
                 .subscribe(
-                    evt -> onEvent(subscriber, evt, messageId, deferredEvents, toolCallCounter, forceStopped, tagFilter, textStarted, seenToolKeys),
+                    evt -> onEvent(
+                        subscriber,
+                        evt,
+                        messageId,
+                        deferredEvents,
+                        toolCallCounter,
+                        forceStopped,
+                        tagFilter,
+                        textStarted,
+                        seenToolKeys,
+                        pendingTextBeforeToolDecision,
+                        bufferPotentialToolPlanningText
+                    ),
                     err -> {
                         if (!forceStopped[0]) {
                             this.emitEvent(runErrorEvent(err.getMessage()), subscriber);
@@ -394,7 +462,15 @@ public class SpringAIAgent extends LocalAgent {
                             this.emitEvent(runFinishedEvent(input.threadId(), input.runId()), subscriber);
                             log.info("[SpringAIAgent] run 已强制停止 - 工具调用超限 (limit={})", this.maxToolCalls);
                         } else {
-                            onComplete(input, subscriber, messageId, deferredEvents, textStarted, currentToolExecutionCount);
+                            onComplete(
+                                input,
+                                subscriber,
+                                messageId,
+                                deferredEvents,
+                                textStarted,
+                                currentToolExecutionCount,
+                                pendingTextBeforeToolDecision
+                            );
                         }
                     }
                 );
@@ -527,10 +603,20 @@ public class SpringAIAgent extends LocalAgent {
      * @param toolCallCounter Counter for tool calls in this run
      * @param forceStopped Whether the run has been force-stopped
      * @param tagFilter Streaming tag filter for think/parameter/invoke tags
-     * @param textBuffer Buffer for text content (emitted only if no tool calls)
      * @param textStarted Whether TEXT_MESSAGE_START has been emitted
      */
-    private void onEvent(AgentSubscriber subscriber, ChatResponse evt, String messageId, List<BaseEvent> deferredEvents, AtomicInteger toolCallCounter, boolean[] forceStopped, StreamingTagFilter tagFilter, boolean[] textStarted, java.util.Set<String> seenToolKeys) {
+    private void onEvent(
+            AgentSubscriber subscriber,
+            ChatResponse evt,
+            String messageId,
+            List<BaseEvent> deferredEvents,
+            AtomicInteger toolCallCounter,
+            boolean[] forceStopped,
+            StreamingTagFilter tagFilter,
+            boolean[] textStarted,
+            java.util.Set<String> seenToolKeys,
+            StringBuilder pendingTextBeforeToolDecision,
+            boolean bufferPotentialToolPlanningText) {
         // 已被强制停止，不再处理后续事件
         if (forceStopped[0]) {
             return;
@@ -594,11 +680,17 @@ public class SpringAIAgent extends LocalAgent {
             String text = evt.getResult().getOutput().getText();
             log.debug("[SpringAIAgent] LLM raw text chunk ({} chars): {}", text.length(),
                 text.length() > 200 ? text.substring(0, 200) + "..." : text);
-            // 跨 chunk 过滤 <think>...</think> / <parameter>...</parameter> 等泄漏的 XML/JSX 风格标签
+            // 跨 chunk 过滤 <parameter> / <invoke> / <tool_call> 等工具调用草稿标签
             // （v3 状态机版：仅依赖 per-chunk 正则会在跨 chunk 边界时漏掉 <tag>...<tag> 这种 split 情况）
             String filtered = tagFilter.process(text);
             if (StringUtils.hasText(filtered)) {
-                // 实时发射文本（真流式）——不做缓冲
+                if (bufferPotentialToolPlanningText) {
+                    pendingTextBeforeToolDecision.append(filtered);
+                    return;
+                }
+
+                // 实时发射文本——只过滤明确的工具调用草稿标签，不猜测普通文本语义。
+                // 首轮可能调用工具时的文本由 pendingTextBeforeToolDecision 延迟到 onComplete 决策。
                 if (!textStarted[0]) {
                     this.emitEvent(textMessageStartEvent(messageId, "assistant"), subscriber);
                     textStarted[0] = true;
@@ -609,19 +701,18 @@ public class SpringAIAgent extends LocalAgent {
     }
 
     /**
-     * 去除推理模型（DeepSeek-R1 / MiniMax-M3 / Claude extended thinking 等）
-     * 泄漏到正文中的 XML/JSX 风格标签及其内容，包括：
-     *   <think> / <thinking> / <parameter> / <invoke> / <function_calls> /
-     *   <antml_thinking> / <antml_call>。
+     * 去除模型泄漏到正文中的工具调用草稿标签及其内容，包括：
+     *   <parameter> / <invoke> / <tool_call> / <function_calls> / <antml_call>。
      *
      * 背景：这些标签会被 React 当作未知 HTML/JSX 标签处理，触发
      * "The tag X is unrecognized in this browser" 警告并污染前端 UI。
+     * <think> / <thinking> 不在这里删除，由前端折叠显示。
      *
      * 注意：这里只删除成对的标签（包括其内容），不删除标签外的正文。
      * 使用 Matcher.replaceAll 而非 find + 一次替换，以保证同一文本中出现
      * 多组标签时全部被清除。
      */
-    private String stripThinkTags(String text) {
+    private String stripToolDraftTags(String text) {
         if (text == null || text.isEmpty()) {
             return text;
         }
@@ -629,17 +720,17 @@ public class SpringAIAgent extends LocalAgent {
     }
 
     /**
-     * 跨 chunk 流式过滤推理模型（DeepSeek-R1 / MiniMax-M3 / Claude extended thinking 等）
-     * 泄漏到正文中的 XML/JSX 风格标签（含 <parameter> / <invoke> / <function_calls> / <think> / 等）。
+     * 跨 chunk 流式过滤模型泄漏到正文中的工具调用草稿标签
+     *（含 <parameter> / <invoke> / <tool_call> / <function_calls> 等）。
      *
      * <p>为什么需要 stateful per-stream 过滤器？</p>
-     * 推理模型经常把 <think>...</think> 拆成多个 chunk 流式输出，例如：
+     * 模型经常把工具调用草稿标签拆成多个 chunk 流式输出，例如：
      * <pre>
-     *   chunk 1: "<think>\nThe user wants..."
-     *   chunk 2: "...the API call.\n</think>"
+     *   chunk 1: "<parameter name=\"url\">/api"
+     *   chunk 2: "/products</parameter>"
      * </pre>
-     * 之前基于单个 chunk 的 {@link #stripThinkTags} 因为看不到完整的开闭标签对，
-     * 会原样放行 chunk 1，导致 React 收到一个独立的 <parameter> / <invoke> / <think>
+     * 之前基于单个 chunk 的 {@link #stripToolDraftTags} 因为看不到完整的开闭标签对，
+     * 会原样放行 chunk 1，导致 React 收到一个独立的 <parameter> / <invoke>
      * 标签而触发 "unrecognized in this browser" 警告。
      *
      * <p>本过滤器在 run() 调用期间维护：
@@ -673,6 +764,18 @@ public class SpringAIAgent extends LocalAgent {
                 return "";
             }
             buffer.append(delta);
+
+            // 先过滤方括号风格的工具调用标签 [TOOL_CALL]...[/TOOL_CALL]
+            // 某些 LLM（如 DeepSeek）会输出这种格式的工具调用草稿
+            String bufferStr = buffer.toString();
+            java.util.regex.Matcher bracketMatcher = BRACKET_TOOL_CALL_PATTERN.matcher(bufferStr);
+            if (bracketMatcher.find()) {
+                buffer.setLength(0);
+                buffer.append(bracketMatcher.replaceAll(""));
+                if (buffer.isEmpty()) {
+                    return "";
+                }
+            }
 
             StringBuilder out = new StringBuilder();
             while (true) {
@@ -977,11 +1080,24 @@ public class SpringAIAgent extends LocalAgent {
      * @param textStarted whether TEXT_MESSAGE_START has been emitted
      * @param toolExecutionCount current tool execution round count (for loop prevention)
      */
-    private void onComplete(RunAgentInput input, AgentSubscriber subscriber, String messageId, List<BaseEvent> deferredEvents, boolean[] textStarted, int toolExecutionCount) {
+    private void onComplete(
+            RunAgentInput input,
+            AgentSubscriber subscriber,
+            String messageId,
+            List<BaseEvent> deferredEvents,
+            boolean[] textStarted,
+            int toolExecutionCount,
+            StringBuilder pendingTextBeforeToolDecision) {
         boolean hasToolCalls = !deferredEvents.isEmpty();
 
         log.info("[SpringAIAgent] onComplete: hasToolCalls={}, textStarted={}, internalToolExecutionEnabled={}, toolExecutionCount={}",
             hasToolCalls, textStarted[0], this.internalToolExecutionEnabled, toolExecutionCount);
+
+        if (!hasToolCalls && !textStarted[0] && !pendingTextBeforeToolDecision.isEmpty()) {
+            this.emitEvent(textMessageStartEvent(messageId, "assistant"), subscriber);
+            textStarted[0] = true;
+            this.emitEvent(textMessageContentEvent(messageId, pendingTextBeforeToolDecision.toString()), subscriber);
+        }
 
         // 兜底：stream 完成但既没有文本也没有工具调用（例如 LLM 只输出了被全部过滤的内容）
         if (!hasToolCalls && !textStarted[0]) {
