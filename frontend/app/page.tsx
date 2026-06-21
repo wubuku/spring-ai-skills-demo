@@ -275,21 +275,34 @@ function sanitizeAssistantContent(content: string) {
 }
 
 function stripLeakedPlanningLines(content: string) {
+  // 中文规划文本模式
   const planningLinePattern =
-    /^(用户想要|用户希望|用户问|用户再次|用户就|根据之前的对话|从对话记忆中|这应该就是|现在我需要|我已经加载了|我已经知道|我需要直接|让我|接下来我|根据工具返回的结果|我刚才已经|我应该|我来|用户想知道|我已经通过)/;
+    /^(用户想要|用户希望|用户问|用户再次|用户就|根据之前的对话|从对话记忆中|这应该就是|现在我需要|我已经加载了|我已经知道|我需要直接|让我|接下来我|根据工具返回的结果|我刚才已经|我应该|我来|用户想知道|我已经通过|好的|首先|接下来|然后我|现在让我|我来看看|让我来|我将|我先)/;
 
-  // English planning patterns from multilingual models (MiniMax, etc.)
+  // English planning patterns (including non-bold lines starting with common planning verbs)
   const englishPlanningPattern =
-    /^\*\*(Checking|Reviewing|Analyzing|Processing|I'm|I've|Looking|Examining|Verifying|Confirming|Preparing|Waiting|Now I|Let me|I need|I'll|I am|I will)\b/i;
+    /^(\*\*\s*)?(Checking|Reviewing|Analyzing|Processing|I'm|I've|Looking|Examining|Verifying|Confirming|Preparing|Waiting|Now I|Let me|I need|I'll|I am|I will|I think|I should|First,|Next,|Then,|Based on|According to|The user|It seems|It appears|I notice|I see|I understand)\b/i;
 
-  // Also remove lines that are pure planning meta-narrative (bold markdown headers)
+  // Bold markdown headers that are planning meta-narrative
   const metaHeaderPattern = /^\*\*[A-Z][a-z]+(ing|ed|tion)\b.*\*\*$/;
 
-  return content
+  // [TOOL_CALL]...[/TOOL_CALL] 伪文本工具调用块
+  const fakeToolCallPattern = /^\[TOOL_CALL\]|^\[\/TOOL_CALL\]|^\{tool\s*=>/;
+
+  // 过滤 think 标签内的内容（后端未折叠的场景）
+  let result = content;
+
+  return result
     .split(/\r?\n/)
     .filter((line) => {
       const trimmed = line.trim();
-      return !planningLinePattern.test(trimmed) && !englishPlanningPattern.test(trimmed) && !metaHeaderPattern.test(trimmed);
+      if (!trimmed) return true;
+      return (
+        !planningLinePattern.test(trimmed) &&
+        !englishPlanningPattern.test(trimmed) &&
+        !metaHeaderPattern.test(trimmed) &&
+        !fakeToolCallPattern.test(trimmed)
+      );
     })
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")

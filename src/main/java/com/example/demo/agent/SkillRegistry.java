@@ -479,4 +479,7 @@ public class SkillRegistry {
 
     public Map<String, Skill> all() { return skills; }
     public Optional<Skill> get(String name) { return Optional.ofNullable(skills.get(name)); }
+
+    /** 返回 API 端点索引（供前端 URL 校验使用） */
+    public Map<String, ApiIndexEntry> getApiIndex() { return apiIndex; }
 }

@@ -1,59 +1,56 @@
 package com.example.demo.config;
 
-import jakarta.annotation.PostConstruct;
+import com.example.demo.auth.AuthFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-/**
- * Spring Security 配置
- *
- * 启用方法级安全保护 (@PreAuthorize 注解)
- * 使用简化的认证机制（硬编码用户凭证 Demo）
- */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
 
+    private final AuthFilter authFilter;
+
+    public SecurityConfig(AuthFilter authFilter) {
+        this.authFilter = authFilter;
+    }
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            // 禁用 CSRF（前后端分离场景）
+            .cors(cors -> {})
             .csrf(csrf -> csrf.disable())
-            // 禁用 Session（使用 Token 认证）
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            // 配置访问规则
+            .addFilterBefore(authFilter, UsernamePasswordAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth
-                // 公开端点
                 .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers("/api/products").permitAll()
-                .requestMatchers("/api/products/*").permitAll()
-                .requestMatchers("/api/products/**").permitAll()
                 .requestMatchers("/api/chat").permitAll()
                 .requestMatchers("/api/chat/**").permitAll()
                 .requestMatchers("/api/explain-result").permitAll()
                 .requestMatchers("/api/agui/**").permitAll()
                 .requestMatchers("/api/transcribe/**").permitAll()
-                // PetStore API 公开端点
+                // 商品浏览公开
+                .requestMatchers(HttpMethod.GET, "/api/products").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/products/{id}").permitAll()
+                // PetStore API
                 .requestMatchers("/api/v3/store/inventory").permitAll()
                 .requestMatchers("/api/v3/pet/**").permitAll()
                 .requestMatchers("/api/v3/user/**").permitAll()
                 .requestMatchers("/api/v3/store/order").permitAll()
                 .requestMatchers("/h2-console/**").permitAll()
-                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/swagger-ui-init-ui.js", "/v3/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll()
+                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/").permitAll()
                 .requestMatchers("/index.html").permitAll()
-                // 受保护端点需要认证
                 .anyRequest().authenticated()
             )
-            // 允许 H2 控制台
             .headers(headers -> headers.frameOptions(frame -> frame.disable()));
 
         return http.build();

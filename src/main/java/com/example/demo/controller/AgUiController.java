@@ -4,6 +4,7 @@ import com.agui.server.spring.AgUiParameters;
 import com.agui.server.spring.AgUiService;
 import com.agui.spring.ai.SpringAIAgent;
 import com.example.demo.agent.SkillCoreTools;
+import com.example.demo.agent.SkillRegistry;
 import com.example.demo.auth.UserContextHolder;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -37,11 +38,13 @@ public class AgUiController {
     private final AgUiService agUiService;
     private final SpringAIAgent enterpriseAgent;
     private final SkillCoreTools skillCoreTools;
+    private final SkillRegistry skillRegistry;
 
-    public AgUiController(AgUiService agUiService, SpringAIAgent enterpriseAgent, SkillCoreTools skillCoreTools) {
+    public AgUiController(AgUiService agUiService, SpringAIAgent enterpriseAgent, SkillCoreTools skillCoreTools, SkillRegistry skillRegistry) {
         this.agUiService = agUiService;
         this.enterpriseAgent = enterpriseAgent;
         this.skillCoreTools = skillCoreTools;
+        this.skillRegistry = skillRegistry;
     }
 
     /**
@@ -173,6 +176,24 @@ public class AgUiController {
     /**
      * Agent 信息模型
      */
+    /**
+     * API 端点索引（供前端 httpRequest URL 校验）
+     * 返回所有已注册的 API 端点，格式: {"GET /api/products": {"skillName":"search-products", ...}}
+     */
+    @GetMapping("/skills/api-index")
+    public ResponseEntity<Map<String, Object>> apiIndex() {
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        skillRegistry.getApiIndex().forEach((key, entry) -> {
+            Map<String, String> item = new java.util.LinkedHashMap<>();
+            item.put("skillName", entry.getSkillName());
+            item.put("path", entry.getPath());
+            item.put("method", entry.getMethod());
+            item.put("description", entry.getDescription());
+            result.put(key, item);
+        });
+        return ResponseEntity.ok(result);
+    }
+
     public record AgentInfo(
             String agentId,
             String name,

@@ -68,8 +68,15 @@ public class SkillCoreTools {
                     skill.getMeta().getLinks().stream()
                         .map(l -> "- `" + l.getName() + "`：" + l.getDescription())
                         .collect(Collectors.joining("\n"));
+                String mutationReminder = "";
+                // For skills that involve write operations, add a mandatory reminder
+                String bodyLower = skill.getBody().toLowerCase();
+                if (bodyLower.contains("post") || bodyLower.contains("put") || bodyLower.contains("delete")) {
+                    mutationReminder = "\n\n⚠️ **关键提醒**：此技能涉及写操作。你**必须**调用 `httpRequest` 工具实际执行 API 调用，" +
+                        "然后等待用户确认。**禁止**只用文字回复而不实际调用 API！";
+                }
                 return "✓ 技能 `" + skillName + "` 已加载" + linksHint +
-                       "\n\n---\n" + skill.getBody();
+                       "\n\n---\n" + skill.getBody() + mutationReminder;
             })
             .orElse("✗ 错误：技能 `" + skillName + "` 不存在。可用技能：" +
                     registry.all().keySet().stream().sorted().collect(Collectors.joining(", ")) +

@@ -5,6 +5,7 @@ import com.agui.server.streamer.AgentStreamer;
 import com.agui.spring.ai.SpringAIAgent;
 import com.example.demo.agent.JsonArgToolCallback;
 import com.example.demo.agent.SkillCoreTools;
+import com.example.demo.agent.SkillRegistry;
 import com.example.demo.agent.SkillsAdvisor;
 import com.example.demo.service.PromptLoader;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -74,6 +75,7 @@ public class AgUiConfig {
     public SpringAIAgent enterpriseAgent(
             @Qualifier("chatModel") ChatModel chatModel,
             SkillCoreTools skillCoreTools,
+            SkillRegistry skillRegistry,
             SkillsAdvisor skillsAdvisor,
             JdbcChatMemoryRepository jdbcChatMemoryRepository,
             PromptLoader promptLoader
@@ -128,6 +130,7 @@ public class AgUiConfig {
                 // 之前 maxToolCalls=3 时 LLM 用 2 轮 loadSkill 后就只剩 1 轮，
                 // httpRequest 还没下发就被跳过 → 前端永远拿不到 tool → 无确认 → 无最终回答。
                 .maxToolCalls(5)
+                .skillRegistry(skillRegistry)
                 .build();
     }
 

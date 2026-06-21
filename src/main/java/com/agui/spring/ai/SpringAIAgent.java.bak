@@ -25,7 +25,6 @@ import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.util.StringUtils;
 
-import com.example.demo.agent.SkillRegistry;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -74,10 +73,6 @@ public class SpringAIAgent extends LocalAgent {
      * 因此这里在应用层强制限制。
      */
     public static final int DEFAULT_MAX_TOOL_CALLS = 1;
-
-    // ★ Text-based [TOOL_CALL] parsing: accumulate chunks and convert to structured tool calls
-    private final java.util.concurrent.atomic.AtomicBoolean inTextToolCall = new java.util.concurrent.atomic.AtomicBoolean(false);
-    private final StringBuilder textToolCallBuffer = new StringBuilder();
 
     /**
      * 匹配推理模型（DeepSeek-R1、MiniMax-M3、Claude w/ extended thinking 等）泄漏到正文中的
@@ -275,12 +270,6 @@ public class SpringAIAgent extends LocalAgent {
     private final boolean internalToolExecutionEnabled;
 
     /**
-     * 技能注册表（可选）。用于 httpRequest URL 校验。
-     * 如果不设置，跳过后端 URL 校验（仅依赖前端校验）。
-     */
-    private final SkillRegistry skillRegistry;
-
-    /**
      * Protected constructor that initializes the SpringAIAgent using the builder pattern.
      *
      * @param builder the Builder instance containing all configuration parameters
@@ -310,7 +299,6 @@ public class SpringAIAgent extends LocalAgent {
 
         this.toolCallbacksForExecution = builder.toolCallbacksForExecution;
         this.internalToolExecutionEnabled = builder.internalToolExecutionEnabled;
-        this.skillRegistry = builder.skillRegistry;
 
         this.toolMapper = new ToolMapper();
     }
@@ -701,36 +689,6 @@ public class SpringAIAgent extends LocalAgent {
                 text.length() > 200 ? text.substring(0, 200) + "..." : text);
             // 跨 chunk 过滤 <parameter> / <invoke> / <tool_call> 等工具调用草稿标签
             // （v3 状态机版：仅依赖 per-chunk 正则会在跨 chunk 边界时漏掉 <tag>...<tag> 这种 split 情况）
-            // ★ Check for [TOOL_CALL] blocks BEFORE the tag filter strips them
-            if (text.contains("[TOOL_CALL]") || text.contains("[tool_call]")) {
-                inTextToolCall.set(true);
-            }
-            if (inTextToolCall.get()) {
-                synchronized (textToolCallBuffer) {
-                    textToolCallBuffer.append(text);
-                    String buffered = textToolCallBuffer.toString();
-                    int endIdx = buffered.indexOf("[/TOOL_CALL]");
-                    if (endIdx < 0) endIdx = buffered.indexOf("[/tool_call]");
-                    if (endIdx >= 0) {
-                        inTextToolCall.set(false);
-                        var parsedCalls = parseTextToolCalls(buffered);
-                        if (!parsedCalls.isEmpty()) {
-                            log.info("[SpringAIAgent] ★ Parsed {} text tool calls from stream", parsedCalls.size());
-                            for (var tc : parsedCalls) {
-                                String tcId = "text_tc_" + UUID.randomUUID().toString().substring(0, 8);
-                                this.emitEvent(toolCallStartEvent(messageId, tc.name(), tcId), subscriber);
-                                this.emitEvent(toolCallArgsEvent(tc.arguments(), tcId), subscriber);
-                                this.emitEvent(toolCallEndEvent(tcId), subscriber);
-                                deferredEvents.add(toolCallStartEvent(messageId, tc.name(), tcId));
-                                deferredEvents.add(toolCallArgsEvent(tc.arguments(), tcId));
-                            }
-                        }
-                        textToolCallBuffer.setLength(0);
-                    }
-                }
-                return; // Don't emit [TOOL_CALL] text to frontend
-            }
-
             String filtered = tagFilter.process(text);
             if (StringUtils.hasText(filtered)) {
                 if (bufferPotentialToolPlanningText) {
@@ -766,96 +724,6 @@ public class SpringAIAgent extends LocalAgent {
             return text;
         }
         return THINK_TAG_PATTERN.matcher(text).replaceAll("").trim();
-    }
-
-    /**
-     * Parse [TOOL_CALL]...[/TOOL_CALL] blocks from text.
-     */
-    private List<AssistantMessage.ToolCall> parseTextToolCalls(String text) {
-        List<AssistantMessage.ToolCall> result = new ArrayList<>();
-        if (text == null || text.isEmpty()) return result;
-        String lower = text.toLowerCase();
-        int start = 0;
-        while (true) {
-            int blockStart = lower.indexOf("[tool_call]", start);
-            if (blockStart < 0) break;
-            int blockEnd = lower.indexOf("[/tool_call]", blockStart);
-            if (blockEnd < 0) break;
-            String block = text.substring(blockStart + 11, blockEnd).trim();
-            start = blockEnd + 12;
-            String toolName = null;
-            for (String pat : new String[]{"tool => \"", "name => \""}) {
-                int ns = block.indexOf(pat);
-                if (ns >= 0) {
-                    ns += pat.length();
-                    int ne = block.indexOf("\"", ns);
-                    if (ne > ns) { toolName = block.substring(ns, ne); break; }
-                }
-            }
-            if (toolName == null) continue;
-            String args = "{}";
-            for (String pat : new String[]{"args => ", "args: "}) {
-                int as = block.indexOf(pat);
-                if (as >= 0) {
-                    as += pat.length();
-                    int bs = block.indexOf("{", as);
-                    if (bs >= 0) {
-                        int depth = 0; int ae = -1;
-                        for (int i = bs; i < block.length(); i++) {
-                            if (block.charAt(i) == '{') depth++;
-                            else if (block.charAt(i) == '}') depth--;
-                            if (depth == 0) { ae = i + 1; break; }
-                        }
-                        if (ae > bs) args = cleanTextArgs(block.substring(bs, ae));
-                    }
-                    break;
-                }
-            }
-            String callId = "text_tc_" + UUID.randomUUID().toString().substring(0, 8);
-            result.add(new AssistantMessage.ToolCall(callId, "function", toolName, args));
-            log.info("[SpringAIAgent] Parsed text tool call: {} args={}", toolName, args);
-        }
-        return result;
-    }
-
-    private String cleanTextArgs(String raw) {
-        raw = raw.trim();
-        if (raw.startsWith("{") && raw.endsWith("}")) {
-            try { new com.fasterxml.jackson.databind.ObjectMapper().readTree(raw); return raw; }
-            catch (Exception e) { /* not valid JSON, fall through */ }
-        }
-        java.util.Map<String, String> params = new java.util.LinkedHashMap<>();
-        int i = 0;
-        while (i < raw.length()) {
-            while (i < raw.length() && Character.isWhitespace(raw.charAt(i))) i++;
-            if (i >= raw.length()) break;
-            if (raw.charAt(i) == '-' && i + 1 < raw.length() && raw.charAt(i + 1) == '-') {
-                i += 2;
-                int ks = i;
-                while (i < raw.length() && !Character.isWhitespace(raw.charAt(i))) i++;
-                String key = raw.substring(ks, i);
-                while (i < raw.length() && Character.isWhitespace(raw.charAt(i))) i++;
-                String value = "";
-                if (i < raw.length()) {
-                    char c = raw.charAt(i);
-                    if (c == '"' || c == '\'') {
-                        i++;
-                        int vs = i;
-                        while (i < raw.length() && raw.charAt(i) != c) i++;
-                        value = raw.substring(vs, i);
-                        if (i < raw.length()) i++;
-                    } else {
-                        int vs = i;
-                        while (i < raw.length() && !Character.isWhitespace(raw.charAt(i))) i++;
-                        value = raw.substring(vs, i);
-                    }
-                }
-                if (!key.isEmpty()) params.put(key, value);
-            } else { i++; }
-        }
-        if (params.isEmpty()) return "{}";
-        try { return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(params); }
-        catch (Exception e) { return "{}"; }
     }
 
     /**
@@ -1358,18 +1226,8 @@ public class SpringAIAgent extends LocalAgent {
                 }
             } else {
                 // 工具不在本地注册（如 httpRequest 由前端 useCopilotAction 处理）。
-                // 对 httpRequest 进行后端 URL 校验：如果 URL 不合法，直接返回错误，
-                // 让 LLM 看到错误后自行纠正（调用 loadSkill 获取正确 URL）。
-                if ("httpRequest".equals(toolName) && this.skillRegistry != null) {
-                    String urlError = validateHttpRequestUrl(toolArguments);
-                    if (urlError != null) {
-                        log.warn("[SpringAIAgent] httpRequest URL 校验失败: {} — {}", toolArguments, urlError);
-                        String errorResult = "[URL_VALIDATION_ERROR] " + urlError;
-                        this.emitEvent(toolCallResultEvent(toolCall.id(), errorResult, messageId, Role.tool), subscriber);
-                        toolResponses.add(new ToolResponseMessage.ToolResponse(toolCall.id(), toolName, errorResult));
-                        continue;
-                    }
-                }
+                // 标记为未找到，不发射 TOOL_CALL_RESULT——让前端 CopilotKit 的
+                // useCopilotAction 处理该工具调用并返回结果。
                 log.info("[SpringAIAgent] 工具 {} 未在后端注册，跳过执行（由前端处理）", toolName);
                 allToolsFound = false;
                 continue;
@@ -1607,50 +1465,6 @@ public class SpringAIAgent extends LocalAgent {
      *
      * @return a new Builder instance
      */
-
-    /**
-     * 校验 httpRequest 工具参数中的 URL 是否合法。
-     * @return null 如果合法，否则返回错误消息
-     */
-    private String validateHttpRequestUrl(String toolArguments) {
-        if (toolArguments == null || toolArguments.isEmpty()) return null;
-        try {
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            var node = mapper.readTree(toolArguments);
-            String method = node.has("method") ? node.get("method").asText() : "";
-            String url = node.has("url") ? node.get("url").asText() : "";
-            if (url.isEmpty() || method.isEmpty()) return null; // 缺失字段，让前端处理
-            if (url.startsWith("http")) return null; // 完整 URL，跳过校验
-            String urlPath = url.split("\\?")[0];
-            var apiIndex = skillRegistry.getApiIndex();
-            // 精确匹配
-            String exactKey = method.toUpperCase() + " " + urlPath;
-            if (apiIndex.containsKey(exactKey)) return null;
-            // 模式匹配（如 /api/products/1 匹配 /api/products/{id}）
-            for (String key : apiIndex.keySet()) {
-                String[] parts = key.split(" ", 2);
-                if (parts.length != 2 || !parts[0].equals(method.toUpperCase())) continue;
-                String pattern = parts[1].replaceAll("\\{[^}]+}", "[^/]+");
-                if (urlPath.matches("^" + pattern + "$")) return null;
-            }
-            // URL 不合法，返回可用端点列表
-            StringBuilder hint = new StringBuilder();
-            hint.append("URL \"").append(url).append("\" 不是已注册的 API 端点。");
-            hint.append("请先调用 loadSkill 获取正确的 API 路径。\n");
-            hint.append("可用的 ").append(method.toUpperCase()).append(" 端点：\n");
-            for (var entry : apiIndex.entrySet()) {
-                if (entry.getKey().startsWith(method.toUpperCase())) {
-                    hint.append("  ").append(entry.getKey())
-                        .append(" → loadSkill(\"").append(entry.getValue().getSkillName()).append("\")\n");
-                }
-            }
-            return hint.toString();
-        } catch (Exception e) {
-            log.debug("[SpringAIAgent] httpRequest URL 校验解析失败: {}", e.getMessage());
-            return null; // 解析失败，让前端处理
-        }
-    }
-
     public static Builder builder() {
         return new Builder();
     }
@@ -1726,11 +1540,6 @@ public class SpringAIAgent extends LocalAgent {
          * 默认为 true（Spring AI 内部执行工具）。
          */
         private boolean internalToolExecutionEnabled = true;
-
-        /**
-         * 技能注册表（可选）。用于 httpRequest URL 校验。
-         */
-        private SkillRegistry skillRegistry;
 
         /**
          * Sets the ChatModel for the agent.
@@ -1935,17 +1744,6 @@ public class SpringAIAgent extends LocalAgent {
          * @return a new SpringAIAgent instance
          * @throws AGUIException if the configuration is invalid or required parameters are missing
          */
-        /**
-         * 设置技能注册表，用于 httpRequest URL 校验。
-         *
-         * @param skillRegistry the SkillRegistry instance
-         * @return this builder instance for method chaining
-         */
-        public Builder skillRegistry(final SkillRegistry skillRegistry) {
-            this.skillRegistry = skillRegistry;
-            return this;
-        }
-
         public SpringAIAgent build() throws AGUIException {
             return new SpringAIAgent(this);
         }
