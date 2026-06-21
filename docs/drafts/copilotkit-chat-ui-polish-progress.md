@@ -1,80 +1,59 @@
 # CopilotKit Chat UI Polish — Progress Tracker
 
-> Last updated: 2026-06-21 (v11: backend URL validation fix)
+> Last updated: 2026-06-21 (v12: prompt cleanup, rate limited)
 
 ## Goal
 
 实现购物流程的端到端体验优化：
-1. 用户登录后问"我有什么商品可以买？" → 获得商品列表 ✅
-2. 用户说"将 iPhone 15 添加到购物车" → 弹出确认卡片 → 点击确认 → 添加成功 ✅
-3. 用户说"查询我的购物车" → 列出购物车内容 ✅
+1. 用户登录后问"我有什么商品可以买？" → 获得商品列表
+2. 用户说"将 iPhone 15 添加到购物车" → 弹出确认卡片 → 点击确认 → 添加成功
+3. 用户说"查询我的购物车" → 列出购物车内容
 
 **硬性约束**：
 - 使用 MiniMax-M2.7-highspeed 模型（不换模型）
 - 流式必须是真流式（不能伪流式）
-- 不能作弊（不能为了让测试通过而改安全规则）
+- 不能作弊（提示词中不能硬编码 API URL，模型必须通过 SKILL 探索获取 URL）
 
 ## Current Status
 
-**PASS RATE: 100% (5/5 runs)**
+**RATE LIMITED — 等待 API 限流恢复**
 
-### Root Cause & Fix
+### 已完成的修复
 
-**问题**：模型有时生成错误的 API URL（如 `/api/cart/add` 而非 `/api/products/cart`）
+1. **后端 httpRequest URL 校验**（SpringAIAgent.java）
+   - 当模型发送错误 URL 时，后端返回 `[URL_VALIDATION_ERROR]`
+   - 模型看到错误后自行纠正（调用 loadSkill）
+   - 之前 5/5 通过（但那时提示词有硬编码示例）
 
-**修复（关键突破）**：在后端 `SpringAIAgent.executeToolCallsAndReRun()` 中添加 httpRequest URL 校验：
-- 当模型发送 httpRequest 工具调用时，后端先校验 URL 是否在 API 索引中
-- 如果 URL 不合法，后端直接返回 `[URL_VALIDATION_ERROR]` 工具结果
-- 模型看到错误后自行纠正（调用 loadSkill 获取正确 URL）
-- 这比前端校验更有效：模型能立即看到错误并重试
+2. **前端 URL 匹配算法修复**（useHttpRequestTool.tsx）
+   - `{param}` 通配符不再匹配非数字路径段
+   - 阈值从 0.4 提高到 0.5
 
-**其他修复**：
-1. 前端 URL 匹配算法修复：`{param}` 通配符不再匹配非数字路径段
-2. 前端匹配阈值从 0.4 提高到 0.5
+3. **提示词清理**（进行中）
+   - 移除了硬编码的 API URL 示例
+   - 添加了通用的对话流程示例（展示 loadSkill → httpRequest 的模式）
+   - ⚠️ 需要测试：MiniMax 是否能在没有硬编码示例的情况下正确调用工具
 
-### E2E Test Results (5 runs)
+### 关键发现
 
-| Run | Products | AddToCart | Cart | 403s |
-|-----|----------|-----------|------|------|
-| 1   | ✅       | ✅        | ✅   | 0    |
-| 2   | ✅       | ✅        | ✅   | 0    |
-| 3   | ✅       | ✅        | ✅   | 0    |
-| 4   | ✅       | ✅        | ✅   | 0    |
-| 5   | ✅       | ✅        | ✅   | 0    |
+- **MiniMax 需要具体示例**：完全移除示例后，模型不调用任何工具（0/5 通过）
+- **需要平衡**：示例要展示工具调用的"模式"，但不能硬编码具体 API URL
+- **API 限流**：连续测试导致 429 错误，需要等待或切换 key
 
-## Changes Made
+### 下一步
 
-### Backend
-1. **`SpringAIAgent.java`**: Added `skillRegistry` field + `validateHttpRequestUrl()` method
-   - Validates httpRequest URLs against SkillRegistry API index
-   - Returns `[URL_VALIDATION_ERROR]` with available endpoints on failure
-   - Model self-corrects by calling loadSkill
-
-2. **`AgUiConfig.java`**: Pass SkillRegistry to SpringAIAgent builder
-
-3. **`SecurityConfig.java`** (from previous AI): cart/checkout require auth ✅
-4. **`SkillCoreTools.java`** (from previous AI): mutation reminder ✅
-5. **`SkillRegistry.java`** (from previous AI): exposed `getApiIndex()` ✅
-6. **`AgUiController.java`** (from previous AI): `/skills/api-index` endpoint ✅
-7. **System prompts** (from previous AI): improved instructions ✅
-
-### Frontend
-1. **`useHttpRequestTool.tsx`**: Fixed URL matching algorithm
-   - `{param}` wildcards only match numeric segments
-   - Threshold raised from 0.4 to 0.5
-
-## Remaining Issues
-
-1. **Streaming UX**: Long delays before response appears (model thinking time)
-2. **Planning text leakage**: Model outputs verbose thinking that shows in chat
-3. **Confirmation card UX**: Could be improved visually
+1. 等待 API 限流恢复（或切换 key）
+2. 测试当前提示词是否能让模型正确调用工具
+3. 如果仍然失败，需要找到"不作弊但有示例"的平衡点
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `src/main/java/com/agui/spring/ai/SpringAIAgent.java` | Backend URL validation |
-| `src/main/java/com/example/demo/config/AgUiConfig.java` | Agent configuration |
+| `src/main/java/com/example/demo/config/AgUiConfig.java` | Agent config |
+| `src/main/resources/prompts/enterprise-agent/system-prompt.template` | System prompt |
+| `src/main/resources/prompts/skills-advisor/mode-rules.template` | Mode rules |
 | `frontend/hooks/useHttpRequestTool.tsx` | Frontend URL matching |
 
 ## Environment
@@ -84,4 +63,5 @@
 - Login: admin / admin123
 - Model: MiniMax-M2.7-highspeed
 - CopilotKit: v1.60.2, Spring AI: 1.1.2
+- API Keys: 两个 key 轮换使用（.env 中有注释说明）
 
