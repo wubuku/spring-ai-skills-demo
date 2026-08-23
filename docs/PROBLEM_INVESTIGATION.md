@@ -1,8 +1,11 @@
 # 问题排查记录：前端用户确认模式失效
 
 > **文档状态**: 历史诊断记录（2026-03-17）。
-> 当前实现已从旧的 `buildHttpRequest`/代码块确认模式迁移到 AG-UI 前端
-> `httpRequest` + `useHumanInTheLoop`；请以 [故障排查](troubleshooting.md) 和当前源码为准。
+> 本文只保留当时的 AG-UI 确认模式故障证据，不描述当前普通 Agent 的完整工具契约。
+> 当前实现分为两条链路：普通 `/api/chat` 使用后端 `SkillTools`，只读请求由后端执行，
+> 写操作由 `buildHttpRequest` 生成确认元数据；AG-UI 使用后端 `SkillCoreTools` 和浏览器侧
+> `httpRequest` + `useHumanInTheLoop`。请以 [系统架构](ARCHITECTURE.md)、
+> [故障排查](troubleshooting.md) 和当前源码为准。
 
 ## 问题描述
 

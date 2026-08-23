@@ -11,7 +11,8 @@
 - 一个可用的 OpenAI-compatible、Anthropic 或 MiniMax 模型配置。
 - 使用 `postgresql` profile 时，需要 PostgreSQL、`vector` 扩展和对应凭证。
 
-Docker 构建阶段使用 Amazon Corretto 21；这不改变 Maven 的 Java 17 编译目标。修改 Java 或 Docker 配置时同时检查 `pom.xml` 和 `Dockerfile`。
+Dockerfile 构建和运行均使用 Java 17；修改 Java 或 Docker 配置时同时检查 `pom.xml`
+和 `Dockerfile`。
 
 ## 后端
 
@@ -61,13 +62,17 @@ mvn spring-boot:run -DskipTests
 
 ### Profile
 
-当前 `src/main/resources/application.yml` 显式激活 `postgresql`。本地不使用 PostgreSQL 时必须显式覆盖：
+根 `src/main/resources/application.yml` 不自动激活 profile。直接运行 Maven 时默认使用
+H2；`dev.sh` 在未覆盖时默认设置 `postgresql`，以匹配本地 PostgreSQL 开发环境。
+本地不使用 PostgreSQL 时可显式选择非 PostgreSQL profile：
 
 ```bash
 SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
 ```
 
-此时使用基础配置中的 H2 文件数据库和非 PostgreSQL 的 `SimpleVectorStore`。`application-dev.yml` 只有在 `dev` profile 被显式选择时才生效。
+此时使用 H2 文件数据库和非 PostgreSQL 的 `SimpleVectorStore`。`application-dev.yml`
+只有在显式使用 `dev` profile 时才生效。RAG 和语义向量记忆默认关闭，只有打开对应
+开关时才要求 Embedding 配置。
 
 ### 切换模型 Provider
 
@@ -120,11 +125,12 @@ npm run test:e2e:traditional
 3. 后端改动运行 `mvn -DskipTests clean package`。
 4. 前端改动运行 `cd frontend && npm run build`。
 5. 涉及真实 Agent、认证、流式或外部服务时，按 [验证手册](HARNESS.md) 选择专项脚本。
-6. 提交前运行 `git diff --check` 和 `git status --short`。
+6. 提交前运行 `git diff --check`、`git status --short` 和子模块状态检查。
 
 ## 不应默认执行的命令
 
-- `mvn test` 不是完全离线测试，其中包含外部 LLM/DeepSeek 相关烟测。
+- 默认 `mvn test` 排除 `live-llm` 和 `container` 标签，是确定性/Mock 测试；
+  真实 provider 和 PostgreSQL 测试必须显式启用。
 - `test-*.sh` 通常要求后端已启动、`.env`、外部 API 或 PostgreSQL。
 - 多模态测试需要 `TEST_IMAGE_PATH`、`TEST_AUDIO_PATH`。
 - AG-UI 浏览器测试需要后端 8080、前端 4000 和 Playwright。

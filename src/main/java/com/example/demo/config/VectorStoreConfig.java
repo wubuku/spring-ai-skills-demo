@@ -3,6 +3,8 @@ package com.example.demo.config;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SimpleVectorStore;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -21,35 +23,59 @@ import java.io.File;
 @Profile("!postgresql")
 public class VectorStoreConfig {
 
-    /**
-     * 创建 VectorStore Bean (SimpleVectorStore)
-     * 支持文件持久化
-     */
+    @Bean("knowledgeVectorStore")
+    public VectorStore knowledgeVectorStore(
+        EmbeddingModel embeddingModel,
+        @Value("${app.ai.vector-store.knowledge-file:./data/vector-store.json}")
+        String persistenceFile
+    ) {
+        return simpleVectorStore(embeddingModel, persistenceFile);
+    }
+
+    @Bean("chatMemoryVectorStore")
+    public VectorStore chatMemoryVectorStore(
+        EmbeddingModel embeddingModel,
+        @Value("${app.ai.vector-store.chat-memory-file:./data/chat-memory-vector-store.json}")
+        String persistenceFile
+    ) {
+        return simpleVectorStore(embeddingModel, persistenceFile);
+    }
+
     @Bean
-    public VectorStore vectorStore(EmbeddingModel embeddingModel) {
+    public VectorStorePersistenceExecutor knowledgeVectorStorePersistenceExecutor(
+        @Qualifier("knowledgeVectorStore") VectorStore vectorStore,
+        @Value("${app.ai.vector-store.knowledge-file:./data/vector-store.json}")
+        String persistenceFile
+    ) {
+        return new VectorStorePersistenceExecutor(vectorStore, persistenceFile);
+    }
+
+    @Bean
+    public VectorStorePersistenceExecutor chatMemoryVectorStorePersistenceExecutor(
+        @Qualifier("chatMemoryVectorStore") VectorStore vectorStore,
+        @Value("${app.ai.vector-store.chat-memory-file:./data/chat-memory-vector-store.json}")
+        String persistenceFile
+    ) {
+        return new VectorStorePersistenceExecutor(vectorStore, persistenceFile);
+    }
+
+    private VectorStore simpleVectorStore(
+        EmbeddingModel embeddingModel,
+        String persistenceFile
+    ) {
         SimpleVectorStore simpleVectorStore = SimpleVectorStore.builder(embeddingModel)
             .build();
 
-        // 尝试从文件加载已存储的向量
-        File vectorStoreFile = new File("./data/vector-store.json");
+        File vectorStoreFile = new File(persistenceFile);
         if (vectorStoreFile.exists()) {
             try {
                 simpleVectorStore.load(new FileSystemResource(vectorStoreFile));
             } catch (Exception e) {
-                // 忽略加载错误，使用空存储
+                throw new IllegalStateException(
+                    "无法加载向量存储文件: " + vectorStoreFile.getAbsolutePath(), e);
             }
         }
 
         return simpleVectorStore;
-    }
-
-    /**
-     * VectorStore 持久化控制器
-     * 用于在应用关闭时保存向量数据到文件
-     * 注意：此控制器仅在非 postgresql profile 时生效
-     */
-    @Bean
-    public VectorStorePersistenceExecutor vectorStorePersistenceExecutor(VectorStore vectorStore) {
-        return new VectorStorePersistenceExecutor(vectorStore);
     }
 }

@@ -2,6 +2,7 @@ package com.example.demo.controller;
 
 import com.example.demo.model.ExplainRequest;
 import com.example.demo.service.ExplainResultService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -15,7 +16,7 @@ public class ExplainResultController {
     }
 
     @PostMapping("/explain-result")
-    public String explainResult(@RequestBody ExplainRequest request) {
+    public String explainResult(@Valid @RequestBody ExplainRequest request) {
         return explainResultService.explainResult(request);
     }
 }

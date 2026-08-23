@@ -3,8 +3,10 @@ package com.example.demo.knowledge;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
@@ -13,13 +15,16 @@ import org.springframework.stereotype.Component;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "app.ai.rag.enabled", havingValue = "true")
 public class KnowledgeBaseInitializer {
 
     private final VectorStore vectorStore;
@@ -34,7 +39,13 @@ public class KnowledgeBaseInitializer {
     @Value("${knowledge-base.paths:classpath:knowledge-base/*.md}")
     private List<String> knowledgeBasePaths;
 
-    public KnowledgeBaseInitializer(VectorStore vectorStore, ResourceLoader resourceLoader) {
+    @Value("${knowledge-base.fail-fast:false}")
+    private boolean failFast;
+
+    public KnowledgeBaseInitializer(
+        @Qualifier("knowledgeVectorStore") VectorStore vectorStore,
+        ResourceLoader resourceLoader
+    ) {
         this.vectorStore = vectorStore;
         this.resourceLoader = resourceLoader;
     }
@@ -44,11 +55,14 @@ public class KnowledgeBaseInitializer {
         try {
             loadKnowledgeBase();
         } catch (Exception e) {
+            if (failFast) {
+                throw e;
+            }
             log.error("知识库初始化失败", e);
         }
     }
 
-    private void loadKnowledgeBase() {
+    void loadKnowledgeBase() {
         List<Document> allDocuments = new ArrayList<>();
         
         log.info("开始加载知识库，配置的路径列表: {}", knowledgeBasePaths);
@@ -59,6 +73,10 @@ public class KnowledgeBaseInitializer {
                 allDocuments.addAll(documents);
                 log.info("从路径 [{}] 加载了 {} 个文档", pathPattern, documents.size());
             } catch (Exception e) {
+                if (failFast) {
+                    throw new IllegalStateException(
+                        "从路径加载知识库失败: " + pathPattern, e);
+                }
                 log.warn("从路径 [{}] 加载知识库失败: {}", pathPattern, e.getMessage());
             }
         }
@@ -95,6 +113,9 @@ public class KnowledgeBaseInitializer {
                     documents.add(doc);
                 }
             } catch (IOException e) {
+                if (failFast) {
+                    throw e;
+                }
                 log.error("读取资源失败: {} - {}", resource, e.getMessage());
             }
         }
@@ -115,15 +136,39 @@ public class KnowledgeBaseInitializer {
         
         String filename = resource.getFilename();
         String originalId = filename != null ? filename.replace(".md", "") : "unknown";
+        String source = normalizedSource(resource);
+        String stableId = UUID.nameUUIDFromBytes(
+            source.getBytes(StandardCharsets.UTF_8)
+        ).toString();
         
         return Document.builder()
-            .id(UUID.randomUUID().toString())
+            .id(stableId)
             .text(content)
-            .metadata(java.util.Map.of(
-                "source", resource.getURI().toString(),
+            .metadata(Map.of(
+                "kind", "knowledge",
+                "source", source,
                 "originalId", originalId,
                 "filename", filename != null ? filename : "unknown"
             ))
             .build();
+    }
+
+    private String normalizedSource(Resource resource) throws IOException {
+        String source = resource.getURI().normalize().toString().replace('\\', '/');
+        int jarSeparator = source.indexOf("!/");
+        if (jarSeparator >= 0) {
+            return "classpath:" + source.substring(jarSeparator + 2);
+        }
+        for (String marker : List.of(
+            "/target/classes/",
+            "/target/test-classes/",
+            "/src/main/resources/"
+        )) {
+            int markerIndex = source.indexOf(marker);
+            if (markerIndex >= 0) {
+                return "classpath:" + source.substring(markerIndex + marker.length());
+            }
+        }
+        return source;
     }
 }

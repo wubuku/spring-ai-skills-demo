@@ -8,6 +8,7 @@ import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import jakarta.annotation.PostConstruct;
 
 /**
  * EmbeddingModel 配置类
@@ -36,6 +37,21 @@ public class EmbeddingModelConfig {
 
     @Value("${siliconflow.dimensions-enabled:false}")
     private boolean siliconFlowDimensionsEnabled;
+
+    @Value("${app.ai.rag.enabled:false}")
+    private boolean ragEnabled;
+
+    @Value("${app.ai.vector-memory.enabled:false}")
+    private boolean vectorMemoryEnabled;
+
+    @PostConstruct
+    void validateConfiguration() {
+        if ((ragEnabled || vectorMemoryEnabled)
+            && (siliconFlowApiKey == null || siliconFlowApiKey.isBlank())) {
+            throw new IllegalStateException(
+                "启用 RAG 或向量记忆时必须配置 SILICONFLOW_API_KEY");
+        }
+    }
 
     /**
      * 创建嵌入模型 Bean

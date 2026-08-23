@@ -2,6 +2,7 @@ package com.example.demo.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
@@ -17,6 +18,7 @@ import java.util.function.Function;
  *
  * 解决方案：手动解析 JSON 参数，然后通过反射调用目标方法。
  */
+@Slf4j
 public class JsonArgToolCallback implements ToolCallback {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -41,7 +43,7 @@ public class JsonArgToolCallback implements ToolCallback {
     @Override
     public String call(String toolInput) {
         try {
-            System.out.println("[JsonArgToolCallback] call() 被调用，toolInput=" + toolInput);
+            log.debug("Executing AG-UI tool callback: tool={}", toolDefinition.name());
 
             // 解析 JSON 参数
             JsonNode rootNode = objectMapper.readTree(toolInput);
@@ -53,10 +55,8 @@ public class JsonArgToolCallback implements ToolCallback {
                 JsonNode paramNode = rootNode.get(paramName);
                 if (paramNode != null && !paramNode.isNull()) {
                     args[i] = paramNode.asText();
-                    System.out.println("[JsonArgToolCallback] 参数 " + paramName + "=" + args[i]);
                 } else {
                     args[i] = null;
-                    System.out.println("[JsonArgToolCallback] 参数 " + paramName + " 为 null");
                 }
             }
 
@@ -65,9 +65,9 @@ public class JsonArgToolCallback implements ToolCallback {
             return result != null ? result.toString() : "";
 
         } catch (Exception e) {
-            System.err.println("[JsonArgToolCallback] 执行失败: " + e.getMessage());
-            e.printStackTrace();
-            return "工具执行失败: " + e.getMessage();
+            log.warn("AG-UI tool callback failed: tool={}, error={}",
+                toolDefinition.name(), e.getClass().getSimpleName());
+            return "工具执行失败：工具参数或执行过程异常";
         }
     }
 }

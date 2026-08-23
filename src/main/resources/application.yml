@@ -2,18 +2,14 @@ spring:
   application:
     name: spring-ai-skills-demo
 
-  # 默认使用 PostgreSQL（与 .env 中的 SPRING_DATASOURCE_URL 一致）
-  profiles:
-    active: postgresql
-
-  # 允许 Bean 定义覆盖（解决自定义配置与自动配置冲突）
-  main:
-    allow-bean-definition-overriding: true
-
-  # 默认排除 PgVectorStore 自动配置（当 postgresql profile 激活时会启用）
+  # 项目显式创建两个命名 VectorStore，避免自动配置生成第三个歧义 Bean。
   autoconfigure:
     exclude:
       - org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration
+      - org.springframework.ai.model.anthropic.autoconfigure.AnthropicChatAutoConfiguration
+      - org.springframework.ai.model.minimax.autoconfigure.MiniMaxChatAutoConfiguration
+      - org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 
   # 文件上传配置
   servlet:
@@ -23,15 +19,12 @@ spring:
 
   # Spring AI 配置
   ai:
-    # 开启 Spring AI 日志，打印最终发送给模型的 Prompt
-    # 注意：chat.observations 不能和 openai.chat 同时存在，需要分开配置
-    # LLM Provider 开关：openai 或 anthropic
     provider: ${app.llm.provider:openai}
     openai:
       api-key: ${OPENAI_API_KEY:dummy}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
       chat:
-        # 禁用 Spring AI 自动配置！让 OkHttp 配置生效！
+        # ChatModel 由 SpringAiConfig 创建，以便演示多 Provider 切换。
         enabled: false
         options:
           model: ${OPENAI_MODEL:gpt-4o}
@@ -62,14 +55,13 @@ spring:
           jdbc:
             initialize-schema: always
             platform: h2
-      # Observations 配置 - 用于打印 prompt 和 completion
       observations:
-        enabled: true
-        log-prompt: true
-        log-completion: true
+        enabled: ${AI_OBSERVATIONS_ENABLED:false}
+        log-prompt: ${AI_LOG_PROMPT:false}
+        log-completion: ${AI_LOG_COMPLETION:false}
     retry:
-      max-attempts: 5
-      initial-interval: 3000
+      max-attempts: 3
+      initial-interval: 1s
       multiplier: 2
 
   # H2 文件型数据库（数据持久化到 ./data/chat-memory.mv.db）
@@ -82,7 +74,7 @@ spring:
   # H2 控制台（调试用）
   h2:
     console:
-      enabled: true
+      enabled: false
       path: /h2-console
 
 # SiliconFlow 嵌入模型配置（用于 VectorStoreChatMemoryAdvisor）
@@ -103,29 +95,42 @@ siliconflow:
 
 # 知识库配置
 knowledge-base:
-  # 知识库路径列表，支持类路径（classpath:）和文件系统路径（file:）
-  # 可以通过环境变量 KNOWLEDGE_BASE_PATHS 覆盖，多个路径用逗号分隔
-  # 例如：
-  #   KNOWLEDGE_BASE_PATHS=classpath:knowledge-base/*.md,file:/opt/knowledge/*.md
-  #   - classpath:knowledge-base/*.md
-  #   - file:/opt/knowledge/*.md
-  #   - file:/Users/xxx/Documents/knowledge/**/*.md
   paths: ${KNOWLEDGE_BASE_PATHS:classpath:knowledge-base/*.md}
+  fail-fast: ${KNOWLEDGE_BASE_FAIL_FAST:false}
 
-# 确保 observation 开启
 management:
   observations:
-    enabled: true
+    enabled: ${AI_OBSERVATIONS_ENABLED:false}
   tracing:
     sampling:
-      probability: 1.0
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.0}
 
 app:
-  # LLM Provider 开关：openai 或 anthropic
   llm:
     provider: ${LLM_PROVIDER:openai}
   api:
-    base-url: http://localhost:${server.port:8080}
+    base-url: ${API_BASE_URL:http://localhost:${server.port:8080}}
+  ai:
+    rag:
+      enabled: ${RAG_ENABLED:false}
+    vector-memory:
+      enabled: ${VECTOR_MEMORY_ENABLED:false}
+    log-system-prompt: ${AI_LOG_SYSTEM_PROMPT:false}
+    stream-timeout-ms: ${AI_STREAM_TIMEOUT_MS:180000}
+    http:
+      connect-timeout: ${AI_HTTP_CONNECT_TIMEOUT:30s}
+      read-timeout: ${AI_HTTP_READ_TIMEOUT:120s}
+    vector-store:
+      knowledge-file: ${KNOWLEDGE_VECTOR_STORE_FILE:./data/vector-store.json}
+      chat-memory-file: ${CHAT_MEMORY_VECTOR_STORE_FILE:./data/chat-memory-vector-store.json}
+      knowledge-table: ${KNOWLEDGE_VECTOR_TABLE:vector_store}
+      chat-memory-table: ${CHAT_MEMORY_VECTOR_TABLE:chat_memory_vector_store}
+      distance-type: ${VECTOR_DISTANCE_TYPE:COSINE_DISTANCE}
+      index-type: ${VECTOR_INDEX_TYPE:HNSW}
+      dimensions: ${SILICONFLOW_DIMENSIONS:1024}
+  internal-http:
+    connect-timeout: ${INTERNAL_HTTP_CONNECT_TIMEOUT:5s}
+    read-timeout: ${INTERNAL_HTTP_READ_TIMEOUT:15s}
 
 # 视觉模型配置（火山方舟/豆包视觉）
 vision:
@@ -151,9 +156,5 @@ springdoc:
 
 logging:
   level:
-    com.example.demo: DEBUG
-    org.springframework.ai: DEBUG
-    org.springframework.ai.chat.client.observation: DEBUG
-    org.springframework.ai.chat.client.ChatClient: DEBUG
-    org.springframework.ai.chat.observation: DEBUG
-    org.springframework.ai.model.chat.observation: DEBUG
+    com.example.demo: ${APP_LOG_LEVEL:INFO}
+    org.springframework.ai: ${SPRING_AI_LOG_LEVEL:INFO}

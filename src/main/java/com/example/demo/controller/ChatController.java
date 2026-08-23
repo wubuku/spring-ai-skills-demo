@@ -3,17 +3,16 @@ package com.example.demo.controller;
 import com.example.demo.model.ChatMessage;
 import com.example.demo.service.AgentService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
+import reactor.core.Disposable;
 import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -23,10 +22,16 @@ public class ChatController {
 
     private final AgentService agentService;
     private final ObjectMapper objectMapper;
+    private final long streamTimeoutMs;
 
-    public ChatController(AgentService agentService, ObjectMapper objectMapper) {
+    public ChatController(
+        AgentService agentService,
+        ObjectMapper objectMapper,
+        @Value("${app.ai.stream-timeout-ms:180000}") long streamTimeoutMs
+    ) {
         this.agentService = agentService;
         this.objectMapper = objectMapper;
+        this.streamTimeoutMs = streamTimeoutMs;
     }
 
     /**
@@ -40,25 +45,12 @@ public class ChatController {
 
     @PostMapping
     public Map<String, String> chat(
-            @RequestBody ChatMessage message,
-            @RequestHeader(value = "Authorization", required = false) String authHeader
+            @Valid @RequestBody ChatMessage message
     ) {
-        // 提取 JWT Token 并设置到 SecurityContext（依赖 INHERITABLETHREADLOCAL 自动传递到子线程）
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String jwt = authHeader.substring(7);
-            UsernamePasswordAuthenticationToken authentication =
-                new UsernamePasswordAuthenticationToken(
-                    "user",  // principal
-                    jwt,     // credentials - 存储原始 JWT
-                    Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
-                );
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-        }
-
-        // 使用 conversationId 区分不同会话，默认为 "default"
-        String conversationId = message.getConversationId() != null ?
-            message.getConversationId() : "default";
-        String response = agentService.chat(message.getContent(), conversationId);
+        String response = agentService.chat(
+            message.getContent(),
+            message.getConversationId()
+        );
         return Map.of("response", response);
     }
 
@@ -68,29 +60,16 @@ public class ChatController {
             produces = MediaType.TEXT_EVENT_STREAM_VALUE
     )
     public SseEmitter chatStream(
-            @RequestBody ChatMessage message,
-            @RequestHeader(value = "Authorization", required = false) String authHeader
+            @Valid @RequestBody ChatMessage message
     ) {
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String jwt = authHeader.substring(7);
-            UsernamePasswordAuthenticationToken authentication =
-                new UsernamePasswordAuthenticationToken(
-                    "user",
-                    jwt,
-                    Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
-                );
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-        }
+        SseEmitter emitter = new SseEmitter(streamTimeoutMs);
 
-        String conversationId = message.getConversationId() != null ?
-            message.getConversationId() : "default";
+        Flux<String> tokenFlux = agentService.streamChat(
+            message.getContent(),
+            message.getConversationId()
+        );
 
-        SseEmitter emitter = new SseEmitter(0L);
-
-        Flux<String> tokenFlux = agentService.streamChat(message.getContent(), conversationId);
-
-        // 使用 Reactor 的 Schedulers.boundedElastic() 在独立线程中订阅 Flux
-        tokenFlux
+        Disposable subscription = tokenFlux
             .subscribeOn(Schedulers.boundedElastic())
             .subscribe(
                 token -> {
@@ -116,8 +95,12 @@ public class ChatController {
                 }
             );
 
-        emitter.onTimeout(() -> emitter.complete());
-        emitter.onError(e -> emitter.complete());
+        emitter.onCompletion(subscription::dispose);
+        emitter.onTimeout(() -> {
+            subscription.dispose();
+            emitter.complete();
+        });
+        emitter.onError(e -> subscription.dispose());
 
         return emitter;
     }

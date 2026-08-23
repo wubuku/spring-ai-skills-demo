@@ -20,7 +20,8 @@ cp .env.example .env
 set -a && source .env && set +a
 ```
 
-如果本机没有 PostgreSQL，显式选择 H2 和 `SimpleVectorStore`：
+直接运行 Maven 且未指定 profile 时使用 H2；如果本机没有 PostgreSQL，也可以显式选择
+非 PostgreSQL profile：
 
 ```bash
 SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
@@ -111,7 +112,9 @@ curl -s -X POST http://localhost:8080/api/chat \
   -d '{"content":"你记得我叫什么名字吗？","conversationId":"memory-demo-001"}'
 ```
 
-非 PostgreSQL profile 的 JDBC 数据位于 `./data/chat-memory.mv.db`。PostgreSQL profile 使用数据库中的 Chat Memory schema。
+非 PostgreSQL profile 的 JDBC 数据位于 `./data/chat-memory.mv.db`。PostgreSQL profile
+使用数据库中的 Chat Memory schema。语义向量记忆和知识库向量存储是两个独立的
+VectorStore；分别打开 `VECTOR_MEMORY_ENABLED` 和 `RAG_ENABLED` 后才会使用 Embedding。
 
 ### 语义记忆
 
@@ -225,7 +228,8 @@ python test-e2e-frontend.py
 
 ## Docker
 
-Dockerfile 使用 Amazon Corretto 21，而 Maven 编译目标是 Java 17。Compose 文件仍含有历史注释和默认值，启动前必须核对 profile、数据库和 Embedding URL。
+Dockerfile 使用 Java 17，Compose 默认配置 PostgreSQL profile。启动前仍必须核对
+profile、数据库和 Embedding URL。
 
 ```bash
 docker compose up -d --build
@@ -234,7 +238,9 @@ docker compose ps
 docker compose down
 ```
 
-当前应用根配置显式激活 `postgresql`，而 Compose 中 PostgreSQL 服务和应用的 PostgreSQL 环境变量仍是注释状态；因此不能把 `docker compose up` 直接当作已验证的默认启动方式。若使用 PostgreSQL，请同时提供数据库服务、`SPRING_PROFILES_ACTIVE=postgresql`、JDBC URL、用户名、密码和 `vector` 扩展，并按 [配置参考](configuration.md) 核对实际生效配置。
+根配置不自动激活 profile；`dev.sh` 和 Compose 默认使用 PostgreSQL profile。若使用
+Docker Compose，请同时确认数据库服务、`SPRING_PROFILES_ACTIVE=postgresql`、JDBC URL、
+用户名、密码和 `vector` 扩展，并按 [配置参考](configuration.md) 核对实际生效配置。
 
 仅使用 Dockerfile 时，至少需要显式传入模型配置：
 

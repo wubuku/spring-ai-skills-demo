@@ -49,14 +49,14 @@ spring-ai-agent-utils/spring-ai-agent-utils/
 | 项目 | `spring-ai-agent-utils` `v0.10.0` | 当前项目 |
 |---|---:|---:|
 | Java 编译目标 | 17 | 17 |
-| Spring AI | 2.0.0 | 1.1.2 |
-| Spring Framework | 7.0.8 | 由 Spring Boot 3.4.2 管理 |
+| Spring AI | 2.0.0 | 1.1.8 |
+| Spring Framework | 7.0.8 | 由 Spring Boot 3.5.16 管理 |
 | 发布阶段 | 0.x 正式版本 | 示例项目当前生产/演示链路 |
 | 依赖关系 | 上游独立多模块仓库 | 不依赖社区库 |
 
 社区库 `v0.10.0` 是当前审计时的最新正式 release；上游 `main` 的快照开发不能作为
 当前项目的可复现生产基线。即使两边都使用 Java 17，Spring AI 2.0 与本项目 Spring AI
-1.1.2 的 API、Spring Boot 兼容矩阵和工具调用行为仍不能直接假定兼容。
+1.1.8 的 API、Spring Boot 兼容矩阵和工具调用行为仍不能直接假定兼容。
 
 ## `SkillsTool` 实际做了什么
 
@@ -176,7 +176,7 @@ links:
 | URL/方法校验 | 无业务白名单 | Java/AG-UI/浏览器多处校验 | 社区库不能替代 |
 | 认证透传与人工确认 | 无 | AG-UI 浏览器 Token 和写操作确认 | 社区库不能替代 |
 | 可复用 SkillsJar | 有 builder 和 JAR 扫描思路 | 尚未抽象 SkillProvider | 应作为 P1 参考 |
-| Spring AI 兼容基线 | 2.0.0 | 1.1.2 | 不能直接混用 |
+| Spring AI 兼容基线 | 2.0.0 | 1.1.8 | 不能直接混用 |
 
 ## 质量判断
 
@@ -217,7 +217,7 @@ links:
 4. `readSkillReference` 的受限读取；
 5. 普通 `AgentService` 与 AG-UI/CopilotKit 的双工具边界；
 6. 浏览器认证 Token、写操作确认和前端 URL 校验；
-7. Spring Boot 3.4.2 / Spring AI 1.1.2 到上游 2.0 基线的兼容迁移。
+7. Spring Boot 3.5.16 / Spring AI 1.1.8 到上游 2.0 基线的兼容迁移。
 
 短期收益主要是资源扫描和现成测试；短期代价是主版本升级、格式迁移和安全边界
 重写，收益不足以覆盖风险。

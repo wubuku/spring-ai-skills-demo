@@ -41,7 +41,16 @@
   -> 商品/PetStore API
 ```
 
-`AgentService` 每轮清理已加载 Skill 状态。普通会话使用 `MessageWindowChatMemory` 保存最近窗口，并可叠加 JDBC 记忆、语义记忆和知识库检索。该链路注册完整 `SkillTools`：`httpRequest` 在 Java 端执行请求，`buildHttpRequest` 只构建供确认流程使用的请求元数据；二者都不应被描述成 AG-UI 浏览器工具。
+`AgentService` 每个请求创建独立的 `SkillLoadSession`，通过 Spring AI
+`ToolContext` 传递 Skill 状态和已验证 bearer token，不依赖单例 Bean 的全局加载列表。
+普通会话使用 `MessageWindowChatMemory` 保存最近窗口，并可按配置叠加 JDBC 记忆、语义记忆
+和知识库检索。该链路注册完整 `SkillTools`：`httpRequest` 只执行已登记的 GET，
+`buildHttpRequest` 只构建经校验的写操作请求元数据；二者都不应被描述成 AG-UI 浏览器工具。
+
+Advisor 顺序固定为：Skills -> JDBC 短期记忆 -> 可选语义记忆 -> 可选 RAG ->
+`ToolCallAdvisor`。这样检索上下文和会话消息在工具循环外构造，避免真实
+OpenAI-compatible provider 返回 `content=null` 的中间 tool-call 消息触发 JDBC schema
+错误。
 
 知识库 RAG 当前只接入这条普通链路：`AgentService` 注册了 `QuestionAnswerAdvisor` 和 `VectorStoreChatMemoryAdvisor`。下方 AG-UI 的 `AgUiConfig` 只注册 `SkillsAdvisor` 与 `MessageChatMemoryAdvisor`，所以 Next.js/CopilotKit 链路当前不能自动获得同等的知识库检索能力。
 
@@ -75,7 +84,7 @@ AG-UI 模式下，后端只注册：
 
 `SpringAIAgent` 关闭 Spring AI 内部工具执行，手动执行已注册后端工具；遇到前端工具时结束当前 SSE run，等待前端 `respond()` 触发下一轮。该逻辑还包含：
 
-- `JsonArgToolCallback`：适配 Spring AI 1.1.2 方法参数 JSON 反序列化问题。
+- `JsonArgToolCallback`：兼容 AG-UI 前端工具 schema 的 JSON 参数边界。
 - 工具名称去重，避免前后端同时注册同名工具。
 - `maxToolCalls=5`：限制推理模型造成的工具循环。
 - URL 校验：不接受未出现在 Skill API index 中的业务端点。
@@ -116,7 +125,10 @@ Level 3: 读取 OpenAPI Skill references 下的资源/操作/schema 文档
 | 转写 | 独立 OpenAI-compatible/转写模型，通过 `/api/transcribe/stream` 使用 |
 | LLM | `openai`、`anthropic`、`minimax` 条件化 ChatModel |
 
-根 `application.yml` 当前将 `spring.profiles.active` 设置为 `postgresql`。非 PostgreSQL profile 才启用 H2 文件数据库和 `SimpleVectorStore`，这点必须与 Docker Compose 的历史注释区分。
+根 `application.yml` 不设置 `spring.profiles.active`。直接 Maven 启动默认使用 H2；
+`dev.sh` 在未覆盖时默认注入 `postgresql`。非 PostgreSQL profile 使用 H2 和
+`SimpleVectorStore`，PostgreSQL profile 使用 JDBC Chat Memory 和两个命名的
+`PgVectorStore`。
 
 关于“知识库文档”和“运行时 Skills”应如何选择、扩展及与 Spring AI 2.0 原生能力对照，见 [知识库与运行时 Skills](knowledge-and-skills.md)。
 
@@ -125,10 +137,11 @@ Level 3: 读取 OpenAPI Skill references 下的资源/操作/schema 文档
 认证是 Demo 机制：
 
 - 用户写死在 `AuthService`。
-- 登录 API 返回 Base64 编码的 `username:displayName`，例如 `user1:张三`。
-- 前端和多数测试脚本生成 Base64 编码的 `username:password`，例如 `user1:password1`。
-- 当前 `validateToken()` 只检查第一段用户名是否存在，不校验第二段，因此两种载荷都可能通过；这不提供签名、过期或密码完整性保障。
+- 登录 API 返回 Base64 编码的 `username:password`，例如 `user1:password1`。
+- `validateToken()` 会校验用户名和密码；错误密码、篡改第二段或未知用户会被拒绝。
+- 该 Token 仍不提供签名、过期或可靠的完整性保护。
 - 前端存储在 `localStorage`。
-- `AuthFilter`、`SecurityContextHolder`、`UserContextHolder` 和 Reactor hook 负责异步透传。
+- 普通 Agent 从当前已验证的 `SecurityContext` 复制 token 到 `ToolContext`；
+  AG-UI 链路仍保留自己的异步上下文兼容逻辑。
 
 不要在文档或新代码中把该 Token 称为生产 JWT。修改认证时同时审阅普通聊天、AG-UI SSE、前端 BFF 和浏览器工具路径。

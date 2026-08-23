@@ -16,7 +16,8 @@ rg -n 'profiles:|SPRING_PROFILES_ACTIVE|datasource|pgvector' \
   src/main/resources/application*.yml
 ```
 
-根 `application.yml` 当前激活 `postgresql`。如果只是本地编译或 H2 运行：
+根 `application.yml` 不自动激活 profile。直接 Maven 启动默认使用 H2；如果需要显式
+选择 H2 运行：
 
 ```bash
 SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests

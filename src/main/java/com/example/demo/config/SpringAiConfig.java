@@ -1,10 +1,6 @@
 package com.example.demo.config;
 
 import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
-import okhttp3.*;
-import okio.Buffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.anthropic.AnthropicChatModel;
@@ -22,18 +18,18 @@ import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.io.InputStream;
-import java.util.Collections;
-import java.util.List;
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -44,10 +40,8 @@ import java.util.concurrent.TimeUnit;
  * - openai: 使用 OpenAI API 兼容模型 (如 DeepSeek)
  * - anthropic: 使用 Anthropic API 兼容模型 (如 MiniMax)
  *
- * 注意：
- * 1. OkHttp 用于同步 REST 调用（/api/chat）
- * 2. WebClient 用于 SSE 流式调用（/api/agui）
- * 3. 代理是可选的 - 如果设置了 -Dhttp.proxyHost 和 -Dhttp.proxyPort 则启用
+ * 同步 Spring AI 调用使用 JDK HttpClient，重试由 Spring AI 模型层负责。
+ * OkHttp Bean 仅供流式语音转写服务使用，不注册传输层重试或响应体日志。
  */
 @Configuration
 public class SpringAiConfig {
@@ -116,79 +110,29 @@ public class SpringAiConfig {
     private String transcriptionModelName;
 
     @Bean
-    @Primary
     public OkHttpClient okHttpClient() {
-        //
-        // Fixme: 反模式。OkHttp 应该只做传输，retry 放业务层。
-        //
         return new OkHttpClient.Builder()
-                .retryOnConnectionFailure(true)
+                .retryOnConnectionFailure(false)
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
-                .protocols(Collections.singletonList(okhttp3.Protocol.HTTP_1_1))
-                .addInterceptor(chain -> {
-                    Request request = chain.request();
-                    // 这条日志出现就证明请求走的是 OkHttp
-                    System.out.println("[OkHttp] --> " + request.url());
-
-                    // 重试逻辑：处理 DeepSeek API 的间歇性 EOF 错误
-                    int maxRetries = 3;
-                    Exception lastException = null;
-
-                    // 预先缓存请求体，以便重试
-                    byte[] requestBodyBytes = null;
-                    if (request.body() != null) {
-                        Buffer buffer = new Buffer();
-                        try {
-                            request.body().writeTo(buffer);
-                            requestBodyBytes = buffer.readByteArray();
-                        } catch (Exception e) {
-                            // ignore
-                        }
-                    }
-
-                    for (int i = 0; i <= maxRetries; i++) {
-                        try {
-                            // 构建请求
-                            Request retryRequest = request;
-                            if (i > 0 && requestBodyBytes != null) {
-                                retryRequest = request.newBuilder()
-                                    .post(RequestBody.create(request.body().contentType(), requestBodyBytes))
-                                    .build();
-                            }
-
-                            Response response = chain.proceed(retryRequest);
-                            System.out.println("[OkHttp] <-- " + response.code()
-                                    + " Content-Encoding:" + response.header("Content-Encoding")
-                                    + " Transfer-Encoding:" + response.header("Transfer-Encoding"));
-
-                            // 尝试读取并缓冲响应体，如果失败则重试
-                            String responseBody = response.body().string();
-                            System.out.println("[OkHttp] Response body length: " + responseBody.length());
-
-                            // 返回新的响应（使用缓冲的 body）
-                            return response.newBuilder()
-                                .body(ResponseBody.create(response.body().contentType(), responseBody))
-                                .build();
-                        } catch (java.io.EOFException e) {
-                            lastException = e;
-                            System.out.println("[OkHttp] EOFException on attempt " + (i + 1) + "/" + (maxRetries + 1));
-                            if (i < maxRetries) {
-                                try { Thread.sleep(1000 * (i + 1)); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                            }
-                        }
-                    }
-                    throw new RuntimeException("OkHttp retry exhausted", lastException);
-                })
                 .build();
     }
 
     @Bean
     @Primary
-    @SuppressWarnings("deprecation")
-    public ClientHttpRequestFactory clientHttpRequestFactory(OkHttpClient okHttpClient) {
-        return new org.springframework.http.client.OkHttp3ClientHttpRequestFactory(okHttpClient);
+    public ClientHttpRequestFactory clientHttpRequestFactory(
+        @Value("${app.ai.http.connect-timeout:30s}") Duration connectTimeout,
+        @Value("${app.ai.http.read-timeout:120s}") Duration readTimeout
+    ) {
+        HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(connectTimeout)
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build();
+        JdkClientHttpRequestFactory requestFactory =
+            new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(readTimeout);
+        return requestFactory;
     }
 
     @Bean
@@ -307,33 +251,6 @@ public class SpringAiConfig {
         throw new IllegalStateException(
             "No ChatModel configured for provider: " + provider + 
             ". Set app.llm.provider to 'openai', 'anthropic', or 'minimax'.");
-    }
-
-    /**
-     * ChatClient Bean - 自动选择可用的 ChatModel
-     */
-    @Bean
-    @ConditionalOnMissingBean(ChatClient.class)
-    public ChatClient chatClient(List<ChatModel> chatModels) {
-        List<ChatModel> availableModels = chatModels.stream()
-                .filter(model -> model != null)
-                .toList();
-
-        if (availableModels.isEmpty()) {
-            log.warn("""
-                No ChatModel configured. LLM features disabled.
-                Configure spring.ai.openai.api-key or spring.ai.anthropic.api-key.
-                Set app.llm.provider to 'openai' or 'anthropic'.
-                """);
-            return ChatClient.create(invocation -> {
-                throw new IllegalStateException(
-                    "ChatClient not configured. Set app.llm.provider to 'openai' or 'anthropic'.");
-            });
-        }
-
-        ChatModel chatModel = availableModels.get(0);
-        log.info("Creating ChatClient with model: {}", chatModel.getClass().getSimpleName());
-        return ChatClient.create(chatModel);
     }
 
     /**
@@ -540,10 +457,10 @@ public class SpringAiConfig {
                     }
 
                     String responseBody = responseBuilder.toString();
-                    log.info("GLM-ASR 响应体: {}", responseBody);
+                    log.debug("GLM-ASR 响应体长度: {}", responseBody.length());
 
                     if (responseCode >= 400) {
-                        return "【语音转写失败】HTTP " + responseCode + ": " + responseBody;
+                        return "【语音转写失败】远程服务返回 HTTP " + responseCode;
                     }
 
                     // 解析 JSON 响应

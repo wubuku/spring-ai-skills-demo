@@ -1,9 +1,6 @@
 # Spring AI Skills Demo - Docker Compose 配置
-# 支持两种部署模式：
-# 1. 默认模式（H2 数据库）：适合快速体验和开发测试
-# 2. PostgreSQL 模式：适合生产环境，需要外部 PostgreSQL 数据库
-
-version: '3.8'
+# 默认使用 H2；PostgreSQL 模式通过 SPRING_PROFILES_ACTIVE=postgresql 和
+# SPRING_DATASOURCE_* 显式启用。
 
 services:
   # Java 后端服务
@@ -28,11 +25,14 @@ services:
       # LLM Provider 选择（openai 或 anthropic）
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       
-      # SiliconFlow 嵌入模型配置（用于向量记忆）
+      # RAG / 向量记忆默认关闭；启用时必须配置 SiliconFlow
+      - RAG_ENABLED=${RAG_ENABLED:-false}
+      - VECTOR_MEMORY_ENABLED=${VECTOR_MEMORY_ENABLED:-false}
       - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY:-}
-      - SILICONFLOW_URL=${SILICONFLOW_URL:-https://api.siliconflow.cn/v1}
+      - SILICONFLOW_URL=${SILICONFLOW_URL:-https://api.siliconflow.cn}
       - SILICONFLOW_MODEL=${SILICONFLOW_MODEL:-BAAI/bge-m3}
       - SILICONFLOW_DIMENSIONS=${SILICONFLOW_DIMENSIONS:-1024}
+      - SILICONFLOW_DIMENSIONS_ENABLED=${SILICONFLOW_DIMENSIONS_ENABLED:-false}
       
       # 视觉模型配置（可选）
       - VISION_BASE_URL=${VISION_BASE_URL:-}
@@ -44,10 +44,7 @@ services:
       - TRANSCRIPTION_API_KEY=${TRANSCRIPTION_API_KEY:-}
       - TRANSCRIPTION_MODEL=${TRANSCRIPTION_MODEL:-}
       
-      # 确认模式配置
-      - APP_CONFIRM_BEFORE_MUTATE=${APP_CONFIRM_BEFORE_MUTATE:-false}
-      
-      # 数据库配置（默认使用 H2，如果使用 PostgreSQL 请取消下面的注释并配置）
+      # 数据库配置（默认使用 H2；PostgreSQL 模式取消注释）
       # - SPRING_PROFILES_ACTIVE=postgresql
       # - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/spring-ai-skills-demo}
       # - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER:-postgres}
@@ -57,20 +54,20 @@ services:
       - ./data:/app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/products"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
 
-  # PostgreSQL 数据库服务（可选，取消注释以启用）
+  # PostgreSQL + pgvector 服务（可选，取消注释以启用）
   # postgres:
-  #   image: postgres:16-alpine
+  #   image: pgvector/pgvector:pg17
   #   container_name: spring-ai-postgres
   #   environment:
   #     - POSTGRES_DB=spring-ai-skills-demo
   #     - POSTGRES_USER=${POSTGRES_USER:-postgres}
-  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
   #   ports:
   #     - "5432:5432"
   #   volumes:
@@ -82,6 +79,6 @@ services:
   #     timeout: 5s
   #     retries: 5
 
-# 数据卷定义（用于 PostgreSQL 模式）
+# PostgreSQL 模式还需取消注释此数据卷。
 # volumes:
 #   postgres_data:

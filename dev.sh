@@ -86,6 +86,26 @@ wait_for_http() {
   return 1
 }
 
+run_detached() {
+  local log_file="$1"
+  shift
+
+  if command -v setsid >/dev/null 2>&1; then
+    nohup setsid "$@" >"$log_file" 2>&1 < /dev/null &
+  elif command -v perl >/dev/null 2>&1; then
+    nohup perl -MPOSIX -e '
+      my $sid = POSIX::setsid();
+      die "setsid failed: $!" unless defined($sid) && $sid > 0;
+      exec @ARGV or die "exec failed: $!";
+    ' -- "$@" >"$log_file" 2>&1 < /dev/null &
+  else
+    die "neither setsid nor perl is available to detach development services"
+  fi
+
+  DETACHED_PID="$!"
+  disown "$DETACHED_PID" 2>/dev/null || true
+}
+
 load_env() {
   local env_file="$ROOT_DIR/.env"
   [[ -f "$env_file" ]] || die "missing $env_file; create it from .env.example first"
@@ -119,9 +139,9 @@ start_backend() {
 
   (
     cd "$ROOT_DIR"
-    nohup env SERVER_PORT="$BACKEND_PORT" \
-      mvn spring-boot:run -DskipTests >"$BACKEND_LOG" 2>&1 < /dev/null &
-    echo "$!" > "$DEV_RUNTIME_DIR/backend.pid"
+    run_detached "$BACKEND_LOG" env SERVER_PORT="$BACKEND_PORT" \
+      mvn spring-boot:run -DskipTests
+    echo "$DETACHED_PID" > "$DEV_RUNTIME_DIR/backend.pid"
   )
 
   if ! wait_for_http "http://localhost:$BACKEND_PORT/api/products" 180; then
@@ -145,11 +165,10 @@ start_frontend() {
 
   (
     cd "$ROOT_DIR/frontend"
-    nohup env JAVA_BACKEND_URL="$JAVA_BACKEND_URL" \
+    run_detached "$FRONTEND_LOG" env JAVA_BACKEND_URL="$JAVA_BACKEND_URL" \
       NEXT_PUBLIC_JAVA_BACKEND_URL="$NEXT_PUBLIC_JAVA_BACKEND_URL" \
-      "$ROOT_DIR/frontend/node_modules/.bin/next" dev -p "$FRONTEND_PORT" \
-      >"$FRONTEND_LOG" 2>&1 < /dev/null &
-    echo "$!" > "$DEV_RUNTIME_DIR/frontend.pid"
+      "$ROOT_DIR/frontend/node_modules/.bin/next" dev -p "$FRONTEND_PORT"
+    echo "$DETACHED_PID" > "$DEV_RUNTIME_DIR/frontend.pid"
   )
 
   if ! wait_for_http "http://localhost:$FRONTEND_PORT" 60; then

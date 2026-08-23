@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,9 +46,9 @@ public class AuthService {
     public String login(String username, String password) {
         UserCredential user = USERS.get(username);
         if (user != null && user.getPassword().equals(password)) {
-            // 简单 Token 格式：base64(username:displayName)
-            String tokenData = username + ":" + user.getDisplayName();
-            return Base64.getEncoder().encodeToString(tokenData.getBytes());
+            String tokenData = username + ":" + password;
+            return Base64.getEncoder().encodeToString(
+                tokenData.getBytes(StandardCharsets.UTF_8));
         }
         return null;
     }
@@ -65,15 +66,18 @@ public class AuthService {
                 token = token.substring(7);
             }
 
-            String decoded = new String(Base64.getDecoder().decode(token));
+            String decoded = new String(
+                Base64.getDecoder().decode(token),
+                StandardCharsets.UTF_8
+            );
             String[] parts = decoded.split(":", 2);
             if (parts.length == 2) {
                 String username = parts[0];
-                String displayName = parts[1];
+                String password = parts[1];
 
-                // 验证用户存在
-                if (USERS.containsKey(username)) {
-                    return new AuthUser(username, displayName);
+                UserCredential credential = USERS.get(username);
+                if (credential != null && credential.getPassword().equals(password)) {
+                    return new AuthUser(username, credential.getDisplayName());
                 }
             }
         } catch (Exception e) {

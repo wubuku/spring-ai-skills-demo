@@ -99,7 +99,9 @@ mvn spring-boot:run -DskipTests
 ### 重要运行时边界
 
 - 新增或修改文档通常需要重启应用，当前没有运行时热加载或增量同步接口。
-- 当前加载器把匹配到的文档直接 `vectorStore.add(...)`；持久化向量库在重复启动时可能再次写入相同文档，当前实现没有按 `source` 做去重。
+- 当前加载器为规范化 source 生成稳定 UUID，并写入 `metadata.kind=knowledge`、
+  `source`、文件名等元数据；重复启动同一 source 会复用同一文档 ID。是否覆盖/更新由
+  当前 VectorStore 实现按 ID 处理。
 - 文档内容会进入向量检索和模型上下文，不要放入密钥、内部账号、未脱敏个人信息或不应发送给模型的数据。
 - 知识库只负责提供上下文，不会自动执行退款、创建工单或修改订单。需要执行动作时必须另建 Skill/API 工具边界。
 
@@ -175,8 +177,10 @@ src/main/resources/skills/*/SKILL.md
 截至 **2026-08-23**：
 
 - Spring AI 官方项目页和 GitHub Release 列表的最新稳定版本是 `2.0.1`。
-- Spring AI `1.1.x` 的最新补丁版本是 `1.1.8`；本项目当前使用 Spring Boot `3.4.2` + Spring AI `1.1.2`。
-- Spring AI `2.0.1` 源码基线使用 Spring Boot `4.1.1`，因此本项目不能把 BOM 从 `1.1.2` 直接改成 `2.0.1` 后期待无改动通过。
+- Spring AI `1.1.x` 的最新补丁版本是 `1.1.8`；本项目当前使用 Spring Boot `3.5.16`
+  + Spring AI `1.1.8`。
+- Spring AI `2.0.1` 源码基线使用 Spring Boot `4.1.1`，因此本项目不能把 BOM 从
+  `1.1.8` 直接改成 `2.0.1` 后期待无改动通过。
 - 本节的版本判断应在升级前重新核对官方 [项目页](https://spring.io/projects/spring-ai)、[Release 列表](https://github.com/spring-projects/spring-ai/releases) 和 [升级说明](https://docs.spring.io/spring-ai/reference/upgrade-notes.html)。
 
 ### 三层能力边界
@@ -261,8 +265,8 @@ Spring AI 核心的 [Tool Search Tool](https://docs.spring.io/spring-ai/referenc
 | Skill `links` 图 | 有文档正文可自行描述，但没有对应结构化 API | `SkillMeta.links` + 提示词链路 | 当前项目更强 |
 | API index 和 URL 校验 | 没有业务 API 索引或 URL 白名单 | `SkillRegistry` 建索引，Java/浏览器侧校验 | 当前项目不可替代 |
 | 写操作确认和认证边界 | 不提供业务确认流程；脚本/文件工具边界需自行治理 | AG-UI 浏览器 `httpRequest`、Token 和确认流程已绑定 | 当前项目不可替代 |
-| Spring Boot / Spring AI 版本 | 发布版基于 Spring AI `2.0.0`、Spring Framework `7.0.8` | Spring Boot `3.4.2`、Spring AI `1.1.2` | 不能直接混用 |
-| 可复用包和上游测试 | Maven Central、独立测试和发布流程 | 当前 Skill 代码没有对应单元测试 | 社区库更强 |
+| Spring Boot / Spring AI 版本 | 发布版基于 Spring AI `2.0.0`、Spring Framework `7.0.8` | Spring Boot `3.5.16`、Spring AI `1.1.8` | 不能直接混用 |
+| 可复用包和上游测试 | Maven Central、独立测试和发布流程 | 已有 Registry、reference、工具边界和后端回合测试，但尚未抽象可复用 Skill 包/JAR provider 的独立测试 | 社区库在包复用测试上更强 |
 
 #### 是否值得切换
 
@@ -274,7 +278,7 @@ Spring AI 核心的 [Tool Search Tool](https://docs.spring.io/spring-ai/referenc
 2. 必须保留 `SkillRegistry` 的 API index、路径参数匹配、`/api/agui` 暴露和 URL 校验。
 3. 必须保留 `readSkillReference` 的受限资源读取，不能把业务 API Skill 的 references 自动降级为任意文件读取或 Shell 执行。
 4. 必须继续维护普通 `AgentService` 与 AG-UI/CopilotKit 的双工具边界、前端 Token 和写操作确认。
-5. 还需要先把项目从 Spring Boot `3.4.2` / Spring AI `1.1.2` 升级到社区库的 Spring AI 2.0 基线，并重新验证 AG-UI、工具参数解析和多模型 Provider。
+5. 还需要先把项目从 Spring Boot `3.5.16` / Spring AI `1.1.8` 升级到社区库的 Spring AI 2.0 基线，并重新验证 AG-UI、工具参数解析和多模型 Provider。
 
 因此直接引入后，短期得到的主要是更好的资源扫描和上游测试，短期付出的是主版本升级、Skill 格式迁移和业务安全边界重写；收益不足以覆盖风险。分阶段改进路线见
 [当前项目 SKILL 支持改进规划](drafts/skill-support-improvement-plan.md)。

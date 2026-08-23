@@ -29,7 +29,7 @@ public class ReactorBoundedElasticHookConfig {
 
     @PostConstruct
     public void init() {
-        log.info("[ReactorBoundedElasticHookConfig] Registering boundedElastic schedule hook for user context");
+        log.debug("Registering AG-UI boundedElastic user-context hook");
 
         Function<Runnable, Runnable> decorator = runnable -> {
             // 在提交任务的线程里 capture 需要的上下文
@@ -42,8 +42,7 @@ public class ReactorBoundedElasticHookConfig {
             token = UserContextHolder.getToken();
             username = UserContextHolder.getUsername();
 
-            // [STEP3] 记录捕获阶段的上下文
-            log.info("[STEP3] hook capture on thread={}, capturedToken={}, capturedUsername={}",
+            log.debug("AG-UI context captured: thread={}, tokenPresent={}, username={}",
                     Thread.currentThread().getName(),
                     token != null ? "present" : "null",
                     username);
@@ -52,7 +51,7 @@ public class ReactorBoundedElasticHookConfig {
             if (token == null) {
                 try {
                     Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-                    log.info("[ReactorBoundedElasticHookConfig] SecurityContext authentication: {}, authenticated: {}",
+                    log.debug("SecurityContext capture: authClass={}, authenticated={}",
                         auth != null ? auth.getClass().getSimpleName() : "null",
                         auth != null ? auth.isAuthenticated() : false);
 
@@ -74,16 +73,9 @@ public class ReactorBoundedElasticHookConfig {
             final String capturedToken = token;
             final String capturedUsername = username;
 
-            // 始终记录，以便调试
-            log.info("[STEP3] Captured token: {}, username: {}",
-                capturedToken != null ? "present" : "null",
-                capturedUsername);
-
             return () -> {
                 try {
-                    // 这里已经是在 boundedElastic-* 线程
-                    // [STEP3] 记录设置阶段的上下文
-                    log.info("[STEP3] hook set on thread={}, ctxToken={}, ctxUsername={}",
+                    log.debug("AG-UI context installed: thread={}, tokenPresent={}, username={}",
                             Thread.currentThread().getName(),
                             capturedToken != null ? "present" : "null",
                             capturedUsername);
@@ -92,10 +84,6 @@ public class ReactorBoundedElasticHookConfig {
                     // 因为同一个 boundedElastic 线程可能被多个请求复用，必须用当前请求的 token 覆盖
                     if (capturedToken != null) {
                         UserContextHolder.setToken(capturedToken);
-                        log.info("[{}] [Hook] Set user context: username={}, hasToken={}",
-                                Thread.currentThread().getName(),
-                                capturedUsername,
-                                capturedToken != null);
                     }
                     if (capturedUsername != null) {
                         UserContextHolder.setUsername(capturedUsername);
@@ -113,6 +101,6 @@ public class ReactorBoundedElasticHookConfig {
         };
 
         Schedulers.onScheduleHook("AguiBoundedElasticHook", decorator);
-        log.info("[ReactorBoundedElasticHookConfig] BoundedElastic hook registered successfully");
+        log.debug("AG-UI boundedElastic user-context hook registered");
     }
 }

@@ -15,22 +15,26 @@ import java.io.File;
 public class VectorStorePersistenceExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(VectorStorePersistenceExecutor.class);
-    private static final String VECTOR_STORE_FILE = "./data/vector-store.json";
 
     private final VectorStore vectorStore;
+    private final String persistenceFile;
 
-    public VectorStorePersistenceExecutor(VectorStore vectorStore) {
+    public VectorStorePersistenceExecutor(VectorStore vectorStore, String persistenceFile) {
         this.vectorStore = vectorStore;
+        this.persistenceFile = persistenceFile;
     }
 
     @PreDestroy
     public void saveVectorStore() {
         if (vectorStore instanceof SimpleVectorStore) {
             try {
-                File file = new File(VECTOR_STORE_FILE);
-                file.getParentFile().mkdirs();
+                File file = new File(persistenceFile);
+                File parent = file.getParentFile();
+                if (parent != null) {
+                    parent.mkdirs();
+                }
                 ((SimpleVectorStore) vectorStore).save(file);
-                log.info("VectorStore 已保存到: {}", VECTOR_STORE_FILE);
+                log.info("VectorStore 已保存到: {}", persistenceFile);
             } catch (Exception e) {
                 log.error("保存 VectorStore 失败: {}", e.getMessage());
             }

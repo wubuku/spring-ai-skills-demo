@@ -2,6 +2,7 @@ package com.example.demo.agent;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.Resource;
@@ -10,6 +11,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -54,6 +56,8 @@ class SkillReferenceReaderTest {
             .contains("路径非法");
         assertThat(reader.read("swagger-petstore-openapi-3-0", "operations//addPet.md"))
             .contains("路径非法");
+        assertThat(reader.read("swagger-petstore-openapi-3-0", "operations/" + "x".repeat(512)))
+            .contains("路径过长");
         assertThat(reader.read("unknown-skill", "operations/addPet.md"))
             .contains("技能不存在");
     }
@@ -66,7 +70,7 @@ class SkillReferenceReaderTest {
             "http://localhost:8080",
             reader
         );
-        SkillCoreTools agUiTools = new SkillCoreTools(registry, ordinaryTools, reader);
+        SkillCoreTools agUiTools = new SkillCoreTools(registry, reader);
 
         String ordinary = ordinaryTools.readSkillReference(
             "swagger-petstore-openapi-3-0", "operations/addPet.md");
@@ -78,27 +82,32 @@ class SkillReferenceReaderTest {
     }
 
     @Test
-    void recordsEachLoadedSkillOnlyOnceAcrossBothToolAdapters() {
+    void keepsOrdinaryAndAgUiLoadedSkillStateIndependent() {
         SkillTools ordinaryTools = new SkillTools(
             registry,
             new RestTemplate(),
             "http://localhost:8080",
             reader
         );
-        SkillCoreTools agUiTools = new SkillCoreTools(registry, ordinaryTools, reader);
+        SkillCoreTools agUiTools = new SkillCoreTools(registry, reader);
 
-        ordinaryTools.loadSkill("search-products");
-        String ordinaryDuplicate = ordinaryTools.loadSkill("search-products");
-        assertThat(ordinaryTools.getLoadedSkills()).containsExactly("search-products");
+        SkillLoadSession session = new SkillLoadSession();
+        ToolContext context = new ToolContext(Map.of(
+            SkillTools.SKILL_SESSION_CONTEXT_KEY, session
+        ));
+        ordinaryTools.loadSkill("search-products", context);
+        String ordinaryDuplicate = ordinaryTools.loadSkill("search-products", context);
+        assertThat(session.loadedSkills()).containsExactly("search-products");
         assertThat(ordinaryDuplicate).contains("已在本轮加载")
             .contains("不要再次调用 `loadSkill`");
+        assertThat(agUiTools.getLoadedSkills()).isEmpty();
 
-        agUiTools.reset();
         agUiTools.loadSkill("search-products");
         String agUiDuplicate = agUiTools.loadSkill("search-products");
         assertThat(agUiTools.getLoadedSkills()).containsExactly("search-products");
         assertThat(agUiDuplicate).contains("已在本轮加载")
             .contains("不要再次调用 `loadSkill`");
+        assertThat(session.loadedSkills()).containsExactly("search-products");
     }
 
     @Test

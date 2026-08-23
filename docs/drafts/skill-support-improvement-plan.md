@@ -1,6 +1,6 @@
 # 当前项目 SKILL 支持改进规划
 
-> **状态**: P0 已实施并通过离线硬门槛；P1/P2/P3 按本文规划继续推进
+> **状态**: P0 与普通 Agent 的 P1-B 已实施并通过离线硬门槛；P1-C/P2/P3 按本文规划继续推进
 > **目的**: 在不直接替换生产链路的前提下，系统改进当前项目运行时 Skills 的正确性、安全性、可测试性、可发现性和未来迁移能力。
 > **最后核对**: 2026-08-23
 > **规划对应审计**: [Spring AI Community `SkillsTool` 审计报告](../spring-ai-agent-utils-audit.md)
@@ -72,8 +72,9 @@ path: spring-ai-agent-utils/
   `---` 分隔线，校验 `name`、`description`、`links`，保留 `license`、`metadata` 和
   额外 metadata；重复 Skill name 和 API index 冲突会启动失败。
 - `SkillReferenceReader` 将 Level 3 限制在已注册 Skill 的 `references/` 下，拒绝未知
-  Skill、绝对路径、反斜杠、空路径段、`.`、`..`、编码的点号/分隔符和超大资源；读取
-  上限为 64 KiB，模型返回上限为 4000 字符，普通 Agent 与 AG-UI 共用同一实现。
+  Skill、绝对路径、反斜杠、空路径段、`.`、`..`、编码的点号/分隔符、过长路径和超大
+  资源；读取上限为 64 KiB，模型返回上限为 4000 字符，底层资源错误不向模型暴露主机
+  路径，普通 Agent 与 AG-UI 共用同一实现。
 - `SkillRegistry` 建立稳定排序的 API index，集中处理 method、相对路径、查询串、
   fragment、路径参数、绝对 URL、目录跳转和未索引端点校验；路径参数替换后还会再次
   校验最终 URL，防止模板校验被替换值绕过。
@@ -85,8 +86,9 @@ path: spring-ai-agent-utils/
 
 仍未完成的缺口：
 
-- `SkillTools.loadedSkills` 仍是组件字段，尚无真正的请求/运行范围 context 和并发隔离
-  证据；这是 P1-B，不应由当前 P0 测试结果推断已解决。
+- 普通 Agent 已使用每次同步/流式调用独立的 `SkillLoadSession` 和 `ToolContext`，并有
+  单测及 Spring Context 工具回合证据；AG-UI 的 `SkillCoreTools` 仍保留进程级状态，本轮
+  明确不重构或验收该链路。若未来要统一两条链路，需单独设计 run/thread context。
 - 尚未抽象 `SkillSource`/`SkillProvider`，也没有独立 filesystem/classpath/JAR fixture
   测试；这是 P1-C。
 - `SkillsAdvisor` 尚未加入 Level 1/2/3 指标、links 去重/循环保护、能力分类或风险标签；
@@ -133,8 +135,9 @@ git diff --check
 ```
 
 并且测试能够证明：错误 frontmatter 可诊断、非法 references 路径被拒绝、合法
-references 可读取、API index 能区分方法和路径参数。并发请求不会互相污染 loaded state
-属于尚未完成的 P1-B，不在本次 P0 完成声明中。
+references 可读取、API index 能区分方法和路径参数；普通 Agent 的每次同步/流式调用
+使用独立 loaded state，AG-UI 状态仍按本规划的非目标边界单独记录。专门的并发压力测试
+仍是后续测试增强项，不能由当前集成回合替代。
 
 ### 3.4 本次实施记录
 
@@ -150,7 +153,8 @@ references 可读取、API index 能区分方法和路径参数。并发请求�
 | `.env` 一键开发环境 | `dev.sh` | 已完成 |
 | 传统页面真实浏览器验收 | `frontend/tests/traditional-ui-e2e.mjs`、`frontend/package.json` | 已完成 |
 | Embedding provider 参数兼容 | `EmbeddingModelConfig.java`、`application.yml` | 已完成 |
-| 资源 provider/JAR、turn context、指标 | 本文 P1/P2 设计 | 未实施 |
+| 普通 Agent turn context | `SkillLoadSession`、`AgentService`、`SkillToolsTest`、`BackendApiIntegrationTest` | 已完成 |
+| 资源 provider/JAR、指标 | 本文 P1/P2 设计 | 未实施 |
 
 离线硬门槛结果（2026-08-23）：
 
@@ -318,27 +322,27 @@ git diff --check                                      PASS
 - 测试名称描述行为，不只描述实现方法；
 - 任何修复先添加能复现问题的回归测试。
 
-本次已完成 `SkillRegistryTest` 和 `SkillReferenceReaderTest` 的离线基线、前端
-Mock Playwright 的 API index/DOM/网络/访问性断言，以及传统页面真实 Playwright
-E2E；`SkillsAdvisor`、`SkillTools` HTTP 执行和 JAR/fat-JAR 仍按本节矩阵留待 P1 扩展。
+本次已完成 `SkillRegistryTest`、`SkillReferenceReaderTest`、`SkillToolsTest` 和
+`BackendApiIntegrationTest` 的离线基线、前端 Mock Playwright 的 API index/DOM/网络/
+访问性断言，以及传统页面真实 Playwright E2E；独立的 `SkillsAdvisor` 测试和
+JAR/fat-JAR fixture 仍按本节矩阵留待 P1 扩展。
 
 ### P1-B：验证 loaded Skill 状态隔离
 
-**背景**：`SkillTools.loadedSkills` 是 Spring 组件字段，当前通过每次请求前 reset
-维持“本轮状态”。这需要并发证据，而不是只靠代码直觉。
+**背景**：普通 Agent 曾将 `loadedSkills` 放在 Spring 单例字段中；当前普通链路已经改为
+通过每次调用创建的 `SkillLoadSession` 放入 Spring AI `ToolContext`。剩余工作只针对
+AG-UI 的 `SkillCoreTools` 进程级状态和两条链路未来是否需要统一上下文。
 
 **需要验证**：
 
-- 两个普通 `/api/chat` 请求并发时不能看到对方已加载 Skill；
-- 同一 conversation 的同步与 stream 行为一致；
-- AG-UI 请求与普通 Agent 请求互不污染；
-- 工具调用重跑时，本轮 Level 2 内容仍可见；
-- 请求异常、取消和超时后不会把状态留给下一个请求。
+- 为普通 `/api/chat` 增加并发压力测试，证明两个请求不能看到对方已加载 Skill；
+- 为同一 conversation 的同步与 stream 增加一致性测试；
+- AG-UI 请求与普通 Agent 请求的状态隔离仍需单独设计和验收；
+- 为工具调用重跑、请求异常、取消和超时补充生命周期测试。
 
-本次 P0 实施同时修复了同一请求内的重复记录：普通 Agent 与 AG-UI
-共享 `CopyOnWriteArrayList.addIfAbsent` 语义，重复的 Skill 名称不会再次进入
-loaded 列表。跨请求状态隔离仍由请求开始时的 reset 逻辑保证；后续应继续用并发
-和多轮请求测试覆盖这一边界。
+本次实施已为普通 Agent 提供独立 `SkillLoadSession.markLoaded()`，重复 Skill 只在当前
+ToolContext 会话中去重；同步和流式请求均不依赖全局 loaded 列表。AG-UI 仍使用
+`SkillCoreTools` 的既有状态，本轮不把它宣称为已完成的并发隔离。
 
 **推荐默认**：先用请求范围的 `SkillTurnContext` 替代共享 `List`，由
 `SkillTools`/`SkillCoreTools` 委托；如果 Spring request scope 不覆盖异步 Agent
@@ -583,7 +587,7 @@ git -C spring-ai-agent-utils status --short --branch
 | P0 | reference reader 安全 | SkillRegistry name lookup | traversal/size tests 全绿 | 已完成 |
 | P0 | API index/URL 统一 | 先稳定索引模型 | Java/浏览器语义一致 | 已完成 |
 | P1 | deterministic tests | P0 契约 | 不依赖 LLM 可运行 | 已完成最小基线，待扩展 |
-| P1 | turn state isolation | 测试基座 | 并发和异常隔离有证据 | 待实施 |
+| P1 | 普通 Agent turn state isolation | 测试基座 | `ToolContext`/`SkillLoadSession` 和工具回合证据 | 已完成；AG-UI 独立状态仍待后续 |
 | P1 | source/provider abstraction | P0 registry | classpath/filesystem/JAR fixture | 待实施 |
 | P2 | Level 1/2/3 观测与排序 | P1 tests | prompt 和耗时可观测 | 待实施 |
 | P2 | 文档发现链维护 | 当前文档入口 | 从 README/AGENTS 可到达 | 本次已补齐入口，持续维护 |

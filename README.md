@@ -52,7 +52,9 @@ mvn -DskipTests clean package
 mvn spring-boot:run -DskipTests
 ```
 
-当前 `src/main/resources/application.yml` 显式激活 `postgresql` profile。没有 PostgreSQL 时，显式选择非 PostgreSQL profile 使用 H2 和 `SimpleVectorStore`：
+根 `src/main/resources/application.yml` 不自动激活 profile，直接运行 Maven 时使用 H2。
+根目录 `dev.sh` 为了贴合本地数据库开发，会在未覆盖时默认设置 `postgresql` profile。
+没有 PostgreSQL 时，显式选择非 PostgreSQL profile 使用 H2：
 
 ```bash
 SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
@@ -131,19 +133,26 @@ git diff --check
 # 后端编译
 mvn -DskipTests clean package
 
-# Java 测试，可能访问外部 LLM
+# 默认 Java 测试：确定性/Mock，排除 live-llm 和 container
 mvn test
 
 # 前端构建
 cd frontend
+npx tsc --noEmit
 npm run build
+npm run test:skills
+npm run test:e2e:traditional:mock
 ```
 
-专项 Shell、AG-UI、RAG、流式、多模态和 Playwright 验证见 [验证手册](docs/HARNESS.md)。这些测试通常需要后端、`.env`、外部 Provider、PostgreSQL 或测试媒体文件，不能默认视为离线测试。
+真实 provider、PostgreSQL Testcontainers、传统页面真实 LLM E2E，以及专项 Shell
+验证见 [验证手册](docs/HARNESS.md)。真实测试必须在 Mock/构建门槛通过后显式启用。
 
 ## Docker
 
-仓库包含 `Dockerfile` 和 `docker-compose.yml`，但 Compose 中仍保留部分历史的 H2、确认模式和 Embedding 默认值。使用 Docker 前请按 [开发指南](docs/DEVELOPMENT.md) 和 [配置参考](docs/configuration.md) 核对 `SPRING_PROFILES_ACTIVE`、数据库和环境变量，不要把 Compose 注释当作当前应用默认值。
+仓库包含 `Dockerfile` 和 `docker-compose.yml`。当前 Dockerfile 使用 Java 17，
+Compose 默认使用 H2；如需 PostgreSQL，需要按 Compose 文件注释启用 PostgreSQL 服务和
+profile。启动前仍需按 [开发指南](docs/DEVELOPMENT.md) 和
+[配置参考](docs/configuration.md) 提供数据库、Embedding 和模型配置。
 
 ## 文档导航
 

@@ -1,5 +1,9 @@
 package com.example.demo.auth;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -9,7 +13,6 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "*")
 public class AuthController {
 
     private final AuthService authService;
@@ -22,48 +25,56 @@ public class AuthController {
      * 登录
      */
     @PostMapping("/login")
-    public Map<String, Object> login(@RequestBody Map<String, String> credentials) {
-        String username = credentials.get("username");
-        String password = credentials.get("password");
+    public ResponseEntity<Map<String, Object>> login(
+        @Valid @RequestBody LoginRequest credentials
+    ) {
+        String username = credentials.username();
+        String password = credentials.password();
 
         String token = authService.login(username, password);
 
         if (token != null) {
-            AuthService.AuthUser user = new AuthService.AuthUser(username,
-                username.equals("user1") ? "张三" :
-                username.equals("user2") ? "李四" : "管理员");
-            return Map.of(
+            AuthService.AuthUser user = authService.validateToken(token);
+            return ResponseEntity.ok(Map.of(
                 "success", true,
                 "token", token,
                 "username", username,
                 "displayName", user.getDisplayName()
-            );
+            ));
         }
 
-        return Map.of(
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
             "success", false,
             "message", "用户名或密码错误"
-        );
+        ));
     }
 
     /**
      * 验证 Token（用于测试）
      */
     @GetMapping("/verify")
-    public Map<String, Object> verify(@RequestHeader("Authorization") String authHeader) {
+    public ResponseEntity<Map<String, Object>> verify(
+        @RequestHeader(value = "Authorization", required = false) String authHeader
+    ) {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String token = authHeader.substring(7);
             AuthService.AuthUser user = authService.validateToken(token);
 
             if (user != null) {
-                return Map.of(
+                return ResponseEntity.ok(Map.of(
                     "valid", true,
                     "username", user.getUsername(),
                     "displayName", user.getDisplayName()
-                );
+                ));
             }
         }
 
-        return Map.of("valid", false);
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+            .body(Map.of("valid", false));
     }
+
+    public record LoginRequest(
+        @NotBlank(message = "username 不能为空") String username,
+        @NotBlank(message = "password 不能为空") String password
+    ) {}
 }

@@ -12,7 +12,7 @@
 | Git 范围 | `git status --short` | 提交前 | 无 |
 | 后端硬门槛 | `mvn clean compile test-compile` | Java、配置、资源和 Skill | Maven 仓库 |
 | Skills 确定性测试 | `mvn -Dtest='*Skill*Test,*Api*Test' test` | Skill、reference、API index 契约 | Maven 仓库，无 LLM |
-| Maven 测试 | `mvn test` | Java 测试和上下文 | 可能访问外部 LLM |
+| Maven 测试 | `mvn test` | 默认确定性 Java 测试和上下文 | Maven 仓库；排除 live-llm/container |
 | 前端类型检查 | `cd frontend && npx tsc --noEmit` | TypeScript/React | Node 依赖 |
 | 前端构建 | `cd frontend && npm run build` | Next.js、CopilotKit、CSS、TypeScript | Node 依赖和本地 patch |
 | 前端 Skills Mock 验收 | `cd frontend && npm run test:skills` | API index、URL 校验和工具 DOM/网络行为 | Node 依赖、Playwright |
@@ -122,7 +122,8 @@ npm run test:skills
 
 ## Maven 测试的边界
 
-`mvn test` 包含 `@SpringBootTest` 和 DeepSeek/LLM 相关测试，不能在没有凭证、网络或匹配 profile 的环境下视为离线测试。报告结果时区分：
+默认 `mvn test` 通过 Surefire 排除 `live-llm` 和 `container` 标签，不访问真实 LLM、
+PostgreSQL 或 Docker。显式启用真实/容器测试时，报告结果时区分：
 
 - 编译或 Spring ApplicationContext 失败。
 - 外部模型、Embedding、视觉、转写服务失败。

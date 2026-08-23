@@ -520,6 +520,13 @@
         // 认证状态
         let authToken = localStorage.getItem('auth_token');
         let authUsername = localStorage.getItem('auth_username');
+        let conversationId = localStorage.getItem('conversation_id');
+        if (!conversationId) {
+            conversationId = window.crypto && window.crypto.randomUUID
+                ? window.crypto.randomUUID()
+                : 'browser-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+            localStorage.setItem('conversation_id', conversationId);
+        }
 
         // 流式模式状态
         let isStreamMode = localStorage.getItem('stream_mode') === 'true';
@@ -554,9 +561,21 @@
         }
 
         // 页面加载时检查登录状态
-        window.onload = function() {
+        window.onload = async function() {
             if (authToken && authUsername) {
-                updateAuthUI();
+                try {
+                    const response = await fetch('/api/auth/verify', {
+                        headers: { 'Authorization': 'Bearer ' + authToken }
+                    });
+                    const data = await response.json();
+                    if (response.ok && data.valid === true) {
+                        updateAuthUI();
+                    } else {
+                        logout(false);
+                    }
+                } catch (error) {
+                    logout(false);
+                }
             }
         };
 
@@ -603,8 +622,9 @@
                         'Authorization': 'Bearer ' + token
                     }
                 });
+                const data = await response.json();
 
-                if (response.ok) {
+                if (response.ok && data.valid === true) {
                     authToken = token;
                     authUsername = username;
                     localStorage.setItem('auth_token', token);
@@ -622,13 +642,15 @@
             }
         }
 
-        function logout() {
+        function logout(showMessage = true) {
             authToken = null;
             authUsername = null;
             localStorage.removeItem('auth_token');
             localStorage.removeItem('auth_username');
             updateAuthUI();
-            appendMessage('assistant', '已退出登录');
+            if (showMessage) {
+                appendMessage('assistant', '已退出登录');
+            }
         }
 
         // 获取认证头
@@ -640,56 +662,22 @@
             return headers;
         }
 
-        async function sendMessage() {
-            const input = document.getElementById('userInput');
-            const sendBtn = document.getElementById('sendBtn');
-            const messages = document.getElementById('messages');
-            const userMessage = input.value.trim();
-
-            if (!userMessage) return;
-
-            // 显示用户消息
-            appendMessage('user', userMessage);
-            input.value = '';
-            sendBtn.disabled = true;
-
-            // 显示加载中
-            const loadingDiv = appendMessage('assistant', '<span class="loading"></span> 正在思考...');
-
-            try {
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: getAuthHeaders(),
-                    body: JSON.stringify({ content: userMessage })
-                });
-                const data = await response.json();
-                messages.removeChild(loadingDiv);
-
-                // 检测是否包含需要用户确认的操作
-                console.log('[DEBUG] 原始响应:', data.response);
-                const confirmAction = parseConfirmAction(data.response);
-                console.log('[DEBUG] 解析结果:', confirmAction);
-                if (confirmAction) {
-                    showConfirmAction(confirmAction);
-                } else {
-                    appendMessage('assistant', data.response);
-                }
-            } catch (error) {
-                messages.removeChild(loadingDiv);
-                appendMessage('assistant', '抱歉，服务出问题了：' + error.message);
-            } finally {
-                sendBtn.disabled = false;
-                input.focus();
-            }
-        }
-
         function appendMessage(role, content) {
             const messages = document.getElementById('messages');
             const div = document.createElement('div');
             div.className = 'message ' + role;
-            div.innerHTML = content;
+            div.textContent = content;
             messages.appendChild(div);
             messages.scrollTop = messages.scrollHeight;
+            return div;
+        }
+
+        function appendLoadingMessage(text) {
+            const div = appendMessage('assistant', '');
+            const spinner = document.createElement('span');
+            spinner.className = 'loading';
+            div.appendChild(spinner);
+            div.appendChild(document.createTextNode(' ' + text));
             return div;
         }
 
@@ -716,13 +704,20 @@
 
         /** 前端版 httpRequest —— 根据元数据构造并发送 HTTP 请求 */
         async function executeHttpRequest(meta) {
-            let url = meta.url;
+            const method = String(meta.method || '').toUpperCase();
+            if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+                throw new Error('确认操作只允许 HTTP 写方法');
+            }
+            const resolvedUrl = new URL(meta.url, window.location.origin);
+            if (resolvedUrl.origin !== window.location.origin) {
+                throw new Error('拒绝执行跨站请求');
+            }
             // 支持 queryParams 和 params 两种格式
             let queryParams = meta.queryParams || meta.params || {};
 
             if (queryParams && Object.keys(queryParams).length > 0) {
-                const sp = new URLSearchParams(queryParams);
-                url += '?' + sp.toString();
+                Object.entries(queryParams).forEach(([key, value]) =>
+                    resolvedUrl.searchParams.append(key, value));
             }
 
             // 添加认证头
@@ -734,14 +729,14 @@
             }
 
             const opts = {
-                method: meta.method,
+                method: method,
                 headers: headers
             };
             // GET/HEAD 请求不能带 body
-            if (meta.body && !['GET', 'HEAD'].includes(meta.method)) {
+            if (meta.body) {
                 opts.body = JSON.stringify(meta.body);
             }
-            const resp = await fetch(url, opts);
+            const resp = await fetch(resolvedUrl, opts);
             const responseText = await resp.text();
 
             // 调用解释 API
@@ -766,46 +761,6 @@
 
             // 降级：返回原始响应
             return responseText;
-        }
-
-        /** 展示确认操作：说明文本 + 确定/取消按钮 */
-        function showConfirmAction(action) {
-            const messages = document.getElementById('messages');
-            const descHtml = action.description.replace(/\n/g, '<br>');
-            const msgDiv = appendMessage('assistant', descHtml);
-
-            const btnContainer = document.createElement('div');
-            btnContainer.className = 'confirm-buttons';
-
-            const confirmBtn = document.createElement('button');
-            confirmBtn.textContent = '确定';
-            confirmBtn.className = 'confirm-btn';
-            confirmBtn.onclick = async () => {
-                btnContainer.remove();
-                const loading = appendMessage('assistant',
-                    '<span class="loading"></span> 正在执行...');
-                try {
-                    const result = await executeHttpRequest(action.requestMeta);
-                    messages.removeChild(loading);
-                    appendMessage('assistant', '✅ 操作结果：' + result);
-                } catch (e) {
-                    messages.removeChild(loading);
-                    appendMessage('assistant', '❌ 操作失败：' + e.message);
-                }
-            };
-
-            const cancelBtn = document.createElement('button');
-            cancelBtn.textContent = '取消';
-            cancelBtn.className = 'cancel-btn';
-            cancelBtn.onclick = () => {
-                btnContainer.remove();
-                appendMessage('assistant', '已取消该操作。');
-            };
-
-            btnContainer.appendChild(confirmBtn);
-            btnContainer.appendChild(cancelBtn);
-            msgDiv.appendChild(btnContainer);
-            messages.scrollTop = messages.scrollHeight;
         }
 
         // ==================== 多模态支持：图片和语音 ====================
@@ -1127,7 +1082,7 @@
 
         // 同步模式发送消息
         async function sendMessageSync(userMessage, hasAttachments, messages, sendBtn) {
-            const loadingDiv = appendMessage('assistant', '<span class="loading"></span> 正在处理...');
+            const loadingDiv = appendLoadingMessage('正在处理...');
 
             try {
                 let response;
@@ -1139,7 +1094,7 @@
                     if (userMessage) {
                         formData.append('query', userMessage);
                     }
-                    formData.append('conversationId', 'default');
+                    formData.append('conversationId', conversationId);
 
                     selectedImages.forEach(file => {
                         formData.append('image', file);
@@ -1166,12 +1121,15 @@
                     response = await fetch('/api/chat/text', {
                         method: 'POST',
                         headers: getAuthHeaders(),
-                        body: JSON.stringify({ query: userMessage, conversationId: 'default' })
+                        body: JSON.stringify({ query: userMessage, conversationId: conversationId })
                     });
                     data = await response.json();
                 }
 
                 messages.removeChild(loadingDiv);
+                if (!response.ok || typeof data.response !== 'string') {
+                    throw new Error(data.detail || data.title || '请求失败: ' + response.status);
+                }
 
                 // 检测是否包含需要用户确认的操作
                 const confirmAction = parseConfirmAction(data.response);
@@ -1182,7 +1140,9 @@
                 }
 
             } catch (error) {
-                messages.removeChild(loadingDiv);
+                if (loadingDiv.isConnected) {
+                    loadingDiv.remove();
+                }
                 appendMessage('assistant', '抱歉，服务出问题了：' + error.message);
             }
         }
@@ -1213,7 +1173,7 @@
                     if (userMessage) {
                         formData.append('query', userMessage);
                     }
-                    formData.append('conversationId', 'default');
+                    formData.append('conversationId', conversationId);
 
                     selectedImages.forEach(file => {
                         formData.append('image', file);
@@ -1229,7 +1189,7 @@
                     // 纯文本也使用 SSE 端点
                     const formData = new FormData();
                     formData.append('query', userMessage);
-                    formData.append('conversationId', 'default');
+                    formData.append('conversationId', conversationId);
                     headers['Accept'] = 'text/event-stream';
                     body = formData;
                 }
@@ -1299,7 +1259,7 @@
                 }
 
             } catch (error) {
-                messageDiv.innerHTML = '抱歉，服务出问题了：' + error.message;
+                messageDiv.textContent = '抱歉，服务出问题了：' + error.message;
             }
         }
 
@@ -1350,10 +1310,9 @@
         // 显示确认操作（支持自定义消息容器）
         function showConfirmAction(action, messageDiv) {
             const messages = document.getElementById('messages');
-            const descHtml = action.description.replace(/\n/g, '<br>');
 
             if (messageDiv) {
-                messageDiv.innerHTML = descHtml;
+                messageDiv.textContent = action.description;
                 const btnContainer = document.createElement('div');
                 btnContainer.className = 'confirm-buttons';
 
@@ -1362,8 +1321,7 @@
                 confirmBtn.className = 'confirm-btn';
                 confirmBtn.onclick = async () => {
                     btnContainer.remove();
-                    const loading = appendMessage('assistant',
-                        '<span class="loading"></span> 正在执行...');
+                    const loading = appendLoadingMessage('正在执行...');
                     try {
                         const result = await executeHttpRequest(action.requestMeta);
                         messages.removeChild(loading);
@@ -1387,7 +1345,7 @@
                 messageDiv.appendChild(btnContainer);
                 messages.scrollTop = messages.scrollHeight;
             } else {
-                const msgDiv = appendMessage('assistant', descHtml);
+                const msgDiv = appendMessage('assistant', action.description);
                 const btnContainer = document.createElement('div');
                 btnContainer.className = 'confirm-buttons';
 
@@ -1396,8 +1354,7 @@
                 confirmBtn.className = 'confirm-btn';
                 confirmBtn.onclick = async () => {
                     btnContainer.remove();
-                    const loading = appendMessage('assistant',
-                        '<span class="loading"></span> 正在执行...');
+                    const loading = appendLoadingMessage('正在执行...');
                     try {
                         const result = await executeHttpRequest(action.requestMeta);
                         messages.removeChild(loading);

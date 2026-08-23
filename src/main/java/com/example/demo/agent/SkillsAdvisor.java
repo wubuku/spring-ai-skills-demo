@@ -19,11 +19,15 @@ import java.util.stream.Collectors;
 public class SkillsAdvisor implements BaseAdvisor {
 
     private static final Logger log = LoggerFactory.getLogger(SkillsAdvisor.class);
+    public static final String EXECUTION_MODE = "skills.execution-mode";
+    public static final String MODE_BACKEND = "backend";
+    public static final String MODE_FRONTEND = "frontend";
 
     private final SkillRegistry registry;
     private final SkillCoreTools skillCoreTools;
     private final PromptLoader promptLoader;
     private final String apiBaseUrl;
+    private final boolean logSystemPrompt;
 
     /**
      * confirm-before-mutate 配置已移除
@@ -34,11 +38,13 @@ public class SkillsAdvisor implements BaseAdvisor {
      * 同时不依赖 SkillTools 的 HTTP 工具（避免与前端 httpRequest 工具冲突）。
      */
     public SkillsAdvisor(SkillRegistry registry, SkillCoreTools skillCoreTools, PromptLoader promptLoader,
-                         @Value("${app.api.base-url}") String apiBaseUrl) {
+                         @Value("${app.api.base-url}") String apiBaseUrl,
+                         @Value("${app.ai.log-system-prompt:false}") boolean logSystemPrompt) {
         this.registry = registry;
         this.skillCoreTools = skillCoreTools;
         this.promptLoader = promptLoader;
         this.apiBaseUrl = apiBaseUrl;
+        this.logSystemPrompt = logSystemPrompt;
     }
 
     @Override
@@ -49,15 +55,16 @@ public class SkillsAdvisor implements BaseAdvisor {
 
     @Override
     public ChatClientRequest before(ChatClientRequest request, AdvisorChain chain) {
-        String systemPrompt = buildSystemPrompt();
-        log.info("[SkillsAdvisor] 注入系统提示，HTTP工具={}, 技能数量={}",
-                getHttpToolName(),
+        String mode = executionMode(request);
+        String systemPrompt = buildSystemPrompt(mode);
+        log.debug("[SkillsAdvisor] 注入系统提示，mode={}, HTTP工具={}, 技能数量={}",
+                mode,
+                getHttpToolName(mode),
                 registry.all().size());
 
-        // 打印完整系统提示词（用于调试）
-        log.info("========== [完整系统提示词] ==========");
-        log.info(systemPrompt);
-        log.info("==========================================");
+        if (logSystemPrompt && log.isDebugEnabled()) {
+            log.debug("[SkillsAdvisor] 完整系统提示词:\n{}", systemPrompt);
+        }
 
         return request.mutate()
             .prompt(request.prompt().augmentSystemMessage(systemPrompt))
@@ -69,26 +76,22 @@ public class SkillsAdvisor implements BaseAdvisor {
         return response;
     }
 
-    private String buildSystemPrompt() {
+    private String buildSystemPrompt(String mode) {
         String skillList = registry.all().values().stream()
             .map(s -> "- `" + s.getMeta().getName() + "`：" + s.getMeta().getDescription())
             .collect(Collectors.joining("\n"));
 
-        log.info("[SkillsAdvisor] 所有技能列表: {}", registry.all().keySet());
+        log.debug("[SkillsAdvisor] 所有技能列表: {}", registry.all().keySet());
 
-        var loadedSkills = skillCoreTools.getLoadedSkills();
-        String loadedContext = loadedSkills.isEmpty() ? "" :
-            "\n\n## 本轮已加载技能（禁止重复调用）\n"
-            + "以下技能已经在本轮加载。请直接使用对应文档，不要再次调用 `loadSkill`；"
-            + "如果需要执行 API，再调用 `httpRequest`。\n"
-            + loadedSkills.stream()
-                .map(name -> registry.get(name)
-                    .map(s -> "\n### 已激活技能：" + name + "\n" + s.getBody())
-                    .orElse(""))
-                .collect(Collectors.joining());
+        String loadedContext = MODE_FRONTEND.equals(mode)
+            ? buildFrontendLoadedContext()
+            : "";
 
-        String httpToolName = getHttpToolName();
-        String modeRules = promptLoader.getPrompt("prompts/skills-advisor/mode-rules.template");
+        String httpToolName = getHttpToolName(mode);
+        String rulesPath = MODE_BACKEND.equals(mode)
+            ? "prompts/skills-advisor/backend-mode-rules.template"
+            : "prompts/skills-advisor/mode-rules.template";
+        String modeRules = promptLoader.getPrompt(rulesPath);
 
         Map<String, String> placeholders = new HashMap<>();
         placeholders.put("{{SKILL_LIST}}", skillList);
@@ -100,14 +103,27 @@ public class SkillsAdvisor implements BaseAdvisor {
         return promptLoader.getPrompt("prompts/skills-advisor/system-prompt.template", placeholders);
     }
 
-    /**
-     * 返回 HTTP 工具名称
-     *
-     * 历史：原本返回 "buildHttpRequest"（后端工具），但 mode-rules.template 已经统一为前端
-     * "httpRequest"，且 AG-UI 模式下后端 SkillTools 不再注册 HTTP 工具（由 SkillCoreTools 替代），
-     * 因此这里也改为 "httpRequest" 保持一致。
-     */
-    private String getHttpToolName() {
+    private String buildFrontendLoadedContext() {
+        var loadedSkills = skillCoreTools.getLoadedSkills();
+        if (loadedSkills.isEmpty()) {
+            return "";
+        }
+        return "\n\n## 本轮已加载技能（禁止重复调用）\n"
+            + "以下技能已经在本轮加载。请直接使用对应文档，不要再次调用 `loadSkill`；"
+            + "如果需要执行 API，再调用 `httpRequest`。\n"
+            + loadedSkills.stream()
+                .map(name -> registry.get(name)
+                    .map(s -> "\n### 已激活技能：" + name + "\n" + s.getBody())
+                    .orElse(""))
+                .collect(Collectors.joining());
+    }
+
+    private String executionMode(ChatClientRequest request) {
+        Object configuredMode = request.context().get(EXECUTION_MODE);
+        return MODE_BACKEND.equals(configuredMode) ? MODE_BACKEND : MODE_FRONTEND;
+    }
+
+    private String getHttpToolName(String mode) {
         return "httpRequest";
     }
 }

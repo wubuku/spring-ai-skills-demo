@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Pattern;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Reads only files below a registered Skill's {@code references/} directory.
@@ -15,10 +16,12 @@ import java.util.regex.Pattern;
  * a large resource cannot be loaded fully before truncation.
  */
 @Component
+@Slf4j
 public class SkillReferenceReader {
 
     private static final int MAX_READ_BYTES = 64 * 1024;
     private static final int MAX_RESPONSE_CHARS = 4000;
+    private static final int MAX_PATH_LENGTH = 512;
     private static final Pattern VALID_SKILL_NAME = Pattern.compile("[a-z0-9]+(?:-[a-z0-9]+)*");
     private static final Pattern ENCODED_PATH_ESCAPE =
         Pattern.compile("%(?:2e|2f|5c|00)", Pattern.CASE_INSENSITIVE);
@@ -60,7 +63,9 @@ public class SkillReferenceReader {
                 ? content.substring(0, MAX_RESPONSE_CHARS) + "\n...[文件过长已截断]"
                 : content;
         } catch (IOException e) {
-            return "✗ 读取参考文件失败：" + safeMessage(e);
+            log.debug("读取 Skill reference 失败: skill={}, path={}, exception={}",
+                skillName, relativePath, e.getClass().getSimpleName());
+            return "✗ 读取参考文件失败：资源读取异常。";
         }
     }
 
@@ -73,6 +78,9 @@ public class SkillReferenceReader {
         }
         if (relativePath == null || relativePath.isBlank()) {
             return "✗ 读取参考文件失败：路径非法。";
+        }
+        if (relativePath.length() > MAX_PATH_LENGTH) {
+            return "✗ 读取参考文件失败：路径过长。";
         }
         if (relativePath.startsWith("/") || relativePath.startsWith("\\")
             || relativePath.contains("\\") || relativePath.contains("\u0000")
@@ -87,10 +95,5 @@ public class SkillReferenceReader {
             }
         }
         return null;
-    }
-
-    private String safeMessage(Exception exception) {
-        String message = exception.getMessage();
-        return message == null || message.isBlank() ? "资源读取异常" : message;
     }
 }

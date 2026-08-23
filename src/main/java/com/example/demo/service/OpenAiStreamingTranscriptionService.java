@@ -115,8 +115,10 @@ public class OpenAiStreamingTranscriptionService {
         try (Response response = okHttpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 String errorBody = response.body() != null ? response.body().string() : "Unknown error";
-                log.error("Transcription request failed: {} - {}", response.code(), errorBody);
-                emitter.error(new RuntimeException("Transcription request failed: " + response.code() + " - " + errorBody));
+                log.error("Transcription request failed: status={}, responseChars={}",
+                    response.code(), errorBody.length());
+                emitter.error(new RuntimeException(
+                    "Transcription request failed with HTTP " + response.code()));
                 return;
             }
 

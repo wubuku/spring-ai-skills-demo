@@ -23,7 +23,10 @@ import java.util.Map;
  * - 图片理解：使用 visionChatClient 将图片转为文字描述
  * - 语音转写：使用 TranscriptionModel 将语音转为文字
  * - 文字合并：将图片描述、语音转写合并到用户输入
- * - 交给 AgentService.chat() 处理，保留所有现有能力（RAG、Skills等）
+ * - 交给 AgentService 处理，保留所有现有能力（RAG、Skills等）
+ *
+ * 控制器会先把客户端 conversationId 解析为存储层 UUID；本服务只转发该内部 ID，
+ * 避免再次添加用户命名空间。
  */
 @Service
 public class MultimodalAgentService {
@@ -55,7 +58,7 @@ public class MultimodalAgentService {
      * 1. 图片理解 → visionChatClient → 文字描述
      * 2. 语音转写 → TranscriptionModel → 文字
      * 3. 合并所有文字输入
-     * 4. 调用 AgentService.chat() 处理（保留所有能力）
+     * 4. 调用 AgentService 处理（保留所有能力）
      */
     public String chat(String query,
                        String conversationId,
@@ -92,14 +95,14 @@ public class MultimodalAgentService {
         }
 
         // 4. 交给 AgentService 处理（保留所有能力：Skills、RAG、记忆等）
-        return agentService.chat(finalInput, conversationId);
+        return agentService.chatResolved(finalInput, conversationId);
     }
 
     /**
      * 纯文本聊天
      */
     public String chat(String query, String conversationId) {
-        return agentService.chat(query, conversationId);
+        return agentService.chatResolved(query, conversationId);
     }
 
     /**
@@ -134,7 +137,7 @@ public class MultimodalAgentService {
 
         // 场景 4：纯文字
         String finalInput = (query != null && !query.isBlank()) ? query : promptLoader.getLabel("label.no.input", "用户未提供有效输入。");
-        return agentService.streamChat(finalInput, conversationId)
+        return agentService.streamChatResolved(finalInput, conversationId)
                 .map(token -> MultimodalToken.content(token));
     }
 
@@ -257,7 +260,7 @@ public class MultimodalAgentService {
                 .reduce("", String::concat)
                 .flatMapMany(visionDescription -> {
                     String finalInput = buildFinalInput(visionDescription, query);
-                    return agentService.streamChat(finalInput, conversationId)
+                    return agentService.streamChatResolved(finalInput, conversationId)
                             .map(token -> MultimodalToken.content(token));
                 });
 
@@ -283,7 +286,9 @@ public class MultimodalAgentService {
         if (transcriptionModel == null) {
             return Flux.just(MultimodalToken.transcribed(promptLoader.getLabel("label.audio.not.configured", "【语音转写】语音转写功能未配置，无法处理音频。") + "\n\n"))
                     .concatWith(query != null && !query.isBlank()
-                            ? agentService.streamChat(promptLoader.getLabel("label.user.input", "【用户输入】") + query, conversationId)
+                            ? agentService.streamChatResolved(
+                                    promptLoader.getLabel("label.user.input", "【用户输入】") + query,
+                                    conversationId)
                                     .map(token -> MultimodalToken.content(token))
                             : Flux.empty());
         }
@@ -293,7 +298,7 @@ public class MultimodalAgentService {
                 .flatMapMany(transcript -> {
                     String finalInput = promptLoader.getLabel("label.audio.transcribed", "【语音转写】") + transcript + "\n\n"
                             + (query != null && !query.isBlank() ? promptLoader.getLabel("label.user.input", "【用户输入】") + query : "");
-                    return agentService.streamChat(finalInput, conversationId)
+                    return agentService.streamChatResolved(finalInput, conversationId)
                             .map(token -> MultimodalToken.content(token));
                 });
     }
@@ -330,7 +335,7 @@ public class MultimodalAgentService {
                     String finalInput = promptLoader.getLabel("label.image.content", "【图片内容】") + imageDescription + "\n\n"
                             + promptLoader.getLabel("label.audio.transcribed", "【语音转写】") + transcript + "\n\n"
                             + (query != null && !query.isBlank() ? promptLoader.getLabel("label.user.input", "【用户输入】") + query : "");
-                    return agentService.streamChat(finalInput, conversationId)
+                    return agentService.streamChatResolved(finalInput, conversationId)
                             .map(token -> MultimodalToken.content(token));
                 });
 
@@ -341,7 +346,7 @@ public class MultimodalAgentService {
      * 纯文本流式聊天
      */
     public Flux<String> streamChat(String query, String conversationId) {
-        return agentService.streamChat(query, conversationId);
+        return agentService.streamChatResolved(query, conversationId);
     }
 
     /**

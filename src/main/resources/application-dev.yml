@@ -1,6 +1,9 @@
 spring:
   application:
     name: spring-ai-skills-demo
+  h2:
+    console:
+      enabled: true
   ai:
     openai:
       api-key: ${OPENAI_API_KEY}
@@ -12,5 +15,4 @@ spring:
 
 logging:
   level:
-    org.springframework.web.client: DEBUG
-    okhttp3: DEBUG
+    com.example.demo: DEBUG

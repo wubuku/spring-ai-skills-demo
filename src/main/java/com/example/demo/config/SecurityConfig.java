@@ -1,6 +1,7 @@
 package com.example.demo.config;
 
 import com.example.demo.auth.AuthFilter;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -20,6 +21,13 @@ public class SecurityConfig {
 
     public SecurityConfig(AuthFilter authFilter) {
         this.authFilter = authFilter;
+    }
+
+    @Bean
+    public FilterRegistrationBean<AuthFilter> authFilterRegistration(AuthFilter filter) {
+        FilterRegistrationBean<AuthFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     @Bean

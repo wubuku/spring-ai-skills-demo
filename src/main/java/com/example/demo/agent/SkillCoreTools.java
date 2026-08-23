@@ -1,13 +1,12 @@
 package com.example.demo.agent;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 /**
@@ -27,49 +26,37 @@ import java.util.stream.Collectors;
 public class SkillCoreTools {
 
     private final SkillRegistry registry;
-    private final SkillTools skillTools;
     private final SkillReferenceReader referenceReader;
+    private final CopyOnWriteArrayList<String> loadedSkills = new CopyOnWriteArrayList<>();
 
     @Autowired
     public SkillCoreTools(
         SkillRegistry registry,
-        SkillTools skillTools,
         SkillReferenceReader referenceReader
     ) {
         this.registry = registry;
-        this.skillTools = skillTools;
         this.referenceReader = referenceReader;
     }
 
     public void reset() {
-        skillTools.reset();
+        loadedSkills.clear();
     }
 
     public List<String> getLoadedSkills() {
-        return skillTools.getLoadedSkills();
+        return List.copyOf(loadedSkills);
     }
-
-    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     @Tool(description = "加载指定技能的完整操作指令。在使用任何技能前必须先调用此工具。")
     public String loadSkill(
         @ToolParam(description = "技能名称，必须来自 available_skills 列表") String skillName
     ) {
-        // DEBUG: 详细日志
-        System.out.println("[DEBUG] loadSkill 被调用，skillName=" + skillName);
-        System.out.println("[DEBUG] skillName 是否为 null: " + (skillName == null));
-        if (skillName != null) {
-            System.out.println("[DEBUG] skillName 是否为空白: " + skillName.isBlank());
-            System.out.println("[DEBUG] skillName 长度: " + skillName.length());
-        }
-
         if (skillName == null || skillName.isBlank()) {
             return "✗ 错误：skillName 参数不能为空。请提供技能名称，例如 loadSkill('add-to-cart')。可用技能：search-products, get-product-detail, add-to-cart, checkout, view-cart";
         }
         return registry.get(skillName)
             .map(skill -> {
-                boolean alreadyLoaded = skillTools.getLoadedSkills().contains(skillName);
-                skillTools.markSkillLoaded(skillName);
+                boolean alreadyLoaded = loadedSkills.contains(skillName);
+                loadedSkills.addIfAbsent(skillName);
                 String linksHint = skill.getMeta().getLinks() == null ||
                     skill.getMeta().getLinks().isEmpty() ? "" :
                     "\n\n**相关技能（按需加载）：**\n" +

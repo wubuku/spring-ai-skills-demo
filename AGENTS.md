@@ -32,13 +32,14 @@
 以当前源码和 `pom.xml` 为准：
 
 - Java：Maven 编译目标为 17。
-- Spring Boot：3.4.2。
-- Spring AI：1.1.2。
+- Spring Boot：3.5.16。
+- Spring AI：1.1.8。
 - Maven：3.8+。
 - 前端：Next.js 15.1.6、React 19、TypeScript、CopilotKit 1.60.x、Tailwind CSS 3。
 - AG-UI：`ag-ui-4j` 子模块提供核心事件、Spring Server 和 Spring AI 集成源码；部分源码已复制到主仓库 `src/main/java/com/agui/`，且主仓库对 `SpringAIAgent` 有本地修改。
 
-Dockerfile 当前使用 Amazon Corretto 21，并以 `--enable-preview` 启动；这与 Maven 的 Java 17 编译声明不是同一件事。修改 Docker 或 Java 版本时同时检查 `pom.xml`、`Dockerfile` 和 CI/部署命令，不要仅根据其中一处推断最低版本。
+Dockerfile 当前使用 Java 17 的 Amazon Corretto 构建和运行镜像，不启用 preview。修改 Docker
+或 Java 版本时同时检查 `pom.xml`、`Dockerfile` 和 CI/部署命令，不要仅根据其中一处推断最低版本。
 
 ## 目录结构
 
@@ -217,7 +218,8 @@ OPENAI_MODEL=gpt-4o
 
 - 图片理解：`VISION_BASE_URL`、`VISION_API_KEY`、`VISION_MODEL`。
 - 语音转写：`TRANSCRIPTION_BASE_URL`、`TRANSCRIPTION_API_KEY`、`TRANSCRIPTION_MODEL`。
-- 向量记忆/RAG：`SILICONFLOW_API_KEY`、`SILICONFLOW_URL`、`SILICONFLOW_MODEL`；
+- 向量记忆/RAG：`SILICONFLOW_API_KEY`、`SILICONFLOW_URL`、`SILICONFLOW_MODEL`，
+  并显式打开 `VECTOR_MEMORY_ENABLED=true` 或 `RAG_ENABLED=true`；
   `SILICONFLOW_DIMENSIONS` 仅在 provider 支持自定义维度且同时设置
   `SILICONFLOW_DIMENSIONS_ENABLED=true` 时发送。
 
@@ -258,7 +260,9 @@ mvn spring-boot:run -DskipTests
 mvn test
 ```
 
-`mvn test` 当前包含 `@SpringBootTest` 的 DeepSeek/Tools 外部 API 烟测，不是完全离线的单元测试。没有有效 LLM 配置或网络时，优先使用 `mvn -DskipTests clean package` 验证编译和打包。
+默认 `mvn test` 排除 `live-llm` 和 `container` 两个 JUnit 标签，因此不访问真实 LLM、
+PostgreSQL 或 Docker。真实 OpenAI-compatible provider 测试使用
+`RUN_LIVE_LLM_TESTS=true` 显式启用；PostgreSQL profile 测试使用 `container` 标签显式启用。
 
 后端默认端口为 `8080`。应用运行后：
 
@@ -269,10 +273,12 @@ mvn test
 
 ### 数据库与 profile
 
-当前 `src/main/resources/application.yml` 明确设置了 `spring.profiles.active: postgresql`，因此不能再把“H2 是默认运行模式”当作现状。
-
 - `postgresql` profile：PostgreSQL JDBC Chat Memory + PgVectorStore，需要 PostgreSQL、`vector` 扩展及对应凭证。
-- 任意非 `postgresql` profile：基础配置使用文件型 H2 和 `SimpleVectorStore`，向量数据保存到 `./data/vector-store.json`。例如：
+- 直接运行 Maven 且不指定 profile：基础配置使用文件型 H2；如果没有打开向量能力开关，
+  Skills Demo 不要求 Embedding。
+- 任意非 `postgresql` profile：使用文件型 H2 和两个独立的 `SimpleVectorStore`，知识库
+  默认文件为 `./data/vector-store.json`，语义记忆默认文件为
+  `./data/chat-memory-vector-store.json`。例如：
 
 ```bash
 SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
@@ -286,12 +292,13 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
 
 `POST /api/chat` 的 JSON 请求进入 `ChatController`，然后调用 `AgentService`：
 
-1. 清空本轮已加载的技能状态。
-2. 通过 `SkillsAdvisor` 注入技能目录和本轮已经加载的 Skill 内容。
+1. 为本次请求创建独立的 Skill 会话和 ToolContext，并复制已验证的认证信息。
+2. 通过 `SkillsAdvisor` 注入技能目录、本轮已加载 Skill 内容和 backend 工具规则。
 3. 通过 `MessageChatMemoryAdvisor` 读取 JDBC 对话窗口。
-4. 通过 `VectorStoreChatMemoryAdvisor` 注入语义相关历史。
-5. 通过 `QuestionAnswerAdvisor` 查询知识库。
-6. 使用 `SkillTools` 注册的工具执行普通链路工具调用。
+4. 按开关选择性地注入独立的 `VectorStoreChatMemoryAdvisor` 和知识库
+   `QuestionAnswerAdvisor`。
+5. 通过 `ToolCallAdvisor` 驱动 Spring AI 工具回合；记忆/RAG Advisor 的顺序位于工具循环之前。
+6. 使用 `SkillTools` 执行只读 GET，或使用 `buildHttpRequest` 生成写操作确认元数据。
 7. 返回同步文本，或由 `/api/chat/stream` 以 SSE 流式返回。
 
 普通链路的 `AgentService` 使用 `MessageWindowChatMemory(maxMessages=20)`。
@@ -326,7 +333,7 @@ AG-UI 不向模型注册后端 `httpRequest` 或 `buildHttpRequest`。浏览器�
 - 保存前端工具调用/结果到 AG-UI 会话记忆。
 - 限制单次 run 的工具调用次数，当前 `maxToolCalls=5`。
 - 对 `httpRequest` URL 做后端校验，避免模型猜错端点导致循环。
-- 使用 `JsonArgToolCallback` 绕过 Spring AI 1.1.2 的方法参数 JSON 反序列化问题。
+- 使用 `JsonArgToolCallback` 兼容当前 AG-UI 工具参数边界。
 
 AG-UI Agent 的 `MessageWindowChatMemory` 当前只保留最近 4 条消息。不要把它和普通 `AgentService` 的 20 条窗口混为一谈。
 
@@ -388,15 +395,19 @@ AG-UI Agent 的 `MessageWindowChatMemory` 当前只保留最近 4 条消息。�
 这是演示认证，不是生产认证：
 
 - 用户和密码硬编码在 `AuthService`：`user1/password1`、`user2/password2`、`admin/admin123`。
-- 当前 token 是 Base64 编码的两段字符串，不是 JWT，不提供签名、过期时间或可靠的完整性保护。
-- `POST /api/auth/login` 返回的载荷是 `username:displayName`，例如 `user1:张三`。
-- `frontend/components/AuthProvider.tsx` 和多数回归脚本直接生成 `username:password`，例如 `user1:password1`。
-- 当前 `validateToken()` 只检查解码后的第一段用户名是否存在，并不校验第二段内容，因此上述两种格式目前都可能通过验证；这不是可靠的密码校验或 Token 完整性机制。
+- 当前 token 是 Base64 编码的 `username:password` 两段字符串，不是 JWT，不提供签名、
+  过期时间或可靠的完整性保护。
+- `/api/auth/login`、传统页面和测试均使用同一 `username:password` token 契约。
+- `validateToken()` 会校验用户名和密码；错误密码、篡改第二段或未知用户都会被拒绝。
 - 前端把 token 放在 `localStorage`，CopilotKit BFF 和浏览器侧 `httpRequest` 会透传 `Authorization`。
-- `AuthFilter` 将认证放入 `SecurityContextHolder` 和 `UserContextHolder`。
-- `ReactorBoundedElasticHookConfig` 在 Reactor/boundedElastic 线程间传递用户上下文。
+- `AuthFilter` 将认证放入 `SecurityContextHolder`，并通过 FilterRegistrationBean 禁止
+  Servlet 容器和 Security chain 重复执行。
+- 普通 Agent 不依赖 `UserContextHolder` 或隐式线程继承，而是把已验证 token 显式复制到
+  Spring AI `ToolContext`；AG-UI 旧链路仍有自己的异步上下文兼容逻辑。
 
-不要在新代码中把这个 token 称为 JWT，也不要把它作为生产认证方案。修改跨线程认证时，重点检查 `AuthFilter`、`UserContextHolder`、`ReactorBoundedElasticHookConfig`、`AgUiController` 和 `SkillTools.extractJwt()` 的交互。
+不要在新代码中把这个 token 称为 JWT，也不要把它作为生产认证方案。修改认证时，重点检查
+`AuthFilter`、`SecurityConfig`、`AuthController`、普通 Agent 的 `ToolContext` 和 AG-UI
+链路的异步上下文边界。
 
 当前写操作的用户确认主要由 CopilotKit 前端 `useHumanInTheLoop` 实现。`app.confirm-before-mutate` 已不是当前配置项；不要依据旧文档恢复该模式。
 
@@ -406,10 +417,16 @@ AG-UI Agent 的 `MessageWindowChatMemory` 当前只保留最近 4 条消息。�
 - 非 PostgreSQL profile 使用 H2 文件 `./data/chat-memory.mv.db`。
 - `KnowledgeBaseInitializer` 默认加载 `classpath:knowledge-base/*.md`。
 - 可通过 `KNOWLEDGE_BASE_PATHS` 传入逗号分隔的 classpath/file glob。
-- `VectorStoreChatMemoryAdvisor` 提供语义历史检索。
-- `QuestionAnswerAdvisor` 使用同一个 `VectorStore` 做知识库问答。
-- 非 PostgreSQL profile 使用 `SimpleVectorStore`，应用关闭时持久化到 `./data/vector-store.json`。
-- PostgreSQL profile 使用 `PgVectorStore`，表名默认 `vector_store`，维度默认 1024，索引默认 HNSW，距离默认余弦距离。
+- `VectorStoreChatMemoryAdvisor` 仅在 `VECTOR_MEMORY_ENABLED=true` 时启用，并使用独立的
+  `chatMemoryVectorStore`。
+- `QuestionAnswerAdvisor` 仅在 `RAG_ENABLED=true` 时启用，并使用独立的
+  `knowledgeVectorStore`；知识库初始化也只在该开关打开时执行。
+- 非 PostgreSQL profile 使用两个独立的 `SimpleVectorStore`，应用关闭时分别持久化到
+  `./data/vector-store.json` 和 `./data/chat-memory-vector-store.json`。
+- PostgreSQL profile 使用两个独立的 `PgVectorStore`，表名默认 `vector_store` 和
+  `chat_memory_vector_store`，维度默认 1024，索引默认 HNSW，距离默认余弦距离。
+- `KnowledgeBaseInitializer` 使用规范化 source 生成稳定文档 ID，并写入
+  `metadata.kind=knowledge`；重复初始化同一 source 会复用同一 ID。
 
 向量功能依赖嵌入模型。修改 embedding URL 时注意 `SILICONFLOW_URL` 不应带 `/v1`，因为 `OpenAiEmbeddingModel` 会追加路径。
 
@@ -452,8 +469,8 @@ mvn clean compile test-compile
 mvn -Dtest='*Skill*Test,*Api*Test' test
 ```
 
-`mvn test` 还会自行启动后端的脚本（通常会占用或清理 `8080`，启动配置继承当前 shell
-和 `.env`）：
+仓库中的专项 Shell 脚本才负责按各自策略启动或复用后端；`mvn test` 只运行 Java 测试，
+默认排除 `live-llm` 和 `container`：
 
 ```bash
 ./test.sh                     # 已有健康服务则复用，否则启动；商品、聊天、认证和基础回归
@@ -473,7 +490,9 @@ mvn -Dtest='*Skill*Test,*Api*Test' test
 ./test-sse-jwt.sh              # AG-UI SSE 认证透传；不会启动 Java 后端
 ```
 
-这些专项脚本通常还要求 `.env`、有效的 LLM/Embedding/视觉/转写服务或 PostgreSQL。`test-multimodal.sh`、`test-streaming.sh` 的多模态场景需要 `TEST_IMAGE_PATH`、`TEST_AUDIO_PATH`；传统内嵌页面的真实浏览器验收使用：
+这些专项脚本通常还要求 `.env`、有效的 LLM/Embedding/视觉/转写服务或 PostgreSQL。
+`test-multimodal.sh`、`test-streaming.sh` 的多模态场景需要 `TEST_IMAGE_PATH`、
+`TEST_AUDIO_PATH`；传统内嵌页面的真实浏览器验收使用：
 
 ```bash
 ./dev.sh --backend-only

@@ -376,7 +376,8 @@ queries, and automated assertions. Screenshots are not acceptance evidence.
 
 Use the relevant regression script after satisfying its prerequisites. Remember:
 
-- `mvn test` includes external DeepSeek/LLM smoke tests.
+- 默认 `mvn test` 通过 Surefire 排除 `live-llm` 和 `container` 标签，不访问真实 LLM、
+  PostgreSQL 或 Docker；真实 provider 和容器测试必须显式启用。
 - Many `test-*.sh` scripts require `.env`, a running backend, PostgreSQL, or external provider credentials.
 - Multimodal tests require `TEST_IMAGE_PATH` and/or `TEST_AUDIO_PATH`.
 - AG-UI browser tests require the backend, frontend on port 4000, and Playwright.

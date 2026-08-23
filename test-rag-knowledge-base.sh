@@ -79,6 +79,8 @@ if [ ! -f .env ]; then
     exit 1
 fi
 set -a && source .env && set +a
+export RAG_ENABLED=true
+export VECTOR_MEMORY_ENABLED=false
 
 # ── 检查 SiliconFlow 配置 ─────────────────────────────────
 if [ -z "$SILICONFLOW_API_KEY" ] || [ "$SILICONFLOW_API_KEY" = "your-siliconflow-api-key" ]; then
@@ -86,7 +88,7 @@ if [ -z "$SILICONFLOW_API_KEY" ] || [ "$SILICONFLOW_API_KEY" = "your-siliconflow
     yellow "  向量嵌入功能将不可用，跳过相关测试"
     SKIP_VECTOR_TESTS=true
 else
-    green "SiliconFlow API key: 已配置 (${SILICONFLOW_API_KEY:0:10}...)"
+    green "SiliconFlow API key: 已配置"
     SKIP_VECTOR_TESTS=false
 fi
 

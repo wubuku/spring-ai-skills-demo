@@ -1,10 +1,8 @@
 # Spring AI Skills Demo - Dockerfile
 # 使用多阶段构建优化镜像大小
-# 注意：项目使用虚拟线程(Virtual Threads)，需要 Java 21+
 
 # 阶段1: 构建阶段
-# 使用 Amazon Corretto 21（支持虚拟线程）
-FROM amazoncorretto:21-alpine-jdk AS builder
+FROM amazoncorretto:17-alpine-jdk AS builder
 
 # 安装 Maven
 RUN apk add --no-cache maven curl
@@ -25,8 +23,7 @@ COPY src ./src
 RUN mvn clean package -DskipTests -B
 
 # 阶段2: 运行阶段
-# 使用 Amazon Corretto 21 JRE
-FROM amazoncorretto:21-alpine-jdk
+FROM amazoncorretto:17-alpine-jdk
 
 # 安装必要的工具
 RUN apk add --no-cache curl
@@ -51,8 +48,7 @@ EXPOSE 8080
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/actuator/health || exit 1
+    CMD curl -f http://localhost:8080/api/products || exit 1
 
 # 启动应用
-# 启用虚拟线程支持
-ENTRYPOINT ["java", "-Djava.security.egd=file:/dev/./urandom", "--enable-preview", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]

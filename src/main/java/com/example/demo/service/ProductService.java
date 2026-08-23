@@ -12,7 +12,6 @@ public class ProductService {
     
     private final Map<Long, Product> products = new ConcurrentHashMap<>();
     private final AtomicLong idGenerator = new AtomicLong(1);
-    private final Map<Long, List<Long>> carts = new ConcurrentHashMap<>();
 
     public ProductService() {
         // 初始化示例数据
@@ -30,48 +29,18 @@ public class ProductService {
 
     public List<Product> searchProducts(String keyword, String category, Double priceMin, Double priceMax) {
         return products.values().stream()
-            .filter(p -> keyword == null || 
+            .filter(p -> keyword == null || keyword.isBlank() ||
                 p.getName().contains(keyword) || 
                 p.getDescription().contains(keyword))
-            .filter(p -> category == null || p.getCategory().equals(category))
+            .filter(p -> category == null || category.isBlank() || p.getCategory().equals(category))
             .filter(p -> priceMin == null || p.getPrice() >= priceMin)
             .filter(p -> priceMax == null || p.getPrice() <= priceMax)
+            .sorted(Comparator.comparing(Product::getId))
             .collect(Collectors.toList());
     }
 
     public Optional<Product> getProductById(Long id) {
         return Optional.ofNullable(products.get(id));
-    }
-
-    public Map<String, Object> addToCart(Long userId, Long productId) {
-        if (!products.containsKey(productId)) {
-            return Map.of("success", false, "message", "商品不存在");
-        }
-        carts.computeIfAbsent(userId, k -> new ArrayList<>()).add(productId);
-        return Map.of(
-            "success", true, 
-            "message", "已添加到购物车",
-            "cartSize", carts.get(userId).size()
-        );
-    }
-
-    public Map<String, Object> checkout(Long userId) {
-        List<Long> cart = carts.getOrDefault(userId, new ArrayList<>());
-        if (cart.isEmpty()) {
-            return Map.of("success", false, "message", "购物车为空");
-        }
-        double total = cart.stream()
-            .map(products::get)
-            .filter(Objects::nonNull)
-            .mapToDouble(Product::getPrice)
-            .sum();
-        carts.remove(userId);
-        return Map.of(
-            "success", true,
-            "message", "订单已提交",
-            "totalAmount", total,
-            "itemCount", cart.size()
-        );
     }
 
     // ========== 基于用户名的操作（用于认证透传）==========
@@ -80,20 +49,27 @@ public class ProductService {
     private final Map<String, List<Long>> userCarts = new ConcurrentHashMap<>();
 
     public Map<String, Object> addToCartByUsername(String username, Long productId) {
+        username = requireUsername(username);
         if (!products.containsKey(productId)) {
             return Map.of("success", false, "message", "商品不存在");
         }
-        userCarts.computeIfAbsent(username, k -> new ArrayList<>()).add(productId);
+        String resolvedUsername = username;
+        List<Long> cart = userCarts.compute(resolvedUsername, (key, existing) ->
+            append(existing, productId));
         return Map.of(
             "success", true,
             "message", "已添加到购物车",
-            "cartSize", userCarts.get(username).size(),
-            "username", username
+            "cartSize", cart.size(),
+            "username", resolvedUsername
         );
     }
 
     public Map<String, Object> checkoutByUsername(String username) {
-        List<Long> cart = userCarts.getOrDefault(username, new ArrayList<>());
+        username = requireUsername(username);
+        List<Long> cart = userCarts.remove(username);
+        if (cart == null) {
+            cart = List.of();
+        }
         if (cart.isEmpty()) {
             return Map.of("success", false, "message", "购物车为空");
         }
@@ -102,7 +78,6 @@ public class ProductService {
             .filter(Objects::nonNull)
             .mapToDouble(Product::getPrice)
             .sum();
-        userCarts.remove(username);
         return Map.of(
             "success", true,
             "message", "订单已提交",
@@ -113,9 +88,16 @@ public class ProductService {
     }
 
     public Map<String, Object> getCartByUsername(String username) {
-        List<Long> cart = userCarts.getOrDefault(username, new ArrayList<>());
+        username = requireUsername(username);
+        List<Long> cart = userCarts.getOrDefault(username, List.of());
         if (cart.isEmpty()) {
-            return Map.of("success", true, "message", "购物车为空", "items", List.of());
+            return Map.of(
+                "success", true,
+                "message", "购物车为空",
+                "items", List.of(),
+                "totalAmount", 0.0,
+                "itemCount", 0
+            );
         }
         List<Product> products = cart.stream()
             .map(this.products::get)
@@ -128,5 +110,18 @@ public class ProductService {
             "totalAmount", total,
             "itemCount", cart.size()
         );
+    }
+
+    private List<Long> append(List<Long> existing, Long productId) {
+        List<Long> updated = new ArrayList<>(existing == null ? List.of() : existing);
+        updated.add(productId);
+        return List.copyOf(updated);
+    }
+
+    private String requireUsername(String username) {
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("username 不能为空");
+        }
+        return username;
     }
 }

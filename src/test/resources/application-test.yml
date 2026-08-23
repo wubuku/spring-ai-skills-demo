@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:skills-demo-test;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  ai:
+    chat:
+      memory:
+        repository:
+          jdbc:
+            initialize-schema: always
+            platform: h2
+      observations:
+        enabled: false
+        log-prompt: false
+        log-completion: false
+
+app:
+  ai:
+    rag:
+      enabled: false
+    vector-memory:
+      enabled: false
+    log-system-prompt: false
+
+knowledge-base:
+  enabled: false
+
+logging:
+  level:
+    com.example.demo: WARN
+    org.springframework.ai: WARN

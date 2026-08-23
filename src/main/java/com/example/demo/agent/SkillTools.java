@@ -1,69 +1,88 @@
 package com.example.demo.agent;
 
-import com.example.demo.auth.UserContextHolder;
-import com.example.demo.model.Skill;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
-import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Component
 public class SkillTools {
 
+    public static final String SKILL_SESSION_CONTEXT_KEY = "skills.load-session";
+    public static final String AUTH_TOKEN_CONTEXT_KEY = "auth.token";
+    public static final String AUTH_USERNAME_CONTEXT_KEY = "auth.username";
+
+    private static final Set<String> ALLOWED_HEADERS = Set.of(
+        "accept", "content-type", "x-request-id"
+    );
+    private static final Set<String> MUTATION_METHODS = Set.of(
+        "POST", "PUT", "PATCH", "DELETE"
+    );
+    private static final int MAX_MAP_ENTRIES = 32;
+    private static final int MAX_KEY_LENGTH = 128;
+    private static final int MAX_VALUE_LENGTH = 2048;
+    private static final int MAX_BODY_LENGTH = 32 * 1024;
+    private static final int MAX_RESPONSE_LENGTH = 16 * 1024;
+
     private final SkillRegistry registry;
     private final RestTemplate restTemplate;
     private final String apiBaseUrl;
     private final SkillReferenceReader referenceReader;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final CopyOnWriteArrayList<String> loadedSkills = new CopyOnWriteArrayList<>();
 
-    /**
-     * confirm-before-mutate 配置已移除
-     * 原因：AG-UI + SSE + Spring AI 场景不支持用户态 Token 透传
-     * 后端不再试图"代表用户调用API"，任何需要用户 access token 的操作都推到前端
-     */
     @Autowired
     public SkillTools(SkillRegistry registry, RestTemplate restTemplate,
                       @Value("${app.api.base-url}") String apiBaseUrl,
                       SkillReferenceReader referenceReader) {
         this.registry = registry;
         this.restTemplate = restTemplate;
-        this.apiBaseUrl = apiBaseUrl;
+        this.apiBaseUrl = apiBaseUrl.replaceAll("/+$", "");
         this.referenceReader = referenceReader;
     }
 
-    public void reset() { loadedSkills.clear(); }
-    public List<String> getLoadedSkills() { return loadedSkills; }
-    public void markSkillLoaded(String skillName) { loadedSkills.addIfAbsent(skillName); }
-
     @Tool(description = "加载指定技能的完整操作指令。在使用任何技能前必须先调用此工具。")
     public String loadSkill(
-        @ToolParam(description = "技能名称，必须来自 available_skills 列表") String skillName
+        @ToolParam(description = "技能名称，必须来自 available_skills 列表") String skillName,
+        ToolContext toolContext
     ) {
+        if (skillName == null || skillName.isBlank()) {
+            return "✗ 错误：skillName 参数不能为空。";
+        }
+        SkillLoadSession session = skillSession(toolContext);
+        if (session == null) {
+            return "✗ 错误：缺少当前请求的 Skill 会话上下文。";
+        }
         return registry.get(skillName)
             .map(skill -> {
-                boolean alreadyLoaded = loadedSkills.contains(skillName);
-                loadedSkills.addIfAbsent(skillName);
+                boolean firstLoad = session.markLoaded(skillName);
                 String linksHint = skill.getMeta().getLinks() == null ||
                     skill.getMeta().getLinks().isEmpty() ? "" :
                     "\n\n**相关技能（按需加载）：**\n" +
                     skill.getMeta().getLinks().stream()
                         .map(l -> "- `" + l.getName() + "`：" + l.getDescription())
                         .collect(Collectors.joining("\n"));
-                String loadStatus = alreadyLoaded
+                String loadStatus = !firstLoad
                     ? "⚠️ 技能 `" + skillName + "` 已在本轮加载。请不要再次调用 `loadSkill`，直接使用下方指令。"
                     : "✓ 技能 `" + skillName + "` 已加载";
                 return loadStatus + linksHint +
@@ -72,144 +91,198 @@ public class SkillTools {
             .orElse("✗ 错误：技能 `" + skillName + "` 不存在");
     }
 
-    /**
-     * 工具1（后端 httpRequest）：直接发送 HTTP 请求并返回结果。
-     * 由 Spring AI 在 Java 端执行（不会触发前端 useCopilotAction）。
-     * 适用于<b>公开 API</b>（不需要用户 access token）；
-     * 如果调用受保护 API（需要 token）应该改用前端同名 httpRequest 工具。
-     */
-    @Tool(description = "【后端 httpRequest】直接在 Java 端发送 HTTP 请求调用 REST API，并立即返回执行结果。支持 GET/POST/PUT/DELETE 所有方法。" +
-        "**仅适用于公开 API**（不需要用户 access token，例如 GET /api/products 浏览商品、GET /api/products/{id} 查看商品详情）。" +
-        "如果接口需要用户登录态（@PreAuthorize 保护，如 POST /api/products/cart 加购物车），请改用前端的同名 httpRequest 工具，浏览器会自动携带用户 token 并弹出确认对话框。")
+    @Tool(description = "调用已登记的只读 REST API。此工具只允许 GET；写操作必须使用 buildHttpRequest 生成前端确认元数据。")
     public String httpRequest(
-        @ToolParam(description = "HTTP 方法：GET/POST/PUT/DELETE") String method,
+        @ToolParam(description = "HTTP 方法，只允许 GET") String method,
         @ToolParam(description = "API 路径（相对路径会自动拼接 base URL）") String url,
         @ToolParam(description = "路径参数，用于替换 URL 中的占位符") Map<String, String> pathParams,
         @ToolParam(description = "查询参数") Map<String, String> queryParams,
         @ToolParam(description = "请求头") Map<String, String> headers,
-        @ToolParam(description = "请求体（仅用于 POST/PUT）") Map<String, Object> body
+        @ToolParam(description = "请求体；GET 时必须为空对象") Map<String, Object> body,
+        ToolContext toolContext
     ) {
-        return executeHttpRequest(method, url, pathParams, queryParams, headers, body);
+        String normalizedMethod = normalizeMethod(method);
+        if (!"GET".equals(normalizedMethod)) {
+            return "HTTP 请求被拒绝：后端工具只允许 GET；写操作请调用 buildHttpRequest。";
+        }
+        if (body != null && !body.isEmpty()) {
+            return "HTTP 请求被拒绝：GET 请求体必须为空。";
+        }
+        String validationError = validateRequestParts(
+            normalizedMethod, url, pathParams, queryParams, headers, null
+        );
+        if (validationError != null) {
+            return "HTTP 请求被拒绝：" + validationError;
+        }
+
+        String resolvedUrl = resolvePathParams(url, pathParams);
+        validationError = registry.validateResolvedApiRequest(normalizedMethod, resolvedUrl);
+        if (validationError != null) {
+            return "HTTP 请求被拒绝：" + validationError;
+        }
+
+        UriComponentsBuilder uriBuilder = UriComponentsBuilder
+            .fromUriString(apiBaseUrl + resolvedUrl);
+        safeMap(queryParams).forEach(uriBuilder::queryParam);
+
+        HttpHeaders requestHeaders = new HttpHeaders();
+        requestHeaders.setAccept(List.of(MediaType.APPLICATION_JSON));
+        safeMap(headers).forEach(requestHeaders::set);
+        String token = contextString(toolContext, AUTH_TOKEN_CONTEXT_KEY);
+        if (token != null) {
+            requestHeaders.setBearerAuth(token);
+        }
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(
+                uriBuilder.build().encode().toUri(),
+                HttpMethod.GET,
+                new HttpEntity<>(requestHeaders),
+                String.class
+            );
+            log.debug("Skill HTTP GET completed: path={}, status={}, responseChars={}",
+                resolvedUrl,
+                response.getStatusCode().value(),
+                response.getBody() == null ? 0 : response.getBody().length());
+            return bounded(response.getBody());
+        } catch (HttpStatusCodeException e) {
+            return "HTTP " + e.getStatusCode().value() + "：" +
+                bounded(e.getResponseBodyAsString());
+        } catch (ResourceAccessException e) {
+            return "HTTP 请求失败：目标服务不可用或请求超时。";
+        } catch (Exception e) {
+            log.warn("Skill HTTP GET failed for {}: {}", resolvedUrl,
+                e.getClass().getSimpleName());
+            return "HTTP 请求失败：请求执行异常。";
+        }
     }
 
-    /**
-     * 工具2（模式2）：构建HTTP 请求工具（前端确认后请求的模式）
-     */
-    @Tool(description = "返回 HTTP GET/POST/PUT/DELETE 等操作的元数据供用户在前端确认后执行。")
+    @Tool(description = "为 POST/PUT/PATCH/DELETE 写操作生成 JSON 元数据，交给传统页面展示并由用户确认后执行。")
     public String buildHttpRequest(
-        @ToolParam(description = "HTTP 方法：GET/POST/PUT/DELETE") String method,
+        @ToolParam(description = "HTTP 写方法：POST/PUT/PATCH/DELETE") String method,
         @ToolParam(description = "API 路径（相对路径）") String url,
         @ToolParam(description = "路径参数") Map<String, String> pathParams,
         @ToolParam(description = "查询参数") Map<String, String> queryParams,
-        @ToolParam(description = "请求体（JSON 对象，仅用于 POST/PUT）") Map<String, Object> body
+        @ToolParam(description = "请求体（JSON 对象）") Map<String, Object> body
     ) {
-        log.info("[buildHttpRequest] 被调用! method={}, url={}", method, url);
-
-        String validationError = registry.validateApiRequest(method, url);
+        String normalizedMethod = normalizeMethod(method);
+        if (!MUTATION_METHODS.contains(normalizedMethod)) {
+            return "构建请求被拒绝：buildHttpRequest 只接受写操作。";
+        }
+        String validationError = validateRequestParts(
+            normalizedMethod, url, pathParams, queryParams, null, body
+        );
         if (validationError != null) {
             return "构建请求被拒绝：" + validationError;
         }
-        validationError = validatePathParamValues(pathParams);
-        if (validationError != null) {
-            return "构建请求被拒绝：" + validationError;
-        }
 
-        // 替换路径参数
         String resolvedUrl = resolvePathParams(url, pathParams);
-        validationError = registry.validateResolvedApiRequest(method, resolvedUrl);
+        validationError = registry.validateResolvedApiRequest(normalizedMethod, resolvedUrl);
         if (validationError != null) {
             return "构建请求被拒绝：" + validationError;
         }
 
-        // buildHttpRequest 的语义：只构建请求，不直接执行
-        // 返回元数据供前端确认，前端拿到用户 token 后在自己的浏览器中执行
-        log.info("[buildHttpRequest] {} 请求，返回确认元数据", method);
         String confirmUrl = apiBaseUrl + resolvedUrl;
         Map<String, Object> meta = new LinkedHashMap<>();
-        meta.put("method", method.toUpperCase());
+        meta.put("method", normalizedMethod);
         meta.put("url", confirmUrl);
         if (pathParams != null && !pathParams.isEmpty()) meta.put("pathParams", pathParams);
         if (queryParams != null && !queryParams.isEmpty()) meta.put("queryParams", queryParams);
         if (body != null && !body.isEmpty()) meta.put("body", body);
 
         try {
-            String json = objectMapper.writeValueAsString(meta);
-            // 不要输出 [CONFIRM_REQUIRED] 前缀，让模型直接输出 http-request 代码块
-            // 前端会根据代码块自动显示确认对话框，不需要模型多此一举
-            return json;
+            return objectMapper.writeValueAsString(meta);
         } catch (Exception e) {
-            return "构建请求失败：" + e.getMessage();
+            return "构建请求失败：无法序列化请求元数据。";
         }
     }
 
-    /**
-     * 实际执行 HTTP 请求的内部方法
-     * 从 SecurityContextHolder 获取 JWT（通过 AuthFilter 设置）
-     */
-    private String executeHttpRequest(String method, String url, Map<String, String> pathParams,
-                                     Map<String, String> queryParams, Map<String, String> headers,
-                                     Map<String, Object> body) {
-        try {
-            String validationError = registry.validateApiRequest(method, url);
-            if (validationError != null) {
-                return "HTTP 请求被拒绝：" + validationError;
-            }
-            validationError = validatePathParamValues(pathParams);
-            if (validationError != null) {
-                return "HTTP 请求被拒绝：" + validationError;
-            }
-            // 从 SecurityContextHolder 获取 JWT（AuthFilter 已设置）
-            String jwt = extractJwt();
+    @Tool(description = "读取技能的参考文件（适用于具有分层结构的技能，如 OpenAPI 生成的技能）")
+    public String readSkillReference(
+        @ToolParam(description = "技能名称，例如 swagger-petstore-openapi-3-0") String skillName,
+        @ToolParam(description = "相对于该技能 references 目录的路径，例如 resources/pet.md 或 operations/addPet.md") String relativePath
+    ) {
+        return referenceReader.read(skillName, relativePath);
+    }
 
-            // Step 1: 替换路径参数
-            String resolvedUrl = resolvePathParams(url, pathParams);
-            validationError = registry.validateResolvedApiRequest(method, resolvedUrl);
-            if (validationError != null) {
-                return "HTTP 请求被拒绝：" + validationError;
-            }
-
-            // Step 2: 构建完整 URL
-            String fullUrl = apiBaseUrl + resolvedUrl;
-            var uriBuilder = UriComponentsBuilder.fromHttpUrl(fullUrl);
-            if (queryParams != null && !queryParams.isEmpty()) {
-                queryParams.forEach(uriBuilder::queryParam);
-            }
-
-            // Step 3: 构建请求头
-            var httpHeaders = new HttpHeaders();
-            httpHeaders.setContentType(MediaType.APPLICATION_JSON);
-            if (headers != null && !headers.isEmpty()) {
-                headers.forEach(httpHeaders::set);
-            }
-
-            // 认证透传：自动添加用户认证头
-            if (jwt != null && !httpHeaders.containsKey(HttpHeaders.AUTHORIZATION)) {
-                httpHeaders.setBearerAuth(jwt);
-                log.debug("自动注入用户认证头到请求");
-            }
-
-            // [FINAL] 最终确认：HTTP 请求头中是否有 token
-            log.info("[FINAL] executeHttpRequest thread={}, authHeader={}",
-                    Thread.currentThread().getName(),
-                    httpHeaders.getFirst(HttpHeaders.AUTHORIZATION) != null ? "present" : "null");
-
-            var entity = new HttpEntity<>(body, httpHeaders);
-
-            // Step 4: 发送请求
-            var response = restTemplate.exchange(
-                uriBuilder.toUriString(),
-                HttpMethod.valueOf(method.toUpperCase()),
-                entity,
-                String.class
-            );
-
-            String responseBody = response.getBody();
-            return responseBody != null && responseBody.length() > 3000
-                ? responseBody.substring(0, 3000) + "\n...[响应过长已截断]"
-                : responseBody;
-        } catch (Exception e) {
-            return "HTTP 请求失败：" + e.getMessage();
+    private String validateRequestParts(
+        String method,
+        String url,
+        Map<String, String> pathParams,
+        Map<String, String> queryParams,
+        Map<String, String> headers,
+        Map<String, Object> body
+    ) {
+        String validationError = registry.validateApiRequest(method, url);
+        if (validationError != null) {
+            return validationError;
         }
+        if (url.contains("?")) {
+            return "URL 中不能内嵌查询字符串，请使用 queryParams。";
+        }
+        validationError = validateStringMap("路径参数", pathParams, false);
+        if (validationError != null) {
+            return validationError;
+        }
+        validationError = validatePathParamValues(pathParams);
+        if (validationError != null) {
+            return validationError;
+        }
+        validationError = validateStringMap("查询参数", queryParams, true);
+        if (validationError != null) {
+            return validationError;
+        }
+        validationError = validateHeaders(headers);
+        if (validationError != null) {
+            return validationError;
+        }
+        if (body != null) {
+            try {
+                if (objectMapper.writeValueAsBytes(body).length > MAX_BODY_LENGTH) {
+                    return "请求体超过长度上限。";
+                }
+            } catch (Exception e) {
+                return "请求体无法序列化。";
+            }
+        }
+        return null;
+    }
+
+    private String validateStringMap(
+        String label,
+        Map<String, String> values,
+        boolean allowBlankValue
+    ) {
+        if (values == null) {
+            return null;
+        }
+        if (values.size() > MAX_MAP_ENTRIES) {
+            return label + "数量超过上限 " + MAX_MAP_ENTRIES + "。";
+        }
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key == null || key.isBlank() || key.length() > MAX_KEY_LENGTH
+                || value == null || value.length() > MAX_VALUE_LENGTH
+                || (!allowBlankValue && value.isBlank())
+                || containsControlCharacter(key) || containsControlCharacter(value)) {
+                return label + "包含非法键或值。";
+            }
+        }
+        return null;
+    }
+
+    private String validateHeaders(Map<String, String> headers) {
+        String validationError = validateStringMap("请求头", headers, false);
+        if (validationError != null) {
+            return validationError;
+        }
+        for (String name : safeMap(headers).keySet()) {
+            if (!ALLOWED_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
+                return "请求头 `" + name + "` 不在允许列表中。";
+            }
+        }
+        return null;
     }
 
     private String validatePathParamValues(Map<String, String> pathParams) {
@@ -243,51 +316,42 @@ public class SkillTools {
         return resolvedUrl;
     }
 
-    /**
-     * 提取 JWT Token
-     * 优先从 SecurityContextHolder 获取，如果为空则从 UserContextHolder 获取
-     * （boundedElastic 线程中 SecurityContext 已被清理，需要从 UserContextHolder 获取）
-     */
-    private String extractJwt() {
-        // [STEP4] 记录当前线程信息
-        log.info("[STEP4] extractJwt thread={}", Thread.currentThread().getName());
-
-        // 首先尝试从 SecurityContextHolder 获取（主线程中使用）
-        try {
-            var auth = SecurityContextHolder.getContext().getAuthentication();
-            log.info("[STEP4] SecurityContext authClass={}, authenticated={}",
-                auth != null ? auth.getClass().getSimpleName() : "null",
-                auth != null && auth.isAuthenticated());
-            if (auth != null && auth.isAuthenticated()) {
-                Object credentials = auth.getCredentials();
-                log.info("[STEP4] credentials 类型: {}", credentials != null ? credentials.getClass().getSimpleName() : "null");
-                if (credentials instanceof String) {
-                    log.info("[STEP4] 从 SecurityContext 提取到 token");
-                    return (String) credentials;
-                }
-            }
-        } catch (Exception e) {
-            log.info("[STEP4] 从 SecurityContext 提取 JWT 失败: {}", e.getMessage());
+    private SkillLoadSession skillSession(ToolContext toolContext) {
+        if (toolContext == null) {
+            return null;
         }
-
-        // 从 UserContextHolder 获取（boundedElastic 线程中使用）
-        // 由于不清理 UserContextHolder，boundedElastic 线程复用时仍能获取到 token
-        String token = UserContextHolder.getToken();
-        log.info("[STEP4] UserContextHolder token: {}", token != null ? "present" : "null");
-        if (token != null) {
-            log.info("[STEP4] 从 UserContextHolder 获取到 JWT token");
-            return token;
-        }
-
-        log.warn("[STEP4] 所有方式都无法获取 JWT token！");
-        return null;
+        Object session = toolContext.getContext().get(SKILL_SESSION_CONTEXT_KEY);
+        return session instanceof SkillLoadSession skillLoadSession
+            ? skillLoadSession
+            : null;
     }
 
-    @Tool(description = "读取技能的参考文件（适用于具有分层结构的技能，如 OpenAPI 生成的技能）")
-    public String readSkillReference(
-        @ToolParam(description = "技能名称，例如 swagger-petstore-openapi-3-0") String skillName,
-        @ToolParam(description = "相对于该技能 references 目录的路径，例如 resources/pet.md 或 operations/addPet.md") String relativePath
-    ) {
-        return referenceReader.read(skillName, relativePath);
+    private String contextString(ToolContext toolContext, String key) {
+        if (toolContext == null) {
+            return null;
+        }
+        Object value = toolContext.getContext().get(key);
+        return value instanceof String string && !string.isBlank() ? string : null;
+    }
+
+    private String bounded(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return value.length() > MAX_RESPONSE_LENGTH
+            ? value.substring(0, MAX_RESPONSE_LENGTH) + "\n...[响应过长已截断]"
+            : value;
+    }
+
+    private boolean containsControlCharacter(String value) {
+        return value.chars().anyMatch(Character::isISOControl);
+    }
+
+    private String normalizeMethod(String method) {
+        return method == null ? "" : method.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private Map<String, String> safeMap(Map<String, String> values) {
+        return values == null ? Map.of() : values;
     }
 }

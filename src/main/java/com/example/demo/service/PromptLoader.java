@@ -82,6 +82,31 @@ public class PromptLoader {
             10. `loadSkill` 的 `skillName` 必须从 `<available_skills>` 列表逐字复制
             """;
 
+    private static final String DEFAULT_SKILLS_ADVISOR_BACKEND_MODE_RULES = """
+            6. 【后端 HTTP 工具规则】
+               - 只读 GET：调用 `httpRequest`
+               - 写操作 POST/PUT/PATCH/DELETE：必须调用 `buildHttpRequest`
+               - 写操作必须调用 `buildHttpRequest`，禁止通过 `httpRequest` 直接执行
+               - `pathParams`、`queryParams`、`headers`、`body` 都传 JSON 对象
+
+            7. 【技能探索流程】
+               - 先调用 `loadSkill`，再从返回文档获取 method、url 和参数
+               - 分层 Skill 继续调用 `readSkillReference`
+               - URL 必须来自 Skill 文档，禁止猜测
+
+            8. 【只读请求格式】
+               - `httpRequest(method, url, pathParams, queryParams, headers, body)`
+               - `method` 必须是 `GET`
+               - 没有参数时传空对象
+
+            9. 【写操作确认】
+               - `buildHttpRequest(method, url, pathParams, queryParams, body)` 只构建元数据
+               - 将返回 JSON 原样放入 `http-request` 代码块，等待浏览器确认
+               - 未收到实际 API 结果前，禁止声称操作成功
+
+            10. 调用工具前不输出说明；拿到结果后用中文回答。每次回复最多执行一次业务 API。
+            """;
+
     /** P3: Vision Prompt with hint */
     private static final String DEFAULT_VISION_PROMPT_WITH_HINT = "用户问题是：{{USER_QUERY}}\n请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
 
@@ -274,6 +299,7 @@ public class PromptLoader {
     private void initializeDefaultPrompts() {
         defaultPrompts.put("prompts/skills-advisor/system-prompt.template", DEFAULT_SKILLS_ADVISOR_SYSTEM_PROMPT);
         defaultPrompts.put("prompts/skills-advisor/mode-rules.template", DEFAULT_SKILLS_ADVISOR_MODE_RULES);
+        defaultPrompts.put("prompts/skills-advisor/backend-mode-rules.template", DEFAULT_SKILLS_ADVISOR_BACKEND_MODE_RULES);
         defaultPrompts.put("prompts/multimodal/vision-prompt-with-hint.template", DEFAULT_VISION_PROMPT_WITH_HINT);
         defaultPrompts.put("prompts/multimodal/vision-prompt.template", DEFAULT_VISION_PROMPT);
         defaultPrompts.put("prompts/multimodal/vision-prompt-generator.template", DEFAULT_VISION_PROMPT_GENERATOR);

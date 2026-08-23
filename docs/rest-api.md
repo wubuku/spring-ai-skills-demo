@@ -17,9 +17,9 @@
 
 1. `POST /api/auth/login` 提交 `username`、`password`。
 2. 响应中的 `token` 通过 `Authorization: Bearer <token>` 使用。
-3. 登录 API 返回的 Token 载荷是 Base64 编码的 `username:displayName`，例如 `user1:张三`。
-4. 前端和测试脚本常用 Base64 编码的 `username:password`，例如 `user1:password1`；当前后端只检查第一段用户名是否存在，因此两种格式都可能通过验证。
-5. 当前实现没有签名、过期时间或可靠的密码完整性校验，不能作为生产认证方案。
+3. 登录 API 返回的 Token 载荷是 Base64 编码的 `username:password`，例如 `user1:password1`。
+4. `validateToken()` 会校验用户名和密码；错误密码、篡改第二段或未知用户都会被拒绝。
+5. 当前实现没有签名、过期时间或可靠的完整性校验，不能作为生产认证方案。
 
 公开商品查询不需要认证；购物车和结算由 `@PreAuthorize("isAuthenticated()")` 保护。浏览器前端会从 `localStorage` 读取 token，AG-UI BFF 转发 Authorization。
 
@@ -67,8 +67,6 @@ curl -s -X POST http://localhost:8080/api/auth/login \
 | `GET` | `/api/products/cart` | 是 | 查询当前用户购物车 |
 | `POST` | `/api/products/cart?productId={id}` | 是 | 加入购物车 |
 | `POST` | `/api/products/checkout` | 是 | 结算当前用户购物车 |
-| `POST` | `/api/products/cart-legacy?userId={id}&productId={id}` | 否，已弃用 | 旧版用户 ID 接口 |
-| `POST` | `/api/products/checkout-legacy?userId={id}` | 否，已弃用 | 旧版用户 ID 接口 |
 
 实际请求示例：
 

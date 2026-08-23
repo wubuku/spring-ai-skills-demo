@@ -21,26 +21,44 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @Profile("postgresql")
 public class VectorStorePostgresqlConfig {
 
-    @Value("${spring.ai.vectorstore.pgvector.vector-table-name:vector_store}")
-    private String vectorTableName;
+    @Value("${app.ai.vector-store.knowledge-table:vector_store}")
+    private String knowledgeTableName;
 
-    @Value("${spring.ai.vectorstore.pgvector.distance-type:COSINE_DISTANCE}")
+    @Value("${app.ai.vector-store.chat-memory-table:chat_memory_vector_store}")
+    private String chatMemoryTableName;
+
+    @Value("${app.ai.vector-store.distance-type:COSINE_DISTANCE}")
     private String distanceType;
 
-    @Value("${spring.ai.vectorstore.pgvector.index-type:HNSW}")
+    @Value("${app.ai.vector-store.index-type:HNSW}")
     private String indexType;
 
-    @Value("${spring.ai.vectorstore.pgvector.dimensions:1024}")
+    @Value("${app.ai.vector-store.dimensions:1024}")
     private int dimensions;
 
-    /**
-     * 创建 PostgreSQL PgVectorStore Bean (pgvector)
-     * 使用 HNSW 索引，支持高效的向量相似度搜索
-     */
-    @Bean
-    public PgVectorStore vectorStore(JdbcTemplate jdbcTemplate, EmbeddingModel embeddingModel) {
+    @Bean("knowledgeVectorStore")
+    public PgVectorStore knowledgeVectorStore(
+        JdbcTemplate jdbcTemplate,
+        EmbeddingModel embeddingModel
+    ) {
+        return createStore(jdbcTemplate, embeddingModel, knowledgeTableName);
+    }
+
+    @Bean("chatMemoryVectorStore")
+    public PgVectorStore chatMemoryVectorStore(
+        JdbcTemplate jdbcTemplate,
+        EmbeddingModel embeddingModel
+    ) {
+        return createStore(jdbcTemplate, embeddingModel, chatMemoryTableName);
+    }
+
+    private PgVectorStore createStore(
+        JdbcTemplate jdbcTemplate,
+        EmbeddingModel embeddingModel,
+        String tableName
+    ) {
         return PgVectorStore.builder(jdbcTemplate, embeddingModel)
-            .vectorTableName(vectorTableName)
+            .vectorTableName(tableName)
             .distanceType(PgVectorStore.PgDistanceType.valueOf(distanceType))
             .indexType(PgVectorStore.PgIndexType.valueOf(indexType))
             .dimensions(dimensions)
