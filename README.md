@@ -20,6 +20,7 @@
 | 新增查询订单、创建售后单、申请退款等可执行服务 | [知识库与运行时 Skills：通过运行时 Skills 提供服务](docs/knowledge-and-skills.md#路径二通过运行时-skills-提供服务) |
 | 判断 Spring AI 是否已经内置同类 Skills 能力 | [与 Spring AI 最新能力的关系](docs/knowledge-and-skills.md#与-spring-ai-最新能力的关系) |
 | 评估社区 `spring-ai-agent-utils` 是否值得替换当前 Skills 实现 | [`SkillsTool` 质量与迁移评估](docs/knowledge-and-skills.md#spring-ai-agent-utils-质量与迁移评估) |
+| 查看固定版本的社区源码审计与改进路线 | [社区 `SkillsTool` 审计报告](docs/spring-ai-agent-utils-audit.md) -> [SKILL 支持改进规划](docs/drafts/skill-support-improvement-plan.md) |
 
 ## 快速开始
 
@@ -159,6 +160,8 @@ npm run build
 | [docs/HARNESS.md](docs/HARNESS.md) | 验证和测试矩阵 |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | 故障排查 |
 | [docs/knowledge-and-skills.md](docs/knowledge-and-skills.md) | 知识库文档、运行时 Skills 和 Spring AI 能力边界 |
+| [docs/spring-ai-agent-utils-audit.md](docs/spring-ai-agent-utils-audit.md) | 固定到社区子模块 `v0.10.0` 的 `SkillsTool` 源码审计 |
+| [docs/drafts/skill-support-improvement-plan.md](docs/drafts/skill-support-improvement-plan.md) | 当前项目 SKILL 支持的分期改进规划 |
 | [frontend/README.md](frontend/README.md) | 前端开发入口 |
 | [TEST_REPORT.md](TEST_REPORT.md) | 带日期的历史测试记录 |
 

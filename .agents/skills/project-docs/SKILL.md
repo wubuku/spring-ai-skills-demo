@@ -14,6 +14,8 @@ Use this skill to create and maintain repository-local documentation for `spring
 3. **Document the current boundary.** Distinguish application runtime Skills under `src/main/resources/skills/` from portable agent workflows under `.agents/skills/`.
 4. **Write for the repository's audience.** This project is Chinese-primary. Keep user-facing project documentation in Chinese; retain English for code identifiers, protocol names, and upstream terminology where useful.
 5. **Keep the change scoped.** A documentation task does not justify unrelated code refactors, mass file moves, or rewriting every historical draft.
+6. **Plan substantive work before implementation.** Explore the repository first, write a self-contained plan for multi-step work, and keep the plan tool status synchronized with the document.
+7. **Review plans in a resettable loop.** After writing a plan, perform three complete system-level reviews with no document edits between them. Any factual, logical, completeness, feasibility, safety, or discoverability problem requires an immediate fix and resets the counter to zero.
 
 Use progressive disclosure for documentation too:
 
@@ -136,6 +138,30 @@ For a substantive documentation initiative:
 - Use `frontend/README.md` for frontend-only setup and implementation details.
 - Keep runtime API instructions in `src/main/resources/skills/`.
 - Keep reusable agent workflows in `.agents/skills/`.
+
+### 4. Self-contained planning and review
+
+For a substantive implementation or documentation change, create or update a plan in
+`docs/drafts/` before changing code. The plan must capture the current implementation
+context, exact files and boundaries, recommended defaults, risks, validation, rollback,
+and resume instructions. Link to nearby source documents instead of copying them.
+
+After the plan is written, review it against the source tree and documentation in a loop:
+
+```text
+counter = 0
+while counter < 3:
+    inspect source, configuration, tests, and related docs
+    if any substantive problem is found:
+        fix the plan immediately
+        counter = 0
+    else:
+        counter += 1
+```
+
+Report each review round with its time, scope, findings, action, and result. Do not edit
+the plan during a no-finding round. Keep using the repository's `AGENTS.md` as the
+long-lived policy entry point; this skill contains the portable workflow details.
 
 ## Workflow: Write
 

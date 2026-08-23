@@ -2,3 +2,7 @@
 	path = ag-ui-4j
 	url = https://github.com/Work-m8/ag-ui-4j.git
 	branch = main
+[submodule "spring-ai-agent-utils"]
+	path = spring-ai-agent-utils
+	url = https://github.com/spring-ai-community/spring-ai-agent-utils.git
+	# The superproject pins this reference implementation to a release commit.

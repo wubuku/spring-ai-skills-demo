@@ -8,6 +8,7 @@
 ## 当前工作计划
 
 - [DOCUMENTATION_PLAN.md](DOCUMENTATION_PLAN.md)：本轮文档体系建设计划。
+- [skill-support-improvement-plan.md](skill-support-improvement-plan.md)：当前项目 SKILL 支持改进规划；依赖 [社区库审计报告](../spring-ai-agent-utils-audit.md) 的固定 `v0.10.0` 基线。
 
 ## 稳定指南的历史补充
 

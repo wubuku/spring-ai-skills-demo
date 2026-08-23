@@ -12,6 +12,7 @@
 | 运行测试或回归 | [验证手册](HARNESS.md) | [测试报告](../TEST_REPORT.md) |
 | 排查启动、模型、SSE 或工具问题 | [故障排查](troubleshooting.md) | [历史诊断材料](#草稿与历史材料) |
 | 配置公司知识或新增服务能力 | [知识库与运行时 Skills](knowledge-and-skills.md) | [配置参考](configuration.md)、[系统架构](ARCHITECTURE.md) |
+| 评估社区 `SkillsTool` 或规划当前 Skills 改进 | [社区库审计报告](spring-ai-agent-utils-audit.md) | [SKILL 支持改进规划](drafts/skill-support-improvement-plan.md) |
 | 给 Agent 提供仓库上下文 | [AGENTS.md](../AGENTS.md) | [project-docs Skill](../.agents/skills/project-docs/SKILL.md) |
 
 ## 稳定指南
@@ -26,6 +27,7 @@
 | [HARNESS.md](HARNESS.md) | 编译、Maven、Shell、前端和 E2E 验证矩阵 | 测试源码和脚本 |
 | [troubleshooting.md](troubleshooting.md) | 按症状排查常见问题 | 当前实现和已验证记录 |
 | [knowledge-and-skills.md](knowledge-and-skills.md) | 知识库问答、运行时 Skills、扩展步骤和 Spring AI 能力边界 | `KnowledgeBaseInitializer`、`AgentService`、`SkillRegistry`、`SkillsAdvisor`、官方 Spring AI 文档 |
+| [spring-ai-agent-utils-audit.md](spring-ai-agent-utils-audit.md) | 固定社区子模块 `v0.10.0` 的 `SkillsTool` 源码、测试、兼容性和迁移评估 | `spring-ai-agent-utils/` 子模块 |
 
 ## 组件和报告入口
 
@@ -47,6 +49,7 @@
 重点材料：
 
 - [DOCUMENTATION_PLAN.md](drafts/DOCUMENTATION_PLAN.md)：本轮文档体系建设计划。
+- [skill-support-improvement-plan.md](drafts/skill-support-improvement-plan.md)：当前项目 SKILL 支持改进规划；实施前须完成规划文档的三轮连续无修改检查。
 - [copilotkit-native-tool-call-lessons-learned.md](copilotkit-native-tool-call-lessons-learned.md)：前后端工具协作的历史经验，适合理解 AG-UI 工具边界。
 - [PROBLEM_INVESTIGATION.md](PROBLEM_INVESTIGATION.md)：确认模式问题的历史排查记录，不能单独作为当前实现依据。
 - [spring-ai-agui-guide.md](drafts/spring-ai-agui-guide.md)：AG-UI 调研草稿，内容可能包含已替代方案。

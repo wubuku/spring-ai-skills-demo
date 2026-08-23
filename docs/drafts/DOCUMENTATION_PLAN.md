@@ -105,3 +105,16 @@ cd frontend && npm run build
 - 结论：社区库适合 Spring AI 2.0 时代的通用 Skills 实验和内部工具，但当前项目不应直接切换。
 - 关键阻塞项：发布基线是 Spring AI `2.0.0`/Spring Framework `7.0.8`；轻量 frontmatter 解析器不兼容当前 `links`/嵌套 metadata；没有本项目的 API index、URL 校验、受限 references 和 AG-UI 前端确认边界。
 - 评估矩阵、风险、兼容性试读结果和 PoC 条件已落在 [knowledge-and-skills.md](../knowledge-and-skills.md)。
+
+## 后续增量：固定源码基线与 SKILL 支持改进规划
+
+> **状态**: 文档已落档；改进规划尚未实施
+> **最后核对**: 2026-08-23
+
+- 将 `spring-ai-community/spring-ai-agent-utils` 引入为 `spring-ai-agent-utils/` Git 子模块。
+- 子模块固定到正式 release `v0.10.0`，提交为 `7f8bc47de1bc5a306b6cb078fa6b191ff7845572`。
+- 新增 [社区库审计报告](../spring-ai-agent-utils-audit.md)，报告中的源码路径、版本和提交与子模块对应。
+- 新增 [SKILL 支持改进规划](skill-support-improvement-plan.md)，覆盖当前 frontmatter、reference
+  安全、API index、状态隔离、资源扫描、渐进式披露、观测、测试和 Spring AI 2.x PoC。
+- `AGENTS.md` 已记录规划先行、自包含、主动推进和“三轮连续无修改”审查规则；`CLAUDE.md`
+  仍保持纯重定向。

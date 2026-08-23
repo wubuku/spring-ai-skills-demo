@@ -1,0 +1,511 @@
+# 当前项目 SKILL 支持改进规划
+
+> **状态**: 规划中，尚未实施
+> **目的**: 在不直接替换生产链路的前提下，系统改进当前项目运行时 Skills 的正确性、安全性、可测试性、可发现性和未来迁移能力。
+> **最后核对**: 2026-08-23
+> **规划对应审计**: [Spring AI Community `SkillsTool` 审计报告](../spring-ai-agent-utils-audit.md)
+> **执行规则**: 本文依照根 [AGENTS.md 的规划与文档评审原则](../../AGENTS.md#规划与文档评审原则) 编写；实施前必须完成“三轮连续无修改”检查。
+
+## 1. 决策摘要
+
+当前项目继续使用：
+
+```text
+SkillRegistry
+  -> SkillsAdvisor
+  -> SkillTools（普通 Agent）
+  -> SkillCoreTools（AG-UI 后端）
+  -> 浏览器 httpRequest（AG-UI 业务 API 执行）
+```
+
+本规划不建议现在把生产实现替换为社区 `SkillsTool`。社区库固定参考基线为：
+
+```text
+spring-ai-community/spring-ai-agent-utils
+release: v0.10.0
+commit: 7f8bc47de1bc5a306b6cb078fa6b191ff7845572
+path: spring-ai-agent-utils/
+```
+
+推荐路线是：
+
+1. 先补当前实现的安全和正确性底座；
+2. 再把资源来源、frontmatter 和测试组织抽象清楚；
+3. 在不改变两条 Agent 链路职责的情况下增强渐进式披露；
+4. 最后再做 Spring AI 2.x + 社区库平面 Skill PoC；
+5. PoC 未通过兼容性、性能、安全和回滚验收前，不替换当前生产实现。
+
+## 2. 当前基线与不可误读的边界
+
+### 2.1 事实来源
+
+实施者恢复任务时，按以下顺序核对：
+
+| 事实 | 当前来源 |
+|---|---|
+| Spring Boot、Spring AI、Java 版本 | `pom.xml` |
+| Skill 资源 | `src/main/resources/skills/` |
+| Skill 元数据模型 | `src/main/java/com/example/demo/model/Skill.java` |
+| Skill 发现与 API index | `src/main/java/com/example/demo/agent/SkillRegistry.java` |
+| Prompt 渐进披露 | `src/main/java/com/example/demo/agent/SkillsAdvisor.java` |
+| 普通链路工具 | `src/main/java/com/example/demo/agent/SkillTools.java`、`AgentService.java` |
+| AG-UI 后端工具 | `SkillCoreTools.java`、`AgUiConfig.java`、`AgUiController.java` |
+| 浏览器业务 API 执行和 URL 校验 | `frontend/hooks/useHttpRequestTool.tsx` |
+| 对外 API | `src/main/java/com/example/demo/controller/`、`docs/rest-api.md` |
+| 外部实现参考 | `spring-ai-agent-utils/` 子模块及 [审计报告](../spring-ai-agent-utils-audit.md) |
+
+### 2.2 当前 Skill 分层
+
+- Level 1：`SkillsAdvisor` 将全部 Skill 的 `name` 和 `description` 放入系统提示；
+- Level 2：`loadSkill(name)` 返回完整 `SKILL.md` 和 `links` 提示；
+- Level 3：`readSkillReference(name, relativePath)` 读取 Skill 的 `references/` 内容；
+- API 执行：普通链路由 Java 端 `SkillTools.httpRequest` 执行；AG-UI 后端只暴露
+  `loadSkill`/`readSkillReference`，由浏览器侧 `httpRequest` 携带 Token 并处理写操作确认。
+
+### 2.3 当前已知缺口
+
+以下缺口是本规划的实施依据，不等同于已修复：
+
+- frontmatter 在 `SkillRegistry` 中以字符串分隔符切分，缺少严格文档结构校验；
+- `SkillMeta` 只建模 `name`、`description`、`version`、`links`，OpenAPI Skill 的 metadata
+  目前未形成明确的领域模型；
+- `readSkillReference` 直接把用户/模型输入拼入 classpath 资源路径，未显式拒绝
+  `..`、绝对路径、反斜杠和越过目标 Skill 的路径；
+- 参考文件和 HTTP 响应通过字符数截断，没有统一的 UTF-8 字节、行数和错误类型契约；
+- API index 通过 Markdown 正则推断端点，平面与分层 Skill 的索引规则不同，缺少冲突、
+  方法和无效 URL 的集中校验；
+- 当前 `SkillTools.loadedSkills` 是组件字段，虽然每轮 reset，但并发请求隔离和流式/
+  普通/AG-UI 组合行为没有确定性单元测试；
+- 当前 `src/test` 主要是外部模型工具烟测，没有围绕 Skills 的离线单元测试；
+- SkillRegistry 的 classpath/fat-JAR/可复用包来源抽象不足；
+- 文档与 Skill 实现之间已有入口，但“当前实现 -> 社区对应代码 -> 评估 -> 改进计划”
+  的发现链此前不完整，本规划和审计报告补齐该链。
+
+## 3. 目标、非目标与成功定义
+
+### 3.1 目标
+
+到规划实施完成后，当前项目应具备：
+
+1. 可校验、可诊断的 Skill frontmatter 契约；
+2. 不允许目录穿越的受限 `readSkillReference`；
+3. 单一、可测试、被普通 Agent 和 AG-UI 共用的 API index 校验规则；
+4. 普通 Agent、AG-UI、同步和流式请求的 Skill 状态隔离证据；
+5. classpath、文件系统和未来可复用 Skill 包的明确资源来源模型；
+6. Level 1/2/3 渐进披露的确定性测试和 Token/命中率评估入口；
+7. 读者可以从稳定导航发现知识库路径、运行时 Skills 路径、社区审计和本规划；
+8. Spring AI 2.x 未来 PoC 与当前生产链路隔离，结果可复现、可回滚。
+
+### 3.2 非目标
+
+- 本阶段不升级主项目 Spring Boot 或 Spring AI；
+- 不把社区库加入当前项目运行时依赖；
+- 不直接改用社区 `SkillsTool` 的通用 FileSystem/Shell 工具；
+- 不把知识库 RAG 和可执行 API Skill 合并成一种资源格式；
+- 不重写 AG-UI 或 CopilotKit 的工具协议；
+- 不把所有历史 `docs/drafts/` 重写为稳定文档；
+- 不在没有真实兼容性证据时宣称已支持 Spring AI 2.x。
+
+### 3.3 成功定义
+
+P0/P1 阶段完成的最低证据：
+
+```text
+mvn -DskipTests clean package
+mvn -Dtest=<Skills-related deterministic tests> test
+git diff --check
+```
+
+并且测试能够证明：错误 frontmatter 可诊断、非法 references 路径被拒绝、合法
+references 可读取、API index 能区分方法和路径参数、并发请求不会互相污染 loaded state。
+
+## 4. 推荐实施顺序
+
+### P0-A：建立 Skill 文档契约与 frontmatter 校验
+
+**目标**：在不改变现有业务 Skill 内容语义的前提下，先让输入数据可靠。
+
+**建议修改边界**：
+
+- `src/main/java/com/example/demo/model/Skill.java`
+- `src/main/java/com/example/demo/agent/SkillRegistry.java`
+- `src/main/resources/skills/*/SKILL.md`
+- 新增 `src/test/java/com/example/demo/agent/SkillRegistryTest.java` 或等价测试；
+- 如需统一错误，新增 `SkillLoadException`/校验结果模型，但不要把异常直接暴露成
+  Stack Trace 给模型。
+
+**推荐默认**：
+
+- 使用现有 Jackson YAML 能力，不引入第二个 YAML parser；
+- frontmatter 必须是文档开头的 `---` 块，结束标记必须独占一行；
+- `name`、`description` 必填；`name` 只允许小写字母、数字和连字符，长度上限
+  默认 64；`description` 长度上限默认 1024；
+- `version` 可选，但存在时保留原始字符串；
+- `links` 解析成当前 `SkillLink` 列表；缺失、空列表和未知 metadata 字段分别定义
+  行为；
+- 对未知字段采用“保留但不参与执行”的兼容策略，避免丢失 OpenAPI metadata；
+- 重复 Skill name 默认启动失败并指出来源文件，而不是静默覆盖。
+
+**验收**：
+
+- flat Skill、带 links Skill、带 metadata Skill、缺字段、错误 YAML、重复 name
+  各有确定性测试；
+- 启动日志能区分“未发现资源”“发现但解析失败”“成功注册”；
+- 没有把 frontmatter 原文全部注入 Level 1 prompt；
+- 当前六个 Skill 仍能加载并生成原有 API index。
+
+**回滚边界**：只要新校验使现有 Skill 内容无法加载，先修复 Skill 文件或提供兼容
+解析，不放宽到静默接受错误输入；整个阶段可以独立回滚，不影响工具执行代码。
+
+### P0-B：修复 `readSkillReference` 的路径和大小安全
+
+**目标**：把 Level 3 明确限制在 `skills/<skillName>/references/` 内。
+
+**建议修改边界**：
+
+- `SkillTools.readSkillReference`
+- `SkillCoreTools.readSkillReference`
+- 推荐新增共享的 `SkillReferenceReader`，由两个工具委托，避免两条链路规则漂移；
+- 新增测试覆盖文件系统和 classpath 资源行为。
+
+**推荐校验顺序**：
+
+1. Skill name 必须来自 `SkillRegistry`；
+2. `relativePath` 非空、不能是绝对路径；
+3. 统一 `/` 分隔符，拒绝 `\`、空路径段和 `..`；
+4. 解析后路径必须仍位于该 Skill 的 `references/` 根；
+5. 只允许常规文件，拒绝目录、符号链接越界和不存在资源；
+6. 统一最大内容大小，默认沿用 4000 字符作为模型返回上限，同时把读取上限与
+   返回上限分开配置；
+7. 返回结构化、可诊断但不泄露主机绝对路径的错误信息。
+
+**验收**：
+
+- 合法 `operations/addPet.md` 可读；
+- `../SKILL.md`、`../../application.yml`、`/etc/passwd`、反斜杠路径和编码绕过被拒绝；
+- 不存在文件、目录、超大文件有不同测试；
+- `SkillTools` 与 `SkillCoreTools` 的结果一致；
+- 不把整个 Skill 根目录、绝对 filesystem path 或任意 Shell 能力暴露给模型。
+
+**回滚边界**：保留工具名和参数名；若底层 Resource 在 fat JAR 下行为不一致，只替换
+资源解析适配，不降低路径限制。
+
+### P0-C：集中 API index、URL 和方法校验
+
+**目标**：让 Skill 文档描述、Java 请求和浏览器请求共享同一份可验证规则。
+
+**建议修改边界**：
+
+- `SkillRegistry` 的索引模型和匹配方法；
+- `AgUiController.apiIndex()`；
+- `frontend/hooks/useHttpRequestTool.tsx`；
+- `SpringAIAgent` 中已有 API 校验逻辑；
+- `docs/rest-api.md`、运行时 Skill 文件和对应 Controller；
+- 新增 Java 和 TypeScript/浏览器侧确定性测试。
+
+**推荐默认**：
+
+- API index 条目至少包含 `skillName`、HTTP method、模板 path、description、
+  hierarchical/reference 信息；
+- method 统一为大写，只允许当前支持的 GET/POST/PUT/PATCH/DELETE；
+- 路径模板按 segment 匹配，精确路径优先，参数模板次之；查询参数不参与路径模板
+  匹配，但按 Skill 文档定义进行 schema 校验；
+- 同一 `METHOD + path` 冲突默认启动时失败并列出来源 Skill；
+- 未被 API index 注册的相对 URL 默认拒绝；绝对 URL 默认也应按 allowlist 决定，
+  不能只因以 `http` 开头就放行；
+- Java 与浏览器侧不各自发明“自动纠错”规则；若保留纠错，必须返回明确的校正结果
+  并有回归测试。
+
+**验收**：
+
+- `/api/products/{id}` 能匹配 `/api/products/3`；
+- 错方法、错路径、跨 Skill 猜测和未索引路径被拒绝；
+- 公开 API 与受保护 API 的认证/确认边界没有因校验重构改变；
+- API index endpoint、Java agent 和浏览器 hook 使用同一语义。
+
+**回滚边界**：先以只读校验和日志模式上线测试，确认误拒绝率后再强化生产拒绝；
+不要在没有 index 诊断信息时让模型陷入重复调用。
+
+### P1-A：补齐确定性测试基础设施
+
+**目标**：让 Skills 逻辑脱离外部 LLM 也可验证。
+
+**最低测试矩阵**：
+
+| 组件 | 必测行为 |
+|---|---|
+| `SkillRegistry` | 平面/分层发现、frontmatter、links、metadata、重复名、索引冲突、路径参数 |
+| `SkillsAdvisor` | Level 1 catalog、Level 2 loaded context、空状态、顺序和 prompt 边界 |
+| `SkillTools` | 合法/非法 `loadSkill`、reference、HTTP URL 校验、响应截断 |
+| `SkillCoreTools` | 与普通链路共享规则、错误输入、写操作提醒 |
+| API index | exact match、template match、错方法、未知路径、查询串 |
+| 资源加载 | filesystem、classpath、打包 JAR；可选 fat JAR |
+| 工具回调 | `JsonArgToolCallback` 的 deterministic JSON 参数适配，不调用真实模型 |
+
+**测试原则**：
+
+- 使用临时目录、内存 Resource 和 mock `RestTemplate`；
+- 不把 OpenAI、MiniMax、Embedding、PostgreSQL 作为单元测试前置；
+- 外部 LLM 烟测继续保留，但在文档中明确不是离线质量门槛；
+- 测试名称描述行为，不只描述实现方法；
+- 任何修复先添加能复现问题的回归测试。
+
+### P1-B：验证 loaded Skill 状态隔离
+
+**背景**：`SkillTools.loadedSkills` 是 Spring 组件字段，当前通过每次请求前 reset
+维持“本轮状态”。这需要并发证据，而不是只靠代码直觉。
+
+**需要验证**：
+
+- 两个普通 `/api/chat` 请求并发时不能看到对方已加载 Skill；
+- 同一 conversation 的同步与 stream 行为一致；
+- AG-UI 请求与普通 Agent 请求互不污染；
+- 工具调用重跑时，本轮 Level 2 内容仍可见；
+- 请求异常、取消和超时后不会把状态留给下一个请求。
+
+**推荐默认**：先用请求范围的 `SkillTurnContext` 替代共享 `List`，由
+`SkillTools`/`SkillCoreTools` 委托；如果 Spring request scope 不覆盖异步 Agent
+生命周期，则显式将 context 绑定到 conversation/run，而不是依赖线程本地变量。
+
+**可逆边界**：在完成并发测试前，不改变现有对外工具名称；可以先增加诊断和隔离层，
+再删除旧字段。
+
+### P1-C：借鉴社区库的 Skill source/provider 与 JAR 测试
+
+**目标**：吸收社区库在资源发现和测试组织上的优点，但保持当前业务约束。
+
+**参考代码**：
+
+- `spring-ai-agent-utils/spring-ai-agent-utils/src/main/java/org/springaicommunity/agent/utils/Skills.java`
+- `spring-ai-agent-utils/spring-ai-agent-utils/src/main/java/org/springaicommunity/agent/tools/SkillsTool.java`
+- `spring-ai-agent-utils/spring-ai-agent-utils/src/test/java/org/springaicommunity/agent/tools/SkillsToolTest.java`
+
+**推荐设计**：
+
+```text
+SkillSource
+  -> FileSystemSkillSource
+  -> ClasspathSkillSource
+  -> OptionalJarSkillSource
+  -> SkillRegistry
+```
+
+先只支持当前需要的 classpath 和 filesystem；JAR/SkillsJar 作为可选能力，必须有来源
+标识、版本、优先级和重复 name 冲突策略。不要把社区子模块路径硬编码到运行时。
+
+**验收**：
+
+- 主项目仍只扫描配置的资源；
+- 可复用 Skill 包不会绕过 frontmatter、API index 和 reference 安全校验；
+- 多来源同名冲突有确定性结果；
+- 资源扫描失败不会静默切换到错误目录；
+- 主仓库 Maven 构建不因社区子模块存在而编译它。
+
+### P2-A：增强渐进披露和 Skill 发现
+
+**目标**：在保持 Token 节省目标的同时，让模型更容易正确发现能力。
+
+**推荐 Level 设计**：
+
+| Level | 内容 | 进入时机 |
+|---|---|---|
+| 1 | name、description、version、能力摘要、风险标签 | 每轮系统提示 |
+| 2 | SKILL.md 正文、结构化 links、API 操作总览 | `loadSkill` |
+| 3 | references/resources/operations/schemas 的单文件内容 | `readSkillReference` |
+
+实施点：
+
+- 给 frontmatter 增加可选的能力分类、只读/写入标志和版本兼容信息，但先不把它们
+  当作安全授权；
+- links 用结构化对象渲染，去重并阻止循环提示；
+- 对关联 Skill 使用有限深度或“提示而不自动加载”；
+- 对大量 Skill 增加稳定排序或分类，避免 ConcurrentHashMap 顺序造成 prompt 漂移；
+- 记录 Level 1/2/3 的字符数、加载耗时和命中情况；
+- 单独评估 Spring AI `ToolSearchToolCallingAdvisor` 对 Java ToolCallback 的价值，
+  不把 Markdown Skill 迁移和 Tool Search 混成一个改造。
+
+**验收**：
+
+- 目录 prompt 不包含完整正文；
+- 一个 Skill 的 Level 2 不会重复注入多次；
+- links 循环、重复和未知目标不会造成无限加载；
+- 能用 deterministic fixture 比较加载前后上下文大小。
+
+### P2-B：明确知识库、运行时 Skill 与 Agent Skill 的发现路径
+
+稳定入口保持三分：
+
+```text
+公司政策/保修/服务条款
+  -> docs/knowledge-and-skills.md
+  -> KnowledgeBaseInitializer / QuestionAnswerAdvisor
+
+查询订单、创建售后、申请退款等服务动作
+  -> docs/knowledge-and-skills.md
+  -> src/main/resources/skills/
+  -> SkillRegistry / SkillsAdvisor / tool boundary
+
+仓库开发工作流
+  -> AGENTS.md
+  -> .agents/skills/project-docs/SKILL.md
+```
+
+社区实现只通过：
+
+```text
+docs/README.md
+  -> docs/spring-ai-agent-utils-audit.md
+  -> spring-ai-agent-utils/ @ v0.10.0
+  -> 本规划
+```
+
+任何未来升级或 PoC 文档都必须从这条链路进入，不能让读者从历史草稿中猜当前方案。
+
+### P2-C：可观测性与脱敏
+
+建议增加结构化事件或 metrics：
+
+- Skill 资源发现数量、成功数、失败数、跳过数；
+- frontmatter 校验失败；
+- Level 1 prompt 大小；
+- `loadSkill`、`readSkillReference` 调用次数与耗时；
+- reference 拒绝原因；
+- API index 命中、拒绝和自动纠错次数；
+- 普通 Agent 与 AG-UI 的工具调用结果。
+
+日志规则：
+
+- 不记录 Skill 正文、知识库全文、Authorization、Token、请求体中的敏感字段；
+- 错误消息使用 Skill name 和相对资源标识，不暴露主机绝对路径；
+- 生产日志保留聚合信息，调试模式才允许有限的非敏感细节。
+
+### P3：Spring AI 2.x + 社区 `SkillsTool` 隔离 PoC
+
+**触发条件**：
+
+- 主项目明确决定升级 Spring Boot 4.x / Spring AI 2.x；
+- 升级有独立分支或独立模块；
+- AG-UI、CopilotKit、模型 Provider 和工具参数适配已有兼容验证计划。
+
+**PoC 结构**：
+
+```text
+独立 demo/module
+  -> Spring Boot 4.x
+  -> Spring AI 2.x
+  -> spring-ai-agent-utils 0.10.0 或当时重新审计的正式版
+  -> 一个没有 links 的平面 Skill
+  -> 一个受限 reference 读取替代方案
+```
+
+**必须验证**：
+
+- filesystem、classpath JAR、Spring Boot fat JAR；
+- 多个 Skill 包和同名冲突；
+- OpenAI-compatible、Anthropic/MiniMax 等实际目标 Provider 的 ToolCallback 参数；
+- Skill description 命中率、错误命中率和 Token 消耗；
+- references 的安全边界；
+- 无社区库时的一键回滚和当前生产链路不受影响。
+
+**禁止条件**：
+
+- 没有把 `allowed-tools`/`model` 误当作权限或路由；
+- 没有用通用 Shell/FileSystem 工具替代受限业务 API 边界；
+- 没有将 PoC 结果直接改写为当前项目已经切换。
+
+## 5. 文件变更地图
+
+实施时按阶段拆分提交，推荐顺序如下：
+
+| 阶段 | 主要文件 | 结果 |
+|---|---|---|
+| P0-A | `Skill.java`、`SkillRegistry.java`、Skill Markdown、Registry tests | frontmatter 和注册契约 |
+| P0-B | `SkillReferenceReader`、`SkillTools`、`SkillCoreTools`、reference tests | 安全 Level 3 |
+| P0-C | `SkillRegistry`、`SpringAIAgent`、`AgUiController`、frontend hook、API tests | 统一 API 校验 |
+| P1-A | `src/test/java/com/example/demo/agent/` | 离线确定性测试基座 |
+| P1-B | context/state classes、Agent/AG-UI tests | 请求/运行隔离 |
+| P1-C | source/provider classes、JAR fixtures | 可复用资源包 |
+| P2 | `SkillsAdvisor`、prompt templates、metrics/logging、stable docs | 渐进披露、发现和观测 |
+| P3 | 独立 PoC 目录或分支、单独 Maven 配置 | Spring AI 2.x 评估 |
+
+不要在同一个提交中同时升级 Spring AI、替换 Skill 格式、重写 AG-UI 工具执行和
+改变前端确认流程。
+
+## 6. 验证矩阵
+
+### 每个阶段都必须运行
+
+```bash
+git diff --check
+mvn -DskipTests clean package
+```
+
+### Skills 离线测试
+
+```bash
+mvn -Dtest='*Skill*Test,*Api*Test' test
+```
+
+如果 Maven Surefire 对 glob 解析行为不同，使用实际测试类名替代，并将命令记录在
+`docs/HARNESS.md`。测试不得要求真实模型 API。
+
+### 前端和 AG-UI
+
+```bash
+cd frontend
+npm run build
+```
+
+具备服务和凭证后再运行 `test-agui-jwt-full.sh`、`test-jwt-get.sh`、前端 E2E；先区分
+环境依赖失败和代码失败。
+
+### 资源包与 release 审计
+
+```bash
+git submodule status
+git -C spring-ai-agent-utils describe --tags --exact-match HEAD
+git -C spring-ai-agent-utils status --short --branch
+```
+
+社区子模块发生更新时，重新执行 [审计报告的复核命令](../spring-ai-agent-utils-audit.md#如何复核)
+并更新报告，而不是只更新 gitlink。
+
+## 7. 风险、默认值与可逆边界
+
+| 问题 | 推荐默认 | 理由 | 可逆边界 |
+|---|---|---|---|
+| 是否现在迁移社区库 | 否 | 主版本、格式和业务边界不兼容 | 独立 PoC 可随时删除 |
+| 是否使用完整 YAML parser | 使用现有 Jackson YAML | 已在主项目中，减少依赖 | 通过 parser adapter 替换 |
+| unknown frontmatter 字段 | 保留、忽略执行语义 | 兼容 metadata，避免静默丢失 | 未来版本可收紧 schema |
+| duplicate Skill name | 启动失败 | 防止顺序覆盖和不可诊断行为 | 可增加显式优先级 |
+| 未索引 URL | 拒绝 | 降低模型猜错或 SSRF 风险 | 先日志模式，再强拒绝 |
+| reference 大小 | 读取上限与返回上限分离 | 防止大文件耗尽资源 | 配置可调整 |
+| JAR source | 先支持、后默认 | 先吸收测试收益，控制发布风险 | provider 可禁用 |
+| Skill state | 显式 turn context | 并发隔离优先于共享字段便利 | 可保留 facade |
+| Spring AI 2.x | 独立 PoC | 避免生产链路被升级阻断 | PoC 失败不回滚生产 |
+
+## 8. 恢复执行指南
+
+任务中断后，按如下顺序继续：
+
+1. 运行 `git status --short --branch` 和 `git submodule status`；
+2. 阅读本文第 2、4、5、6 节；
+3. 重新查看对应阶段的事实来源文件，不假定行号仍然有效；
+4. 用 plan 工具恢复阶段状态；
+5. 先补回归测试，再实现改动；
+6. 每完成一个阶段，更新本文状态、验收结果和风险；
+7. 任何规划事实变化都触发三轮连续无修改检查。
+
+## 9. 当前待办排序
+
+| 优先级 | 待办 | 依赖 | 完成标志 |
+|---|---|---|---|
+| P0 | frontmatter parser/validator | 无 | 解析和错误测试全绿 |
+| P0 | reference reader 安全 | SkillRegistry name lookup | traversal/size tests 全绿 |
+| P0 | API index/URL 统一 | 先稳定索引模型 | Java/浏览器语义一致 |
+| P1 | deterministic tests | P0 契约 | 不依赖 LLM 可运行 |
+| P1 | turn state isolation | 测试基座 | 并发和异常隔离有证据 |
+| P1 | source/provider abstraction | P0 registry | classpath/filesystem/JAR fixture |
+| P2 | Level 1/2/3 观测与排序 | P1 tests | prompt 和耗时可观测 |
+| P2 | 文档发现链维护 | 当前文档入口 | 从 README/AGENTS 可到达 |
+| P3 | Spring AI 2.x PoC | 独立升级条件 | PoC 报告决定是否继续 |

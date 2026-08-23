@@ -14,6 +14,13 @@
 | “查询订单、创建售后单、申请退款、修改地址” | `src/main/resources/skills/<skill-name>/SKILL.md` | 先发现并加载 Skill，再调用其描述的工具/API |
 | 既要查条款，又要执行操作 | 两者组合 | 先用知识库回答规则，再用 Skill/API 执行动作 |
 
+相关技术实现的深入入口：
+
+- [社区 `SkillsTool` 审计报告](spring-ai-agent-utils-audit.md)：固定对应仓库子模块
+  `spring-ai-agent-utils/` 的 `v0.10.0` / `7f8bc47`。
+- [当前项目 SKILL 支持改进规划](drafts/skill-support-improvement-plan.md)：从当前源码缺口
+  出发，规划 frontmatter、reference 安全、API index、测试、状态隔离和未来 PoC。
+
 **知识库是“事实内容”**；**Skill 是“如何完成服务动作的操作说明”**。不要把需要被检索的长篇政策文档全部写进 Skill，也不要把需要参数、认证和副作用说明的 API 操作只放进知识库。
 
 ## 路径一：通过知识库提供知识
@@ -216,11 +223,17 @@ Spring AI 核心的 [Tool Search Tool](https://docs.spring.io/spring-ai/referenc
 
 ### `spring-ai-agent-utils` 质量与迁移评估
 
+本节保留决策摘要，完整的版本化源码审计、测试覆盖、frontmatter 兼容性和风险证据见
+[《Spring AI Community `SkillsTool` 审计报告》](spring-ai-agent-utils-audit.md)。报告对应
+当前仓库的 `spring-ai-agent-utils/` 子模块 `v0.10.0`
+（`7f8bc47de1bc5a306b6cb078fa6b191ff7845572`）；更新子模块后应以审计报告为准重新核对，
+不要只沿用本节的旧结论。
+
 **结论先行：社区库本身值得关注，但当前项目不应直接切换。**
 
 #### 质量判断
 
-截至 **2026-08-23**，上游仓库具备以下积极信号：
+截至 **2026-08-23**，固定的 `v0.10.0` 上游仓库具备以下积极信号：
 
 - Apache-2.0 许可证，已发布到 Maven Central；当前最新正式版为 `0.10.0`，仍属于 `0.x` API 阶段。
 - 有独立的 `SkillsToolTest`、`MarkdownParserTest`，覆盖文件系统目录、Spring `Resource`、JAR/Classpath JAR 和基础调用结果。
@@ -263,7 +276,8 @@ Spring AI 核心的 [Tool Search Tool](https://docs.spring.io/spring-ai/referenc
 4. 必须继续维护普通 `AgentService` 与 AG-UI/CopilotKit 的双工具边界、前端 Token 和写操作确认。
 5. 还需要先把项目从 Spring Boot `3.4.2` / Spring AI `1.1.2` 升级到社区库的 Spring AI 2.0 基线，并重新验证 AG-UI、工具参数解析和多模型 Provider。
 
-因此直接引入后，短期得到的主要是更好的资源扫描和上游测试，短期付出的是主版本升级、Skill 格式迁移和业务安全边界重写；收益不足以覆盖风险。
+因此直接引入后，短期得到的主要是更好的资源扫描和上游测试，短期付出的是主版本升级、Skill 格式迁移和业务安全边界重写；收益不足以覆盖风险。分阶段改进路线见
+[当前项目 SKILL 支持改进规划](drafts/skill-support-improvement-plan.md)。
 
 #### 推荐策略
 
