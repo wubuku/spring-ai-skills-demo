@@ -85,3 +85,13 @@ cd frontend && npm run build
 - 已修正无 PostgreSQL 时的 RAG 启动示例，补充 8080 端口冲突提醒。
 - 已补充前端同 tab 登录后的 BFF headers 同步限制。
 - 已通过 project-docs Skill 的绝对路径/密钥扫描、Markdown 相对链接检查、`mvn -DskipTests clean package` 和 `cd frontend && npm run build`。
+
+## 后续增量：可发现性与 Spring AI SKILL 核查
+
+> **状态**: 已完成
+> **最后核对**: 2026-08-23
+
+- 新增稳定指南 [knowledge-and-skills.md](../knowledge-and-skills.md)，把“知识库文档”和“运行时 Skills”拆成两条读者路径。
+- 在根 `README.md`、`AGENTS.md`、`docs/README.md`、`docs/configuration.md` 和 `docs/ARCHITECTURE.md` 增加发现入口。
+- 记录 Spring AI `2.0.1` 核心的 Tool Search、MCP、RAG 能力，以及 Spring AI Community `spring-ai-agent-utils` 的 `SkillsTool`。
+- 明确当前项目不是重复实现 Spring AI 的 RAG/Tool Calling，但确实自定义实现了部分与社区 SkillsTool 重叠的文件发现和渐进式加载机制；是否替换应按“通用 Skills、工具 Token 优化、跨进程服务”三个目标分别评估。

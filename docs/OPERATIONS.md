@@ -147,6 +147,8 @@ mvn spring-boot:run -DskipTests
 
 知识库加载器支持 `classpath:` 和 `file:` 资源模式；不要把 `knowledge-extra/` 视为默认运行时知识库。
 
+当前知识库问答只接入普通 `/api/chat` 链路；`/api/agui` 尚未注册 `QuestionAnswerAdvisor`。验证公司条款时优先使用本节的普通聊天请求，不要用 CopilotKit 界面是否命中知识库来判断 RAG 是否配置成功。完整实现和扩展步骤见 [知识库与运行时 Skills](knowledge-and-skills.md)。
+
 ## 多模态和转写
 
 ### 同步多模态聊天

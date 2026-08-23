@@ -68,6 +68,8 @@ PostgreSQL profile：
 
 不要把 `knowledge-extra/` 自动当作运行时知识库；是否加载由配置路径决定。
 
+想了解“新增一份公司保修/服务条款后，如何进入 RAG 问答”，见 [知识库与运行时 Skills](knowledge-and-skills.md)。
+
 ## 视觉和语音转写
 
 | 环境变量 | 用途 |

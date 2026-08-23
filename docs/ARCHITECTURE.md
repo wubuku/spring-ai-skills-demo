@@ -43,6 +43,8 @@
 
 `AgentService` 每轮清理已加载 Skill 状态。普通会话使用 `MessageWindowChatMemory` 保存最近窗口，并可叠加 JDBC 记忆、语义记忆和知识库检索。该链路注册完整 `SkillTools`：`httpRequest` 在 Java 端执行请求，`buildHttpRequest` 只构建供确认流程使用的请求元数据；二者都不应被描述成 AG-UI 浏览器工具。
 
+知识库 RAG 当前只接入这条普通链路：`AgentService` 注册了 `QuestionAnswerAdvisor` 和 `VectorStoreChatMemoryAdvisor`。下方 AG-UI 的 `AgUiConfig` 只注册 `SkillsAdvisor` 与 `MessageChatMemoryAdvisor`，所以 Next.js/CopilotKit 链路当前不能自动获得同等的知识库检索能力。
+
 ## AG-UI/CopilotKit 请求流
 
 ```text
@@ -114,6 +116,8 @@ Level 3: 读取 OpenAPI Skill references 下的资源/操作/schema 文档
 | LLM | `openai`、`anthropic`、`minimax` 条件化 ChatModel |
 
 根 `application.yml` 当前将 `spring.profiles.active` 设置为 `postgresql`。非 PostgreSQL profile 才启用 H2 文件数据库和 `SimpleVectorStore`，这点必须与 Docker Compose 的历史注释区分。
+
+关于“知识库文档”和“运行时 Skills”应如何选择、扩展及与 Spring AI 2.0 原生能力对照，见 [知识库与运行时 Skills](knowledge-and-skills.md)。
 
 ## 认证边界
 

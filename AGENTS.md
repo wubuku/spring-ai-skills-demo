@@ -86,6 +86,7 @@ test-*.sh        端到端、回归和专项诊断脚本
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)：REST、聊天、记忆/RAG、多模态和 Docker 操作示例。
 - [docs/HARNESS.md](docs/HARNESS.md)：构建、测试和专项回归矩阵。
 - [docs/troubleshooting.md](docs/troubleshooting.md)：按症状排查启动、模型、工具、SSE 和前端问题。
+- [docs/knowledge-and-skills.md](docs/knowledge-and-skills.md)：知识库问答、运行时 Skills、扩展步骤和 Spring AI 能力边界。
 - [docs/drafts/](docs/drafts/)：计划、诊断和历史材料，不是自动可信的当前事实。
 
 ## 后端启动与构建

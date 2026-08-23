@@ -12,6 +12,14 @@
 - JDBC 对话记忆、VectorStoreChatMemoryAdvisor 和知识库问答。
 - OpenAI-compatible、Anthropic-compatible、MiniMax Provider 切换。
 
+## 常见扩展入口
+
+| 我想做什么 | 从哪里开始 |
+|---|---|
+| 添加公司保修、服务条款、配送政策等知识，让 Agent 基于文档回答 | [知识库与运行时 Skills：通过知识库提供知识](docs/knowledge-and-skills.md#路径一通过知识库提供知识) |
+| 新增查询订单、创建售后单、申请退款等可执行服务 | [知识库与运行时 Skills：通过运行时 Skills 提供服务](docs/knowledge-and-skills.md#路径二通过运行时-skills-提供服务) |
+| 判断 Spring AI 是否已经内置同类 Skills 能力 | [与 Spring AI 最新能力的关系](docs/knowledge-and-skills.md#与-spring-ai-最新能力的关系) |
+
 ## 快速开始
 
 ### 前置条件
@@ -149,6 +157,7 @@ npm run build
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | 可复制的 REST、聊天、RAG、多模态和 Docker 示例 |
 | [docs/HARNESS.md](docs/HARNESS.md) | 验证和测试矩阵 |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | 故障排查 |
+| [docs/knowledge-and-skills.md](docs/knowledge-and-skills.md) | 知识库文档、运行时 Skills 和 Spring AI 能力边界 |
 | [frontend/README.md](frontend/README.md) | 前端开发入口 |
 | [TEST_REPORT.md](TEST_REPORT.md) | 带日期的历史测试记录 |
 
