@@ -95,3 +95,13 @@ cd frontend && npm run build
 - 在根 `README.md`、`AGENTS.md`、`docs/README.md`、`docs/configuration.md` 和 `docs/ARCHITECTURE.md` 增加发现入口。
 - 记录 Spring AI `2.0.1` 核心的 Tool Search、MCP、RAG 能力，以及 Spring AI Community `spring-ai-agent-utils` 的 `SkillsTool`。
 - 明确当前项目不是重复实现 Spring AI 的 RAG/Tool Calling，但确实自定义实现了部分与社区 SkillsTool 重叠的文件发现和渐进式加载机制；是否替换应按“通用 Skills、工具 Token 优化、跨进程服务”三个目标分别评估。
+
+## 后续增量：社区 SkillsTool 质量与迁移评估
+
+> **状态**: 已完成
+> **最后核对**: 2026-08-23
+
+- 审阅 `spring-ai-agent-utils` 的 `SkillsTool`、`Skills`、`MarkdownParser`、专项测试、Maven Central POM、CI 和公开 issue。
+- 结论：社区库适合 Spring AI 2.0 时代的通用 Skills 实验和内部工具，但当前项目不应直接切换。
+- 关键阻塞项：发布基线是 Spring AI `2.0.0`/Spring Framework `7.0.8`；轻量 frontmatter 解析器不兼容当前 `links`/嵌套 metadata；没有本项目的 API index、URL 校验、受限 references 和 AG-UI 前端确认边界。
+- 评估矩阵、风险、兼容性试读结果和 PoC 条件已落在 [knowledge-and-skills.md](../knowledge-and-skills.md)。

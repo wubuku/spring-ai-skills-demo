@@ -19,6 +19,7 @@
 | 添加公司保修、服务条款、配送政策等知识，让 Agent 基于文档回答 | [知识库与运行时 Skills：通过知识库提供知识](docs/knowledge-and-skills.md#路径一通过知识库提供知识) |
 | 新增查询订单、创建售后单、申请退款等可执行服务 | [知识库与运行时 Skills：通过运行时 Skills 提供服务](docs/knowledge-and-skills.md#路径二通过运行时-skills-提供服务) |
 | 判断 Spring AI 是否已经内置同类 Skills 能力 | [与 Spring AI 最新能力的关系](docs/knowledge-and-skills.md#与-spring-ai-最新能力的关系) |
+| 评估社区 `spring-ai-agent-utils` 是否值得替换当前 Skills 实现 | [`SkillsTool` 质量与迁移评估](docs/knowledge-and-skills.md#spring-ai-agent-utils-质量与迁移评估) |
 
 ## 快速开始
 

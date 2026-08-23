@@ -193,7 +193,7 @@ Spring AI 目前需要区分三层，而不是用“Spring AI 是否支持 SKILL
 
 Spring AI 核心的 [Tool Search Tool](https://docs.spring.io/spring-ai/reference/api/tools/tool-search-tool.html) 会按会话索引工具，初始只向模型提供搜索工具，再把发现到的工具加入后续请求；[MCP 支持](https://docs.spring.io/spring-ai/reference/api/mcp/mcp-overview.html)则标准化暴露 tools、resources 和 prompts。这些能力可以替代“工具发现”或“跨进程工具暴露”的部分，但不等于本地 Skill 文件系统。
 
-另一方面，[Spring AI Community 的 `spring-ai-agent-utils`](https://github.com/spring-ai-community/spring-ai-agent-utils) 已经提供 [SkillsTool](https://github.com/spring-ai-community/spring-ai-agent-utils/blob/main/spring-ai-agent-utils/docs/SkillsTool.md)：支持带 YAML frontmatter 的 Markdown Skill、语义匹配、reference/helper files 和 progressive disclosure。它与本项目的文件格式和理念有明显重叠，但必须作为独立社区依赖评估，不应写成 Spring AI 核心已经内置了本项目的 `SkillRegistry`。
+另一方面，[Spring AI Community 的 `spring-ai-agent-utils`](https://github.com/spring-ai-community/spring-ai-agent-utils) 已经提供 [SkillsTool](https://github.com/spring-ai-community/spring-ai-agent-utils/blob/main/spring-ai-agent-utils/docs/SkillsTool.md)：支持 Markdown Skill、frontmatter、目录/JAR 资源加载和按需返回 Skill 正文。它与本项目的文件格式和理念有明显重叠，但必须作为独立社区依赖评估，不应写成 Spring AI 核心已经内置了本项目的 `SkillRegistry`。
 
 ### 结论：是不是重新发明轮子？
 
@@ -214,8 +214,68 @@ Spring AI 核心的 [Tool Search Tool](https://docs.spring.io/spring-ai/referenc
 3. 单独用 `ToolSearchToolCallingAdvisor` 测试大量 `ToolCallback` 时的 Token 与工具命中率，不要把它和 Markdown Skills 迁移绑成一次改造。
 4. 只有在 Spring Boot/Spring AI 主版本升级和 AG-UI 兼容验证通过后，再决定替换 `SkillRegistry`/`SkillsAdvisor`。
 
+### `spring-ai-agent-utils` 质量与迁移评估
+
+**结论先行：社区库本身值得关注，但当前项目不应直接切换。**
+
+#### 质量判断
+
+截至 **2026-08-23**，上游仓库具备以下积极信号：
+
+- Apache-2.0 许可证，已发布到 Maven Central；当前最新正式版为 `0.10.0`，仍属于 `0.x` API 阶段。
+- 有独立的 `SkillsToolTest`、`MarkdownParserTest`，覆盖文件系统目录、Spring `Resource`、JAR/Classpath JAR 和基础调用结果。
+- 有 GitHub Actions CI、Maven Central 发布流程和 GraalVM Runtime Hints；JAR 资源扫描比当前项目的启动扫描实现更系统。
+- 代码量、示例和文档都比较完整，适合作为 Spring AI 2.0 时代的通用 Agent 工具库参考。
+
+但这更接近“**可用于实验、示例和内部工具的中上质量社区库**”，还不能等同于针对企业业务 API 的成熟 Skill 平台。当前公开的主要风险包括：
+
+- 正式版本仍是 `0.10.0`，主分支已经进入 `0.11.0-SNAPSHOT`，API 仍可能变化。
+- `SkillsTool` 本身只是注册一个名为 `Skill` 的 `FunctionToolCallback`，把全部 Skill 元数据放进工具描述，由模型选择 `command`。这里的“语义匹配”本质上是模型根据描述做选择，不是独立的向量/检索匹配器。
+- `SkillsTool` 的实现只读取 `frontMatter["name"]`，其余字段主要原样渲染到工具描述。文档中的 `allowed-tools`、`model` 在 `SkillsTool` 中没有对应的权限执行或模型路由逻辑；这些字段不能被当作安全策略。
+- `reference files` 和 `helper scripts` 不是 `SkillsTool` 自己的受限读取/执行 API。Skill 返回基础目录，模型还需要另外获得 `FileSystemTools`、`ShellTools` 等工具；这会扩大本地文件和命令执行边界。
+- `MarkdownParser` 是逐行的轻量解析器，不是完整 YAML 解析器。它不支持本项目 `links` 的嵌套列表，也不能保留 OpenAPI Skill 的嵌套 `metadata` 结构。
+- 上游仍有与生产部署相关的公开问题：多 SkillsJar 依赖只发现一个资源、Spring Boot fat JAR 的 `jar:nested:` 扫描、GraalVM native image、非 OpenAI 模型工具调用、可插拔 SkillProvider 和权限声明等。对应问题见 [#28](https://github.com/spring-ai-community/spring-ai-agent-utils/issues/28)、[#32](https://github.com/spring-ai-community/spring-ai-agent-utils/issues/32)、[#37](https://github.com/spring-ai-community/spring-ai-agent-utils/issues/37)、[#50](https://github.com/spring-ai-community/spring-ai-agent-utils/issues/50)、[#56](https://github.com/spring-ai-community/spring-ai-agent-utils/issues/56)、[#59](https://github.com/spring-ai-community/spring-ai-agent-utils/issues/59)。
+
+本次审计还用当前项目的 Skill 文件做了兼容性试读：`add-to-cart` 的原始描述“将指定商品加入用户购物车”会被轻量解析器后面的关联 Skill 描述覆盖，`links` 列表也不会得到结构化结果。因此当前 `src/main/resources/skills/` 不能原样交给社区库。
+
+#### 与当前项目的适配矩阵
+
+| 能力 | `spring-ai-agent-utils` | 当前项目 | 判断 |
+|---|---|---|---|
+| 文件系统和 Classpath/JAR Skill 发现 | 较完整，有专门扫描和测试 | 能满足当前 `classpath:skills/*/SKILL.md` 场景 | 社区库更强 |
+| 结构化 frontmatter | 当前实现使用 Jackson YAML，能处理当前 `links` 文件格式；OpenAPI `metadata` 仍未映射到模型 | 上游轻量解析器不兼容当前 `links` 文件 | 当前项目更贴合 |
+| Level 1/2/3 渐进披露 | Level 1 目录 + 一个 Skill 工具返回完整正文；references 依赖额外文件工具 | `SkillsAdvisor`、`loadSkill`、`readSkillReference` 明确分层 | 当前项目更贴合 |
+| Skill `links` 图 | 有文档正文可自行描述，但没有对应结构化 API | `SkillMeta.links` + 提示词链路 | 当前项目更强 |
+| API index 和 URL 校验 | 没有业务 API 索引或 URL 白名单 | `SkillRegistry` 建索引，Java/浏览器侧校验 | 当前项目不可替代 |
+| 写操作确认和认证边界 | 不提供业务确认流程；脚本/文件工具边界需自行治理 | AG-UI 浏览器 `httpRequest`、Token 和确认流程已绑定 | 当前项目不可替代 |
+| Spring Boot / Spring AI 版本 | 发布版基于 Spring AI `2.0.0`、Spring Framework `7.0.8` | Spring Boot `3.4.2`、Spring AI `1.1.2` | 不能直接混用 |
+| 可复用包和上游测试 | Maven Central、独立测试和发布流程 | 当前 Skill 代码没有对应单元测试 | 社区库更强 |
+
+#### 是否值得切换
+
+对当前项目，答案是：**现在不值得直接切换**。
+
+原因不是社区库没有价值，而是替换后仍必须保留本项目的大部分领域层：
+
+1. 必须保留或重写真实 YAML 解析，以支持 `links`、版本；如果要保留 OpenAPI `metadata`，还要先扩展当前 `SkillMeta` 模型。
+2. 必须保留 `SkillRegistry` 的 API index、路径参数匹配、`/api/agui` 暴露和 URL 校验。
+3. 必须保留 `readSkillReference` 的受限资源读取，不能把业务 API Skill 的 references 自动降级为任意文件读取或 Shell 执行。
+4. 必须继续维护普通 `AgentService` 与 AG-UI/CopilotKit 的双工具边界、前端 Token 和写操作确认。
+5. 还需要先把项目从 Spring Boot `3.4.2` / Spring AI `1.1.2` 升级到社区库的 Spring AI 2.0 基线，并重新验证 AG-UI、工具参数解析和多模型 Provider。
+
+因此直接引入后，短期得到的主要是更好的资源扫描和上游测试，短期付出的是主版本升级、Skill 格式迁移和业务安全边界重写；收益不足以覆盖风险。
+
+#### 推荐策略
+
+- **当前阶段**：继续使用项目自有 `SkillRegistry`/`SkillsAdvisor`，补充针对 frontmatter、API index、路径校验和 `readSkillReference` 的单元测试。
+- **若目标是通用 Markdown Skills**：在独立分支做小型 PoC，使用一个没有 `links` 的平面 Skill，验证 `SkillsTool` 与 Spring AI 2.0、实际模型和可执行 JAR 的组合。
+- **若目标是大量 Java 工具的 Token 优化**：优先评估 Spring AI 核心 `ToolSearchToolCallingAdvisor`，不要把它和 Markdown Skill 迁移绑定。
+- **若目标是跨进程/跨语言能力**：优先评估 MCP，而不是把本地 Markdown 文件加载器当成服务协议。
+- **若目标是贡献上游**：最有价值的改进方向是完整 YAML 解析、`SkillProvider` SPI、受限 reference API、权限声明/验证和 Spring Boot fat JAR/native image 回归测试。
+
 ## 发现路径
 
 - 想配置公司政策、保修、配送、支付等知识：先读 [配置参考](configuration.md) 的“知识库”，再读 [操作示例](OPERATIONS.md) 的“记忆和 RAG”。
 - 想新增查询、创建、审批、售后等服务动作：先读本页“运行时 Skills”，再读 [系统架构](ARCHITECTURE.md) 和 `src/main/resources/skills/` 中的真实样例。
 - 想了解 Spring AI 原生能力与本项目自定义层的边界：读本页“与 Spring AI 最新能力的关系”，再回到 `pom.xml` 和官方 Tool Calling/MCP/RAG 文档。
+- 想判断社区 `SkillsTool` 是否值得替换当前实现：直接阅读本页的 [`spring-ai-agent-utils` 质量与迁移评估](#spring-ai-agent-utils-质量与迁移评估)。
