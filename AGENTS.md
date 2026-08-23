@@ -76,6 +76,18 @@ test-*.sh        端到端、回归和专项诊断脚本
 
 `*.bak`、诊断脚本和 `docs/drafts/` 中有不少历史排查产物。修改功能时以当前 Java/TypeScript 源码为准，不要把草稿中的旧方案当成现行架构。
 
+文档导航：
+
+- [docs/README.md](docs/README.md)：稳定文档、组件入口和草稿生命周期索引。
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：当前系统、普通 Agent 与 AG-UI 工具边界。
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)：后端/前端启动、profile 和开发顺序。
+- [docs/configuration.md](docs/configuration.md)：环境变量、数据库、向量库和外部模型。
+- [docs/rest-api.md](docs/rest-api.md)：Controller 端点、认证和 SSE 入口。
+- [docs/OPERATIONS.md](docs/OPERATIONS.md)：REST、聊天、记忆/RAG、多模态和 Docker 操作示例。
+- [docs/HARNESS.md](docs/HARNESS.md)：构建、测试和专项回归矩阵。
+- [docs/troubleshooting.md](docs/troubleshooting.md)：按症状排查启动、模型、工具、SSE 和前端问题。
+- [docs/drafts/](docs/drafts/)：计划、诊断和历史材料，不是自动可信的当前事实。
+
 ## 后端启动与构建
 
 ### 环境变量

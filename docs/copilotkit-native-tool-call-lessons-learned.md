@@ -1,9 +1,14 @@
 # CopilotKit 原生 httpRequest 工具调用 — 经验教训总结
 
 > **创建时间**: 2026-06-15
+> **文档状态**: 历史经验记录
 > **目的**: 总结实现"CopilotKit 原生 `useCopilotAction` 工具调用"过程中踩过的坑和学到的教训
 > **适用范围**: Spring AI + CopilotKit + AG-UI 协议的前后端混合工具调用场景
 > **阅读对象**: 未来的开发者（特别是需要维护或扩展此功能的开发者）
+>
+> 本文记录迁移过程，部分段落使用旧的 `useCopilotAction` 和“JWT”命名。
+> 当前实现使用 CopilotKit v2、`useHumanInTheLoop` 和 Demo Base64 token；
+> 当前架构请以 [架构说明](ARCHITECTURE.md) 为准。
 
 ---
 

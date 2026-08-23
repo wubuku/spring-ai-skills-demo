@@ -1,5 +1,13 @@
 # CopilotKit 集成指南
 
+> **文档状态**: 通用集成参考，部分示例来自历史实现。
+> **最后核对**: 2026-08-23
+>
+> 当前项目使用 Next.js `4000` 端口、CopilotKit `1.60.x`、CopilotKit v2
+> `CopilotKitProvider`/`useSingleEndpoint` 和浏览器 `useHumanInTheLoop`。
+> 本文的示例用于解释集成模式，不能替代项目的
+> [前端指南](../frontend/README.md) 和 [架构说明](ARCHITECTURE.md)。
+
 > **适用场景**: React + Node.js 一体化项目（前端 + BFF 在同一项目）
 > **集成时间**: 10-15 分钟 | **代码量**: ~35 行
 > **前置要求**: Node.js 项目 + Java Spring AI 后端
@@ -302,7 +310,7 @@ public class CorsConfig {
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:3000"));
+        config.setAllowedOrigins(List.of("http://localhost:4000"));
         config.setAllowedMethods(List.of("*"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);

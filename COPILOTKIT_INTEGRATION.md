@@ -1,4 +1,12 @@
-# 企业智能助手 - CopilotKit 集成完成
+# 企业智能助手 - CopilotKit 集成记录
+
+> **文档状态**: 历史集成记录（非当前事实入口）。
+> **最后核对**: 2026-08-23
+>
+> 当前端口、CopilotKit 版本、Provider、工具边界和认证描述请以
+> [架构说明](docs/ARCHITECTURE.md)、[前端指南](frontend/README.md)、
+> [配置参考](docs/configuration.md) 和 [REST API 参考](docs/rest-api.md) 为准。
+> 本文保留实现过程和旧方案背景，其中的 `3000`/`3001`、旧版本号、JWT 命名和旧确认模式可能已经过时。
 
 ## 项目概述
 

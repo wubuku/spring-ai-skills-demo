@@ -1,5 +1,9 @@
 # 问题排查记录：前端用户确认模式失效
 
+> **文档状态**: 历史诊断记录（2026-03-17）。
+> 当前实现已从旧的 `buildHttpRequest`/代码块确认模式迁移到 AG-UI 前端
+> `httpRequest` + `useHumanInTheLoop`；请以 [故障排查](troubleshooting.md) 和当前源码为准。
+
 ## 问题描述
 
 不管使用 DeepSeek 还是 MiniMax 模型测试，后端都固执的直接使用 `httpRequest` 工具"代用户操作"，而不是将请求元数据返回给前端、让用户确认后在前端执行。

@@ -27,7 +27,7 @@ This directory is a portable skill package:
 
 - Keep required instructions and references inside `.agents/skills/project-docs/`.
 - Use relative links from `SKILL.md` to `references/`.
-- Never depend on `/Users/...`, the source repository from which this package was copied, or undocumented machine-local files.
+- Never depend on an absolute user-home path, the source repository from which this package was copied, or undocumented machine-local files.
 - Declare external tools as prerequisites only when the workflow needs them, and check that they are available.
 - Read [`references/templates.md`](references/templates.md) before creating document scaffolds.
 - Read [`references/checklist.md`](references/checklist.md) when auditing or validating documentation.

@@ -1,0 +1,98 @@
+# 配置参考
+
+> **目的**: 记录环境变量、默认值、Profile 和外部依赖，不包含任何真实密钥。
+> **最后核对**: 2026-08-23
+
+## 配置优先级
+
+主要来源：
+
+1. `src/main/resources/application.yml`
+2. `src/main/resources/application-<profile>.yml`
+3. 环境变量和启动参数
+4. 配置类中的 Bean 条件和默认值
+
+当前基础配置显式激活 `postgresql`。因此“默认 H2”只适用于显式选择非 PostgreSQL profile 的本地运行，不是当前无参数启动的事实。
+
+## LLM Provider
+
+| 环境变量 | 用途 | 默认/示例 |
+|---|---|---|
+| `LLM_PROVIDER` | 选择 `openai`、`anthropic` 或 `minimax` | `openai` |
+| `OPENAI_API_KEY` | OpenAI-compatible API key | 无安全默认值 |
+| `OPENAI_BASE_URL` | OpenAI-compatible base URL | `https://api.openai.com` |
+| `OPENAI_MODEL` | 模型名 | `gpt-4o` |
+| `ANTHROPIC_API_KEY` | Anthropic-compatible API key | 无安全默认值 |
+| `ANTHROPIC_BASE_URL` | Anthropic base URL | `https://api.anthropic.com` |
+| `ANTHROPIC_MODEL` | 模型名 | `claude-3-5-sonnet-20241022` |
+| `SPRING_AI_MINIMAX_API_KEY` | MiniMax API key | 无安全默认值 |
+| `SPRING_AI_MINIMAX_BASE_URL` | MiniMax base URL | `https://api.minimax.chat` |
+| `SPRING_AI_MINIMAX_CHAT_OPTIONS_MODEL` | MiniMax 模型名 | `abab6.5g-chat` |
+
+Spring AI 自动配置的 chat 开关在基础 YAML 中被关闭，实际 ChatModel 由 `SpringAiConfig` 根据 `LLM_PROVIDER` 条件化创建。
+
+## Embedding、记忆和向量库
+
+| 环境变量 | 用途 | 默认/注意 |
+|---|---|---|
+| `SILICONFLOW_API_KEY` | Embedding API key | 非空才具备真实向量能力 |
+| `SILICONFLOW_URL` | Embedding base URL | 不要带 `/v1` |
+| `SILICONFLOW_MODEL` | Embedding 模型 | `BAAI/bge-m3` |
+| `SILICONFLOW_DIMENSIONS` | 向量维度 | `1024` |
+| `SPRING_PROFILES_ACTIVE` | 选择数据库和 VectorStore profile | 根配置当前为 `postgresql` |
+| `SPRING_DATASOURCE_URL` | JDBC 连接 | 可覆盖 PostgreSQL profile 中的本地 5432 地址 |
+| `SPRING_DATASOURCE_USERNAME` | 数据库用户 | 导出后可覆盖 profile 中的 `postgres` |
+| `SPRING_DATASOURCE_PASSWORD` | 数据库密码 | 导出后可覆盖 profile 中的 `123456` |
+
+非 PostgreSQL profile：
+
+- JDBC Chat Memory 使用 H2 文件 `./data/chat-memory.mv.db`。
+- VectorStore 使用 `SimpleVectorStore`，持久化到 `./data/vector-store.json`。
+- H2 控制台为 `/h2-console`。
+
+PostgreSQL profile：
+
+- 需要 PostgreSQL 和 `vector` 扩展。
+- 当前 `application-postgresql.yml` 的本地默认值是数据库 `spring-ai-skills-demo`、用户 `postgres`、密码 `123456`；这些值仅适用于本地 Demo，不能作为生产凭证。
+- `.env.example` 中的 `POSTGRES_USER`、`POSTGRES_PASSWORD` 主要供 Docker Compose 注释配置和本地约定使用；只设置这两个变量不会自动覆盖 Spring Boot 数据源。要覆盖当前 profile 的凭证，应导出 `SPRING_DATASOURCE_USERNAME`、`SPRING_DATASOURCE_PASSWORD`，或通过启动参数提供对应的 `spring.datasource.*` 配置。
+- 使用 `PgVectorStore`，默认表 `vector_store`。
+- 当前 YAML 使用余弦距离、HNSW 索引、1024 维。
+- Chat Memory JDBC schema 使用 PostgreSQL platform。
+
+## 知识库
+
+| 配置 | 用途 |
+|---|---|
+| `KNOWLEDGE_BASE_PATHS` | 逗号分隔的 classpath/file glob |
+| 默认值 | `classpath:knowledge-base/*.md` |
+
+不要把 `knowledge-extra/` 自动当作运行时知识库；是否加载由配置路径决定。
+
+## 视觉和语音转写
+
+| 环境变量 | 用途 |
+|---|---|
+| `VISION_BASE_URL` | 视觉模型 OpenAI-compatible base URL |
+| `VISION_API_KEY` | 视觉模型密钥 |
+| `VISION_MODEL` | 视觉模型名称 |
+| `TRANSCRIPTION_BASE_URL` | 转写服务 base URL |
+| `TRANSCRIPTION_API_KEY` | 转写服务密钥 |
+| `TRANSCRIPTION_MODEL` | 转写模型名称 |
+
+多模态聊天和流式转写只有在相应外部服务可用时才可以进行真实验证。
+
+## 应用和网络
+
+| 配置 | 当前值/规则 |
+|---|---|
+| `server.port` | `8080` |
+| `app.api.base-url` | `http://localhost:${server.port}` |
+| 文件上传上限 | 单文件 20MB，请求 25MB |
+| `JAVA_BACKEND_URL` | Next.js BFF 访问 Java 后端 |
+| `NEXT_PUBLIC_JAVA_BACKEND_URL` | 浏览器 `httpRequest` 访问 Java 后端 |
+
+## Docker 注意事项
+
+`Dockerfile` 使用 Corretto 21 构建和运行。`docker-compose.yml` 中仍有历史的 H2、确认模式和 Embedding URL 默认值，不能直接当作 YAML 当前事实；使用 Docker 前应检查 Compose 环境变量是否覆盖了应用 profile 和实际配置。
+
+任何密钥只放在本地 `.env` 或部署系统的 Secret 中，不提交到仓库。

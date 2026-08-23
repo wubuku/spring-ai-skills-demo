@@ -1,44 +1,34 @@
-# Enterprise Agent Frontend
+# CopilotKit 前端
 
-这是一个基于 CopilotKit 的现代化企业智能助手前端。
+这是项目的 Next.js + CopilotKit v2 前端。它通过 Next.js BFF 将浏览器请求转发到 Spring Boot 的 AG-UI SSE 端点，并在浏览器侧执行需要用户身份和确认的 HTTP 工具。
 
-## 技术栈
+## 技术基线
 
-- **Next.js 15.1.6** - React 框架
-- **React 19** - UI 库
-- **CopilotKit 1.54.0** - AI 聊天组件库
-- **Tailwind CSS** - 样式框架
-- **TypeScript** - 类型安全
-- **remark-gfm 4.0.0** - GitHub Flavored Markdown 支持
-- **rehype-highlight 7.0.0** - 代码语法高亮
+版本以 `package.json` 为准：
 
-## 架构说明
+- Next.js `15.1.6`
+- React `19`
+- CopilotKit `1.60.x`
+- `@ag-ui/client` `^0.0.47`
+- TypeScript `5`
+- Tailwind CSS `3`
 
-```
-前端 (Next.js + CopilotKit)
-    ↓ HTTP POST + SSE
-BFF 层 (/api/copilotkit)
-    ↓ HTTP POST + SSE (AG-UI 协议)
-Java 后端 (Spring AI)
-```
+## 运行
 
-## 开发指南
-
-### 安装依赖
+先启动 Java 后端：
 
 ```bash
-npm install
+mvn spring-boot:run -DskipTests
 ```
 
-### 运行开发服务器
+再在本目录安装和启动前端：
 
 ```bash
+npm ci
 npm run dev
 ```
 
-应用将在 http://localhost:3000 启动
-
-### 构建生产版本
+开发服务器使用 `http://localhost:4000`，生产预览使用同一端口：
 
 ```bash
 npm run build
@@ -47,384 +37,71 @@ npm start
 
 ## 环境变量
 
-创建 `.env.local` 文件：
+`.env.local` 至少可以配置：
 
-```
+```dotenv
 JAVA_BACKEND_URL=http://localhost:8080
+NEXT_PUBLIC_JAVA_BACKEND_URL=http://localhost:8080
 ```
 
-## 功能特性
+- `JAVA_BACKEND_URL`：Next.js 服务端 BFF 访问 Java 后端。
+- `NEXT_PUBLIC_JAVA_BACKEND_URL`：浏览器侧登录和 `httpRequest` 访问 Java 后端。
 
-- ✅ 实时流式响应（SSE）
-- ✅ 会话记忆（ChatMemory）
-- ✅ 工具调用（SkillTools）
-- ✅ 确认模式（人在回路）
-- ✅ 技能加载（商品管理、宠物商店等）
-- ✅ OpenAPI 技能解析（Swagger Petstore）
-- ✅ 响应式设计
-- ✅ 深色模式支持
+## 当前请求链路
 
-## 测试状态
-
-本项目已通过完整的 Playwright 浏览器自动化测试，测试覆盖率达到 **100%**。
-
-### 已测试功能
-
-✅ **基础功能测试**（5项）
-- 基本对话能力
-- 技能加载和工具调用
-- 商品查询和数据展示
-- 智能搜索判断
-- 多轮会话记忆
-
-✅ **宠物商店测试**（3项）
-- OpenAPI 技能加载（swagger-petstore-openapi-3-0）
-- 宠物 API 查询（GET /api/v3/pet/findByStatus）
-- 结构化数据返回（宠物列表）
-
-**详细测试报告**: 参见项目根目录的 `TEST_REPORT.md`
-
-## 技术架构
-
-### BFF 层配置（关键）
-
-BFF 层使用 **CopilotRuntime** 和 **HttpAgent** 连接到 Java 后端：
-
-```typescript
-// app/api/copilotkit/route.ts
-import { CopilotRuntime, copilotRuntimeNextJSAppRouterEndpoint } from "@copilotkit/runtime";
-import { HttpAgent } from "@ag-ui/client";
-
-const runtime = new CopilotRuntime({
-  agents: {
-    // 使用 "default" 作为 agent 名称，CopilotPopup 会自动使用
-    default: new HttpAgent({
-      url: `${JAVA_BACKEND_URL}/api/agui`,
-    }),
-  },
-});
-
-const { handleRequest } = copilotRuntimeNextJSAppRouterEndpoint({
-  runtime,
-  endpoint: "/api/copilotkit",
-});
-
-export async function POST(req: NextRequest) {
-  return handleRequest(req);
-}
+```text
+CopilotKit v2 UI
+  -> CopilotKitProvider(runtimeUrl="/api/copilotkit", useSingleEndpoint)
+  -> app/api/copilotkit/route.ts
+  -> CopilotRuntime + HttpAgent
+  -> POST http://localhost:8080/api/agui
+  -> SpringAIAgent
 ```
 
-**关键配置要点**:
-1. ✅ 使用对象格式注册 `agents`（不是数组）
-2. ✅ 使用 `"default"` 作为 agent 名称
-3. ✅ 正确配置 `@ag-ui/client@^0.0.47` 版本
-4. ✅ 移除 CopilotPopup 的 `agent` 属性（使用默认 agent）
+关键文件：
 
-### 数据流
+| 文件 | 职责 |
+|---|---|
+| `app/layout.tsx` | 挂载 `CopilotProvider` |
+| `components/CopilotProvider.tsx` | v2 Provider、single endpoint 和认证 headers |
+| `app/api/copilotkit/route.ts` | BFF、转发 Authorization 到 Java |
+| `app/page.tsx` | 页面、登录入口、CopilotPopup 和消息渲染 |
+| `components/AuthProvider.tsx` | 登录、登出和 `localStorage.auth_token` |
+| `hooks/useHttpRequestTool.tsx` | 浏览器 HTTP 工具、URL 校验和人在回路 |
 
-```
-用户输入 → CopilotPopup 组件
-         ↓ POST /api/copilotkit
-         BFF 层（CopilotRuntime + HttpAgent）
-         ↓ POST /api/agui（AG-UI 协议）
-         Java 后端（SpringAIAgent + ChatClient）
-         ↓ 工具调用（loadSkill + httpRequest）
-         业务 API（商品管理、宠物商店等）
-         ↓ SSE 流式响应
-         前端实时显示
-```
+## 浏览器 `httpRequest` 工具
 
-## Markdown 渲染增强
+AG-UI 模式下后端只注册 `loadSkill` 和 `readSkillReference`。浏览器侧 `useHttpRequestTool` 注册唯一的 `httpRequest`：
 
-### 自定义 Markdown 组件
+- `GET` 自动执行。
+- `POST`、`PUT`、`PATCH`、`DELETE` 在 `executing` 状态显示确认 UI。
+- 确认后通过 `respond()` 将结果返回给 CopilotKit，触发后端下一轮 Agent run。
+- 从 `localStorage.auth_token` 读取 Demo token，发送 `Authorization: Bearer ...`。
+- 请求前获取 `/api/agui/skills/api-index`，校验或纠正 API 路径。
 
-项目为 CopilotPopup 配置了自定义 Markdown 渲染器，确保所有 Markdown 格式都能正确显示：
+不要恢复 v1 `useCopilotAction.renderAndWaitForResponse`，也不要在后端 AG-UI 配置中再次注册同名 `httpRequest` 或 `buildHttpRequest`。
 
-```tsx
-// app/page.tsx
-<CopilotPopup
-  markdownComponents={{
-    // 自定义表格渲染
-    table: (props) => (
-      <div className="overflow-x-auto my-4">
-        <table className="min-w-full border-collapse border" {...props} />
-      </div>
-    ),
-    thead: (props) => <thead className="bg-gray-100" {...props} />,
-    tbody: (props) => <tbody className="divide-y" {...props} />,
-    th: (props) => <th className="border px-4 py-2 font-semibold" {...props} />,
-    td: (props) => <td className="border px-4 py-2" {...props} />,
-    // ... 更多自定义组件
-  }}
-/>
+## CSS 和构建支持文件
+
+`next.config.js` 为 CopilotKit v2 CSS 和 Mermaid 入口配置了 webpack alias。`postinstall` 会调用：
+
+- `scripts/transform-v2-css.mjs`
+- `patches/copilotkit-v2-v3.css`
+- `patches/stubs/mermaid-core-stub.mjs`
+
+这些文件当前可能被 `.gitignore` 忽略。全新 clone 后运行 `npm ci` 或构建前，先确认它们存在；缺少时应先解决依赖来源和可复现性问题。
+
+## 验证
+
+```bash
+npm run build
 ```
 
-**支持的 Markdown 元素**：
-- ✅ 表格（GFM tables）- 带边框、悬停效果、深色模式
-- ✅ 列表（有序、无序）
-- ✅ 代码块（行内、块级）
-- ✅ 加粗、斜体
-- ✅ 引用
-- ✅ 链接
-- ✅ 标题（h1-h6）
+涉及 AG-UI、认证、浏览器工具或 SSE 时，还需要启动后端并参考：
 
-### 可复用的 Markdown 组件
+- [项目架构](../docs/ARCHITECTURE.md)
+- [REST 与 SSE API 参考](../docs/rest-api.md)
+- [验证手册](../docs/HARNESS.md)
+- [故障排查](../docs/troubleshooting.md)
 
-项目还包含一个独立的 MarkdownRenderer 组件（`components/MarkdownRenderer.tsx`），可在其他地方复用：
-
-```tsx
-import { MarkdownRenderer } from '@/components/MarkdownRenderer';
-
-<MarkdownRenderer content={markdownContent} />
-```
-
-## 项目状态与改进建议
-
-### ✅ 已完成的功能
-
-1. **CopilotKit 集成**
-   - ✅ 正确配置 Agent 连接
-   - ✅ SSE 流式响应
-   - ✅ 会话记忆
-
-2. **Markdown 渲染**
-   - ✅ 自定义表格样式
-   - ✅ 深色模式支持
-   - ✅ GFM 支持（表格、删除线、任务列表）
-
-3. **UI/UX**
-   - ✅ 响应式设计
-   - ✅ 美观的表格和列表样式
-   - ✅ 代码高亮支持
-
-### ⚠️ 可改进的地方
-
-#### 1. MarkdownRenderer 组件未被使用
-
-**现状**：
-- 创建了 `components/MarkdownRenderer.tsx` 组件
-- 当前 `app/page.tsx` 没有导入和使用它
-- CopilotPopup 的 `markdownComponents` 已经足够
-
-**建议**：
-- **选项 1（推荐）**：保留作为备用，未来可能用于其他页面
-- **选项 2**：删除该组件，减少维护负担
-
-#### 2. TypeScript 类型可以更严格
-
-**现状**：
-```tsx
-table: (props: any) => (...)
-```
-
-**改进建议**：
-```tsx
-import { ComponentPropsWithoutRef } from 'react';
-
-table: (props: ComponentPropsWithoutRef<'table'>) => (...)
-```
-
-**影响**：不影响功能，只是类型安全性可以提升
-
-#### 3. 依赖版本锁定
-
-**现状**：
-```json
-"@copilotkit/react-core": "1.53.0"  // 锁定版本
-```
-
-**建议**：
-- 继续关注 CopilotKit 更新
-- 测试新版本后再升级
-- 当前版本稳定可用
-
-### 🎯 未来可能的增强
-
-1. **代码复制按钮**
-   - 为代码块添加一键复制功能
-
-2. **表格功能增强**
-   - 表格排序
-   - 表格筛选
-   - 导出为 CSV
-
-3. **性能优化**
-   - 使用 React.memo 优化表格组件
-   - 虚拟滚动（如果表格数据很大）
-
-## 依赖说明
-
-### 核心依赖
-
-| 依赖 | 版本 | 用途 |
-|------|------|------|
-| `@copilotkit/react-core` | 1.54.0 | CopilotKit 核心功能 |
-| `@copilotkit/react-ui` | 1.54.0 | CopilotKit UI 组件 |
-| `@copilotkit/runtime` | 1.54.0 | CopilotKit 运行时 |
-| `@ag-ui/client` | ^0.0.47 | AG-UI 协议客户端 |
-| `remark-gfm` | ^4.0.0 | GFM Markdown 支持 |
-| `rehype-highlight` | ^7.0.0 | 代码语法高亮 |
-
-### 为什么需要 remark-gfm 和 rehype-highlight？
-
-- **CopilotKit 内部使用**：`@copilotkit/react-ui` 内部导入并使用 `remark-gfm`
-- **MarkdownRenderer 使用**：可复用组件需要这两个依赖
-- **支持 GFM 功能**：表格、删除线、任务列表等
-
-## 故障排查
-
-### 常见问题
-
-**Q: Agent 'default' not found 错误？**
-- 检查 `app/api/copilotkit/route.ts` 中 agent 注册格式
-- 确保使用对象格式：`agents: { default: ... }`
-- 不要使用数组格式
-
-**Q: Markdown 表格不显示？**
-- 检查 `markdownComponents` 配置是否正确
-- 确保后端返回的是纯 Markdown 文本
-- 查看浏览器控制台是否有错误
-
-**Q: 深色模式不生效？**
-- 确保自定义组件包含 `dark:` 前缀的样式
-- 检查 Tailwind CSS 配置
-
-## 贡献指南
-
-提交代码前请确保：
-1. ✅ 运行 `npm run lint` 检查代码风格
-2. ✅ 测试 Markdown 渲染功能
-3. ✅ 测试深色模式
-4. ✅ 检查响应式设计
-
-## 许可证
-
-MIT License
-
----
-
-## 经验教训总结（2025年3月）
-
-### 问题背景
-
-在实现 CopilotKit 确认对话框功能时，遇到一个关键问题：SSE 流式输出过程中，如何正确检测和显示 `http-request` 代码块。
-
-### 核心发现
-
-**CopilotKit 的 SSE 处理机制**：
-- CopilotKit 会自动收集、转义、拼接 SSE 流内容
-- 消息内容在流式输出过程中会不断更新
-- 需要等待 SSE 完成后（即 `isLoading=false`）才能获取完整的消息内容
-
-### 关键解决方案
-
-1. **使用 `useCopilotContext` 获取 `isLoading` 状态**
-   ```typescript
-   const { isLoading } = useCopilotContext();
-   // isLoading = true 表示 SSE 正在传输
-   // isLoading = false 表示 SSE 已完成
-   ```
-
-2. **SSE 完成后提取代码块**
-   ```typescript
-   // 只有在流完成后才提取 http-request 代码块
-   const showConfirm = !isLoading && requestMeta && !isConfirmed;
-   ```
-
-3. **请求 Key 必须包含参数**
-   - 什么是请求 Key？它是用于唯一标识一个 HTTP 请求的字符串
-   - 作用：避免同一个请求重复显示确认对话框
-   - 初始实现只使用 `method + URL` 作为 Key
-   - 导致 "添加商品 ID=3" 和 "添加商品 ID=5" 被视为相同请求
-   - 正确做法：`method + URL + JSON.stringify(params)`
-   ```typescript
-   // 例如：
-   // 请求1: POST /api/products, {productId: 3}
-   // 请求 Key: "POST-/api/products-{\"productId\":3}"
-   //
-   // 请求2: POST /api/products, {productId: 7}
-   // 请求 Key: "POST-/api/products-{\"productId\":7}"
-   //
-   // 两个请求的 Key 不同，所以会分别显示确认对话框
-   ```
-
-   **⚠️ 设计权衡**：
-   - 当前设计：确认过的请求在**同一消息卡片**中不会再次显示确认对话框
-   - 关键改进：请求 Key 包含消息 ID（messageId），确保不同消息卡片的相同请求会分别确认
-     - 消息A + 请求X：确认后不会在消息A中重复显示
-     - 消息B + 请求X：会单独显示确认对话框（因为是不同消息卡片）
-   - 潜在问题：用户可能想重复添加同一个商品，但不会收到确认提示
-   - 改进建议：
-     - 添加超时机制（如 5 分钟后重新显示确认）
-     - 提供"始终确认"选项
-     - 添加"不再询问"复选框
-
-4. **模块级状态缓存**
-   - 使用模块级 Map 缓存请求状态
-   - 防止组件在请求过程中被卸载/重挂载导致状态丢失
-
-### 踩坑记录
-
-| 问题 | 原因 | 解决方案 |
-|------|------|----------|
-| 代码块在流式输出时被忽略 | 流式过程中消息内容不完整 | 等待 `isLoading=false` 后再提取 |
-| 不同参数请求被跳过 | 请求 Key 缺少 params | Key 包含完整 params |
-| 组件卸载导致状态丢失 | 缺少持久化缓存 | 使用模块级 Map 缓存 |
-| subComponent 不生效 | CopilotPopup 的子组件渲染机制不同 | 作为独立组件渲染 |
-| 全局请求 Key 导致跨消息重复 | 初始实现用全局 Set 缓存确认状态 | Key 包含 messageId，按消息卡片隔离 |
-
-### 代码示例
-
-```typescript
-// 自定义 AssistantMessage 组件
-function CustomAssistantMessage(props: any) {
-  const { isLoading } = useCopilotContext();
-  const messageId = props.message?.id;  // 获取消息ID
-  const { cleanedContent, requestMeta } = extractHttpRequestMeta(content);
-
-  // 生成唯一的 request key（消息ID + 请求详情）
-  // 这样：同一消息的相同请求不重复确认，不同消息的相同请求会分别确认
-  const requestKey = messageId && requestMeta
-    ? `${messageId}-${getRequestKey(requestMeta)}`
-    : getRequestKey(requestMeta);
-
-  const isConfirmed = requestKey ? confirmedRequests.has(requestKey) : false;
-
-  // 只有 SSE 完成后才显示确认对话框
-  const showConfirm = !isLoading && requestMeta && !isConfirmed;
-
-  return (
-    <>
-      <DefaultAssistantMessage {...props} message={normalizedMessage} />
-      {showConfirm && (
-        <ConfirmDialogContainer
-          key={requestKey}
-          requestMeta={requestMeta}
-        />
-      )}
-    </>
-  );
-}
-```
-
-### 参考资料
-
-- [CopilotKit React Core API](https://docs.copilotkit.io/reference/react-core)
-- [SSE 流式响应机制](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
-
-### 探索 CopilotKit 源码的重要性
-
-这次功能实现过程中，官方文档信息有限，真正的答案在 CopilotKit 源码中：
-
-1. **源码位置**：`/Users/yangjiefeng/Documents/CopilotKit/CopilotKit`
-2. **关键探索点**：
-   - `@copilotkit/react-ui` 中的 `AssistantMessage` 组件实现
-   - `useCopilotContext` hook 提供的状态和方法
-   - `markdownTagRenderers` 的工作原理
-   - 消息渲染的生命周期
-
-3. **为什么需要读源码**：
-   - 文档不完整，很多 API 没有详细说明
-   - 某些行为只有源码才能解释（如 subComponent 的渲染时机）
-   - 理解内部机制才能正确定制 UI
-
+根目录 `TEST_REPORT.md` 是带日期的历史测试记录，不代表当前每次构建或外部服务状态；不要从其中的 `3000`/`3001` 或“JWT”旧命名推断当前配置。
