@@ -70,6 +70,7 @@ frontend/
 ag-ui-4j/        Git 子模块，不要把它当作主仓库普通源码目录修改
 data/            本地 H2、SimpleVectorStore 数据目录，已被 Git 忽略
 docs/            集成文档、诊断记录和设计草稿
+.agents/skills/  可移植的 Agent Skill 包；运行时 Skills 仍在 src/main/resources/skills/
 test-*.sh        端到端、回归和专项诊断脚本
 ```
 
@@ -358,6 +359,7 @@ mvn test
 - 保持现有包名、Spring Bean 名称、端点和配置键，除非任务明确要求迁移。
 - 提示词、Skill 文档、前端工具 schema 和后端工具执行逻辑必须一起检查。
 - 涉及 API 路径时，同时检查 `SkillRegistry` API index 和前端 `validateAndCorrectUrl`。
+- `.agents/skills/` 下的 Agent Skill 包必须自包含、使用相对引用，不能包含源机器绝对路径或密钥。
 - 不要提交 `.env`、`data/`、`target/`、`node_modules/`、Playwright 截图和调试产物。
 - 提交前至少运行 `mvn -DskipTests clean package`，并检查相关专项测试是否具备所需外部依赖。
 - 若改动只涉及文档，也要用 `git diff --check` 和 `git status --short` 验证。
