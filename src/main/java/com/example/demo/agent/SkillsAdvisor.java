@@ -76,11 +76,16 @@ public class SkillsAdvisor implements BaseAdvisor {
 
         log.info("[SkillsAdvisor] 所有技能列表: {}", registry.all().keySet());
 
-        String loadedContext = skillCoreTools.getLoadedSkills().stream()
-            .map(name -> registry.get(name)
-                .map(s -> "\n\n## 已激活技能：" + name + "\n" + s.getBody())
-                .orElse(""))
-            .collect(Collectors.joining());
+        var loadedSkills = skillCoreTools.getLoadedSkills();
+        String loadedContext = loadedSkills.isEmpty() ? "" :
+            "\n\n## 本轮已加载技能（禁止重复调用）\n"
+            + "以下技能已经在本轮加载。请直接使用对应文档，不要再次调用 `loadSkill`；"
+            + "如果需要执行 API，再调用 `httpRequest`。\n"
+            + loadedSkills.stream()
+                .map(name -> registry.get(name)
+                    .map(s -> "\n### 已激活技能：" + name + "\n" + s.getBody())
+                    .orElse(""))
+                .collect(Collectors.joining());
 
         String httpToolName = getHttpToolName();
         String modeRules = promptLoader.getPrompt("prompts/skills-advisor/mode-rules.template");

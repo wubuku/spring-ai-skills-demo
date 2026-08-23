@@ -23,6 +23,9 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
 ```
 
 使用 PostgreSQL 时确认数据库、凭证、`vector` 扩展和 1024 维 embedding 配置。
+如果 `.env` 使用 `POSTGRES_USER`/`POSTGRES_PASSWORD`，优先通过 `./dev.sh` 启动；
+它会补齐 Spring datasource 用户名/密码。直接运行 Maven 时需显式设置
+`SPRING_DATASOURCE_USERNAME` 和 `SPRING_DATASOURCE_PASSWORD`。
 
 ## 模型调用失败
 
@@ -42,6 +45,10 @@ mvn -version
 
 Embedding 404 时重点检查 `SILICONFLOW_URL`：它不应包含 `/v1`，Spring AI 会自动追加路径。
 
+Embedding 返回 `400 parameter is invalid` 时，检查是否发送了不被当前模型支持的
+`dimensions` 参数。`BAAI/bge-m3` 的推荐配置是保留 `SILICONFLOW_DIMENSIONS=1024`
+但不要设置 `SILICONFLOW_DIMENSIONS_ENABLED=true`；应用会使用模型返回的原生维度。
+
 ## Skill 或工具调用失败
 
 ### 症状
@@ -54,7 +61,8 @@ Embedding 404 时重点检查 `SILICONFLOW_URL`：它不应包含 `/v1`，Spring
 2. 确认 frontmatter 的 `name`、`description` 和 `links`。
 3. 先调用 `loadSkill`，分层 Skill 再调用 `readSkillReference`。
 4. 检查 `/api/agui/skills/api-index` 是否包含目标方法和路径。
-5. 检查 Controller 映射和前端 `validateAndCorrectUrl`。
+5. 检查 Controller 映射、`/api/agui/skills/api-index` 和前端
+   `frontend/lib/api-index-validation.mjs`。
 
 普通 Agent 和 AG-UI Agent 的 HTTP 工具不同：
 
@@ -115,6 +123,18 @@ npm run build
 ```
 
 当前 CopilotKit 1.60.x 的 v2 CSS 需要项目本地转换脚本和 webpack alias；Mermaid 入口也有本地 alias。支持文件缺失时，先检查 ignored 文件和安装流程。
+
+传统内嵌页面的真实浏览器验证：
+
+```bash
+./dev.sh --backend-only
+(cd frontend && npm run test:e2e:traditional)
+./dev.sh --stop
+```
+
+该测试使用 `/api/chat/text`，不是 Next.js/CopilotKit 的 AG-UI `/api/agui`。若页面加载和
+登录通过但聊天超时，先看 `DEV_RUNTIME_DIR` 下的后端日志，确认是否到达模型、是否执行
+`loadSkill`/`httpRequest`，再检查外部模型响应。
 
 ## 多模态或转写失败
 

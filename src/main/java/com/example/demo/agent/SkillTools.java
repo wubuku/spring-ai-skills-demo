@@ -5,6 +5,7 @@ import com.example.demo.model.Skill;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -12,7 +13,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.core.io.ClassPathResource;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,24 +26,28 @@ public class SkillTools {
     private final SkillRegistry registry;
     private final RestTemplate restTemplate;
     private final String apiBaseUrl;
+    private final SkillReferenceReader referenceReader;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final List<String> loadedSkills = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<String> loadedSkills = new CopyOnWriteArrayList<>();
 
     /**
      * confirm-before-mutate 配置已移除
      * 原因：AG-UI + SSE + Spring AI 场景不支持用户态 Token 透传
      * 后端不再试图"代表用户调用API"，任何需要用户 access token 的操作都推到前端
      */
+    @Autowired
     public SkillTools(SkillRegistry registry, RestTemplate restTemplate,
-                      @Value("${app.api.base-url}") String apiBaseUrl) {
+                      @Value("${app.api.base-url}") String apiBaseUrl,
+                      SkillReferenceReader referenceReader) {
         this.registry = registry;
         this.restTemplate = restTemplate;
         this.apiBaseUrl = apiBaseUrl;
+        this.referenceReader = referenceReader;
     }
 
     public void reset() { loadedSkills.clear(); }
     public List<String> getLoadedSkills() { return loadedSkills; }
-    public void markSkillLoaded(String skillName) { loadedSkills.add(skillName); }
+    public void markSkillLoaded(String skillName) { loadedSkills.addIfAbsent(skillName); }
 
     @Tool(description = "加载指定技能的完整操作指令。在使用任何技能前必须先调用此工具。")
     public String loadSkill(
@@ -51,14 +55,18 @@ public class SkillTools {
     ) {
         return registry.get(skillName)
             .map(skill -> {
-                loadedSkills.add(skillName);
+                boolean alreadyLoaded = loadedSkills.contains(skillName);
+                loadedSkills.addIfAbsent(skillName);
                 String linksHint = skill.getMeta().getLinks() == null ||
                     skill.getMeta().getLinks().isEmpty() ? "" :
                     "\n\n**相关技能（按需加载）：**\n" +
                     skill.getMeta().getLinks().stream()
                         .map(l -> "- `" + l.getName() + "`：" + l.getDescription())
                         .collect(Collectors.joining("\n"));
-                return "✓ 技能 `" + skillName + "` 已加载" + linksHint +
+                String loadStatus = alreadyLoaded
+                    ? "⚠️ 技能 `" + skillName + "` 已在本轮加载。请不要再次调用 `loadSkill`，直接使用下方指令。"
+                    : "✓ 技能 `" + skillName + "` 已加载";
+                return loadStatus + linksHint +
                        "\n\n---\n" + skill.getBody();
             })
             .orElse("✗ 错误：技能 `" + skillName + "` 不存在");
@@ -97,18 +105,26 @@ public class SkillTools {
     ) {
         log.info("[buildHttpRequest] 被调用! method={}, url={}", method, url);
 
+        String validationError = registry.validateApiRequest(method, url);
+        if (validationError != null) {
+            return "构建请求被拒绝：" + validationError;
+        }
+        validationError = validatePathParamValues(pathParams);
+        if (validationError != null) {
+            return "构建请求被拒绝：" + validationError;
+        }
+
         // 替换路径参数
-        String resolvedUrl = url;
-        if (pathParams != null && !pathParams.isEmpty()) {
-            for (Map.Entry<String, String> entry : pathParams.entrySet()) {
-                resolvedUrl = resolvedUrl.replace("{" + entry.getKey() + "}", entry.getValue());
-            }
+        String resolvedUrl = resolvePathParams(url, pathParams);
+        validationError = registry.validateResolvedApiRequest(method, resolvedUrl);
+        if (validationError != null) {
+            return "构建请求被拒绝：" + validationError;
         }
 
         // buildHttpRequest 的语义：只构建请求，不直接执行
         // 返回元数据供前端确认，前端拿到用户 token 后在自己的浏览器中执行
         log.info("[buildHttpRequest] {} 请求，返回确认元数据", method);
-        String confirmUrl = resolvedUrl.startsWith("http") ? resolvedUrl : apiBaseUrl + resolvedUrl;
+        String confirmUrl = apiBaseUrl + resolvedUrl;
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("method", method.toUpperCase());
         meta.put("url", confirmUrl);
@@ -134,19 +150,26 @@ public class SkillTools {
                                      Map<String, String> queryParams, Map<String, String> headers,
                                      Map<String, Object> body) {
         try {
+            String validationError = registry.validateApiRequest(method, url);
+            if (validationError != null) {
+                return "HTTP 请求被拒绝：" + validationError;
+            }
+            validationError = validatePathParamValues(pathParams);
+            if (validationError != null) {
+                return "HTTP 请求被拒绝：" + validationError;
+            }
             // 从 SecurityContextHolder 获取 JWT（AuthFilter 已设置）
             String jwt = extractJwt();
 
             // Step 1: 替换路径参数
-            String resolvedUrl = url;
-            if (pathParams != null && !pathParams.isEmpty()) {
-                for (Map.Entry<String, String> entry : pathParams.entrySet()) {
-                    resolvedUrl = resolvedUrl.replace("{" + entry.getKey() + "}", entry.getValue());
-                }
+            String resolvedUrl = resolvePathParams(url, pathParams);
+            validationError = registry.validateResolvedApiRequest(method, resolvedUrl);
+            if (validationError != null) {
+                return "HTTP 请求被拒绝：" + validationError;
             }
 
             // Step 2: 构建完整 URL
-            String fullUrl = resolvedUrl.startsWith("http") ? resolvedUrl : apiBaseUrl + resolvedUrl;
+            String fullUrl = apiBaseUrl + resolvedUrl;
             var uriBuilder = UriComponentsBuilder.fromHttpUrl(fullUrl);
             if (queryParams != null && !queryParams.isEmpty()) {
                 queryParams.forEach(uriBuilder::queryParam);
@@ -187,6 +210,37 @@ public class SkillTools {
         } catch (Exception e) {
             return "HTTP 请求失败：" + e.getMessage();
         }
+    }
+
+    private String validatePathParamValues(Map<String, String> pathParams) {
+        if (pathParams == null) {
+            return null;
+        }
+        for (Map.Entry<String, String> entry : pathParams.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key == null || key.isBlank() || value == null || value.isBlank()
+                || value.contains("/") || value.contains("\\")
+                || value.contains("?") || value.contains("#")
+                || value.contains("{") || value.contains("}")
+                || ".".equals(value) || "..".equals(value)
+                || value.chars().anyMatch(c ->
+                    Character.isWhitespace(c) || Character.isISOControl(c))) {
+                return "路径参数包含非法值。";
+            }
+        }
+        return null;
+    }
+
+    private String resolvePathParams(String url, Map<String, String> pathParams) {
+        String resolvedUrl = url;
+        if (pathParams != null && !pathParams.isEmpty()) {
+            for (Map.Entry<String, String> entry : pathParams.entrySet()) {
+                resolvedUrl = resolvedUrl.replace(
+                    "{" + entry.getKey() + "}", entry.getValue());
+            }
+        }
+        return resolvedUrl;
     }
 
     /**
@@ -234,14 +288,6 @@ public class SkillTools {
         @ToolParam(description = "技能名称，例如 swagger-petstore-openapi-3-0") String skillName,
         @ToolParam(description = "相对于该技能 references 目录的路径，例如 resources/pet.md 或 operations/addPet.md") String relativePath
     ) {
-        try {
-            var resource = new ClassPathResource("skills/" + skillName + "/references/" + relativePath);
-            String content = new String(resource.getInputStream().readAllBytes());
-            return content.length() > 4000
-                ? content.substring(0, 4000) + "\n...[文件过长已截断]"
-                : content;
-        } catch (Exception e) {
-            return "✗ 读取参考文件失败：skills/" + skillName + "/references/" + relativePath + " — " + e.getMessage();
-        }
+        return referenceReader.read(skillName, relativePath);
     }
 }

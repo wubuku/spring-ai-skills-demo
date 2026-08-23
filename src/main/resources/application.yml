@@ -95,7 +95,11 @@ siliconflow:
   api-key: ${SILICONFLOW_API_KEY:}
   base-url: ${SILICONFLOW_URL:https://api.siliconflow.cn}
   model: ${SILICONFLOW_MODEL:BAAI/bge-m3}
-  dimensions: ${SILICONFLOW_DIMENSIONS:1024}
+  # 部分 OpenAI-compatible Embedding 服务（例如 BAAI/bge-m3）不接受 dimensions
+  # 请求参数。默认不发送该参数，由服务端返回模型原生维度；只有确认 provider 支持
+  # 该参数时，同时设置 SILICONFLOW_DIMENSIONS_ENABLED=true。
+  dimensions: ${SILICONFLOW_DIMENSIONS:}
+  dimensions-enabled: ${SILICONFLOW_DIMENSIONS_ENABLED:false}
 
 # 知识库配置
 knowledge-base:

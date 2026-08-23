@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start -p 4000",
     "lint": "next lint",
+    "test:skills": "node tests/skills-url-mock.mjs",
+    "test:e2e:traditional": "node tests/traditional-ui-e2e.mjs",
     "postinstall": "node scripts/transform-v2-css.mjs"
   },
   "dependencies": {

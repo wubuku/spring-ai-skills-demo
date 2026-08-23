@@ -49,7 +49,9 @@
 重点材料：
 
 - [DOCUMENTATION_PLAN.md](drafts/DOCUMENTATION_PLAN.md)：本轮文档体系建设计划。
-- [skill-support-improvement-plan.md](drafts/skill-support-improvement-plan.md)：当前项目 SKILL 支持改进规划；实施前须完成规划文档的三轮连续无修改检查。
+- [skill-support-improvement-plan.md](drafts/skill-support-improvement-plan.md)：当前项目 SKILL
+  支持改进规划、P0 实施记录和后续 P1/P2/P3 路线；继续实施前须重新完成规划文档的三轮
+  连续无修改检查。
 - [copilotkit-native-tool-call-lessons-learned.md](copilotkit-native-tool-call-lessons-learned.md)：前后端工具协作的历史经验，适合理解 AG-UI 工具边界。
 - [PROBLEM_INVESTIGATION.md](PROBLEM_INVESTIGATION.md)：确认模式问题的历史排查记录，不能单独作为当前实现依据。
 - [spring-ai-agui-guide.md](drafts/spring-ai-agui-guide.md)：AG-UI 调研草稿，内容可能包含已替代方案。

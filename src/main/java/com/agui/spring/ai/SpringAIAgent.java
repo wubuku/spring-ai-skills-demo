@@ -1620,31 +1620,7 @@ public class SpringAIAgent extends LocalAgent {
             String method = node.has("method") ? node.get("method").asText() : "";
             String url = node.has("url") ? node.get("url").asText() : "";
             if (url.isEmpty() || method.isEmpty()) return null; // 缺失字段，让前端处理
-            if (url.startsWith("http")) return null; // 完整 URL，跳过校验
-            String urlPath = url.split("\\?")[0];
-            var apiIndex = skillRegistry.getApiIndex();
-            // 精确匹配
-            String exactKey = method.toUpperCase() + " " + urlPath;
-            if (apiIndex.containsKey(exactKey)) return null;
-            // 模式匹配（如 /api/products/1 匹配 /api/products/{id}）
-            for (String key : apiIndex.keySet()) {
-                String[] parts = key.split(" ", 2);
-                if (parts.length != 2 || !parts[0].equals(method.toUpperCase())) continue;
-                String pattern = parts[1].replaceAll("\\{[^}]+}", "[^/]+");
-                if (urlPath.matches("^" + pattern + "$")) return null;
-            }
-            // URL 不合法，返回可用端点列表
-            StringBuilder hint = new StringBuilder();
-            hint.append("URL \"").append(url).append("\" 不是已注册的 API 端点。");
-            hint.append("请先调用 loadSkill 获取正确的 API 路径。\n");
-            hint.append("可用的 ").append(method.toUpperCase()).append(" 端点：\n");
-            for (var entry : apiIndex.entrySet()) {
-                if (entry.getKey().startsWith(method.toUpperCase())) {
-                    hint.append("  ").append(entry.getKey())
-                        .append(" → loadSkill(\"").append(entry.getValue().getSkillName()).append("\")\n");
-                }
-            }
-            return hint.toString();
+            return skillRegistry.validateApiRequest(method, url);
         } catch (Exception e) {
             log.debug("[SpringAIAgent] httpRequest URL 校验解析失败: {}", e.getMessage());
             return null; // 解析失败，让前端处理

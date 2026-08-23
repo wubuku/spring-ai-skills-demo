@@ -157,10 +157,10 @@ links:
 1. “读取某个 Skill 的 references 下单个文件”会扩大成通用本地文件读取边界；
 2. “辅助脚本”会引入命令执行能力，而不是当前项目明确的业务 API 工具边界。
 
-当前项目的 `SkillTools.readSkillReference()` 与 `SkillCoreTools.readSkillReference()` 虽然
-仍需补强路径校验，但设计意图更窄：只读指定 Skill 的 `references/` 资源，并把内容截断
-后返回给模型。未来改进应优先把这个受限 API 做正确，而不是直接改用通用 FileSystem/Shell
-工具。
+当前项目的 `SkillTools.readSkillReference()` 与 `SkillCoreTools.readSkillReference()` 已
+委托到同一个受限 reader：只读已注册 Skill 的 `references/` 资源，拒绝绝对路径、目录
+穿越、反斜杠、空路径段和编码的点号/分隔符，并对读取和返回分别设上限。未来改进仍应
+优先扩展这个受限 API 的测试和资源来源适配，而不是直接改用通用 FileSystem/Shell 工具。
 
 ## 与当前项目的能力矩阵
 

@@ -15,6 +15,14 @@
 
 ## 运行
 
+从仓库根目录使用 `.env` 一键启动后端和前端：
+
+```bash
+../dev.sh
+```
+
+也可以分别启动：
+
 先启动 Java 后端：
 
 ```bash
@@ -77,7 +85,7 @@ AG-UI 模式下后端只注册 `loadSkill` 和 `readSkillReference`。浏览器�
 - `POST`、`PUT`、`PATCH`、`DELETE` 在 `executing` 状态显示确认 UI。
 - 确认后通过 `respond()` 将结果返回给 CopilotKit，触发后端下一轮 Agent run。
 - 从 `localStorage.auth_token` 读取 Demo token，发送 `Authorization: Bearer ...`。
-- 请求前获取 `/api/agui/skills/api-index`，校验或纠正 API 路径。
+- 请求前获取 `/api/agui/skills/api-index`，只允许索引中的相对路径和路径参数匹配。
 
 不要恢复 v1 `useCopilotAction.renderAndWaitForResponse`，也不要在后端 AG-UI 配置中再次注册同名 `httpRequest` 或 `buildHttpRequest`。
 
@@ -101,7 +109,19 @@ AG-UI 模式下后端只注册 `loadSkill` 和 `readSkillReference`。浏览器�
 
 ```bash
 npm run build
+npm run test:skills
 ```
+
+内嵌在 Spring Boot 的传统页面真实 E2E（先启动根目录后端并准备 `.env` 中的真实
+LLM/Embedding 配置）：
+
+```bash
+npm run test:e2e:traditional
+```
+
+该测试使用 Playwright headless Chromium，覆盖页面 DOM、登录、`/api/auth/verify`、
+`/api/chat/text` 和最终商品结果；不使用截图。它验证普通 Agent，不是
+Next.js/CopilotKit AG-UI 流程。
 
 涉及 AG-UI、认证、浏览器工具或 SSE 时，还需要启动后端并参考：
 

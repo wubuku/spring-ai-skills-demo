@@ -16,6 +16,10 @@ Use this skill to create and maintain repository-local documentation for `spring
 5. **Keep the change scoped.** A documentation task does not justify unrelated code refactors, mass file moves, or rewriting every historical draft.
 6. **Plan substantive work before implementation.** Explore the repository first, write a self-contained plan for multi-step work, and keep the plan tool status synchronized with the document.
 7. **Review plans in a resettable loop.** After writing a plan, perform three complete system-level reviews with no document edits between them. Any factual, logical, completeness, feasibility, safety, or discoverability problem requires an immediate fix and resets the counter to zero.
+8. **Write acceptance tests before production changes.** For implementation work, define and add the backend integration/deterministic tests and frontend Mock Playwright checks that prove the requested behavior before changing production code.
+9. **Treat integration verification as a hard gate.** Backend changes require `mvn clean compile test-compile` plus related Skills tests. Frontend changes require `npx tsc --noEmit`, a production build, and the core Mock Playwright suite.
+10. **Review only after the gate passes.** Run three fixed-scope, non-overlapping, read-only convergence reviews for correctness/API compatibility, security/consistency, and test/build/documentation delivery. Do not use review as a substitute for tests or enter a test-addition loop during review.
+11. **Use Mock first, then real LLM only when needed and authorized.** Mock/deterministic tests must establish the fast local contract before real model calls. Real calls supplement model/tool/SSE integration evidence, require explicit local credential permission, and must be observed through logs and responses.
 
 Use progressive disclosure for documentation too:
 
@@ -162,6 +166,32 @@ while counter < 3:
 Report each review round with its time, scope, findings, action, and result. Do not edit
 the plan during a no-finding round. Keep using the repository's `AGENTS.md` as the
 long-lived policy entry point; this skill contains the portable workflow details.
+
+### 5. Implementation verification and convergence
+
+When a documentation task also changes application behavior, use this sequence:
+
+```text
+explore -> plan -> write acceptance tests -> implement -> hard-gate verification
+        -> three fixed-scope reviews -> update docs and evidence
+```
+
+The backend hard gate is `mvn clean compile test-compile` plus the relevant deterministic or
+integration tests. The frontend hard gate is `npx tsc --noEmit`, the production build, and a
+Mock Playwright suite. Frontend acceptance evidence must come from DOM/accessibility state,
+network requests/responses, JSON, read-only queries, and assertions; screenshots are not
+acceptance evidence. If a review finds a correctness, security, compatibility, cost, or data
+consistency defect, fix it, rerun the hard gate, and reset the three-review counter to zero.
+Do not add tests reactively during the review loop or perform unrelated refactors.
+
+When a behavior depends on model/tool selection or an end-to-end SSE path, run the smallest
+necessary real-LLM scenario only after the Mock gate passes and the user has authorized local
+`.env` credentials. Prefer the repository's `dev.sh` when it exists; if it does not, use the
+existing test script or Maven startup path and document the selected profile, port, and isolated
+data paths. Observe logs and responses during the call, stop on authentication, external-service,
+tool-loop, or startup failures, and classify the result instead of waiting blindly. Non-main
+worktrees must isolate ports, processes, databases, data directories, and logs. Never print or
+commit credentials.
 
 ## Workflow: Write
 
@@ -324,17 +354,23 @@ git status --short
 ### For backend facts or code examples
 
 ```bash
-mvn -DskipTests clean package
+mvn clean compile test-compile
+mvn -Dtest='*Skill*Test,*Api*Test' test
 ```
 
 ### For frontend commands or frontend references
 
 ```bash
 cd frontend
+npx tsc --noEmit
 npm run build
+npm run test:skills
 ```
 
 Only run this when the local frontend support files required by `package.json` and `next.config.js` exist. The current repository may contain ignored build support files; inspect their presence first.
+
+Frontend acceptance must use DOM/accessibility state, network requests/responses, JSON, read-only
+queries, and automated assertions. Screenshots are not acceptance evidence.
 
 ### For behavior and endpoint claims
 

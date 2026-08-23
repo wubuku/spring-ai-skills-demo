@@ -51,7 +51,7 @@
    - **params 和 body 必须是合法 JSON 字符串，不能是对象！**
 
 9. 【错误处理】
-   - 收到 `[URL_VALIDATION_ERROR]` → 重新调用 `loadSkill` 获取正确 URL
+   - 收到 URL 校验失败信息 → 重新调用 `loadSkill` 获取正确 URL
    - `params`/`body` 用对象而非 JSON 字符串 → 工具拒绝执行
 
 10. 【防止无限循环】

@@ -31,8 +31,11 @@ public class EmbeddingModelConfig {
     @Value("${siliconflow.model:BAAI/bge-m3}")
     private String siliconFlowModel;
 
-    @Value("${siliconflow.dimensions:1024}")
-    private int siliconFlowDimensions;
+    @Value("${siliconflow.dimensions:}")
+    private String siliconFlowDimensions;
+
+    @Value("${siliconflow.dimensions-enabled:false}")
+    private boolean siliconFlowDimensionsEnabled;
 
     /**
      * 创建嵌入模型 Bean
@@ -41,19 +44,26 @@ public class EmbeddingModelConfig {
      */
     @Bean
     public EmbeddingModel embeddingModel() {
-        log.info("Creating EmbeddingModel with baseUrl={}, model={}, apiKey={}",
+        log.info("Creating EmbeddingModel with baseUrl={}, model={}, apiKeyConfigured={}, dimensionsEnabled={}",
             siliconFlowBaseUrl, siliconFlowModel,
-            siliconFlowApiKey != null ? siliconFlowApiKey.substring(0, Math.min(10, siliconFlowApiKey.length())) + "..." : "null");
+            siliconFlowApiKey != null && !siliconFlowApiKey.isBlank(),
+            siliconFlowDimensionsEnabled);
 
         OpenAiApi openAiApi = OpenAiApi.builder()
             .baseUrl(siliconFlowBaseUrl)
             .apiKey(siliconFlowApiKey)
             .build();
 
-        OpenAiEmbeddingOptions embeddingOptions = OpenAiEmbeddingOptions.builder()
-            .model(siliconFlowModel)
-            .dimensions(siliconFlowDimensions)
-            .build();
+        OpenAiEmbeddingOptions.Builder embeddingOptionsBuilder = OpenAiEmbeddingOptions.builder()
+            .model(siliconFlowModel);
+
+        if (siliconFlowDimensionsEnabled
+            && siliconFlowDimensions != null
+            && !siliconFlowDimensions.isBlank()) {
+            embeddingOptionsBuilder.dimensions(Integer.valueOf(siliconFlowDimensions.trim()));
+        }
+
+        OpenAiEmbeddingOptions embeddingOptions = embeddingOptionsBuilder.build();
 
         return new OpenAiEmbeddingModel(openAiApi,
             org.springframework.ai.document.MetadataMode.EMBED,

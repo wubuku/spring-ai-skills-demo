@@ -56,49 +56,30 @@ public class PromptLoader {
 
     /** P2: SkillsAdvisor Mode Rules */
     private static final String DEFAULT_SKILLS_ADVISOR_MODE_RULES = """
-            6. 【强制规则 - 必须严格遵守】
-               - **httpRequest 工具**：仅用于调用**完全公开的、无需认证的外部 API**（如公开的天气 API，商品搜索 API 等）
-               - **buildHttpRequest 工具**：用于构建所有需要认证的 API 调用的请求元数据（如方法、路径、查询参数、请求头、请求体）
-               - **任何涉及当前用户数据的操作**（如查看购物车、查询订单、添加购物车、结算）：**必须使用 buildHttpRequest**
-               - **绝对禁止**：对需要认证的 API 使用 httpRequest 工具（会失败并返回 403 错误）
+            6. 【HTTP 请求工具使用规则】
+               - 唯一可用的 HTTP 工具：`httpRequest`（前端执行，自动携带用户 token）
+               - GET 请求自动执行；POST/PUT/DELETE/PATCH 弹确认对话框
+               - 参数都是字符串：`params`、`body` 都是 JSON 字符串
+               - 禁止输出 `http-request` 代码块或说"需要登录"
 
-            7. 【用户确认模式 - 核心流程】
-               步骤1：调用 buildHttpRequest 工具，传入 method、url、body 等参数；
-               步骤2：工具会返回 JSON 格式的请求元数据；
-               步骤3：在你的回复中先用自然语言清晰描述将要执行的操作（做什么、影响哪些数据、预期结果），然后**必须**输出 http-request 代码块，原样包含工具返回的 JSON。
+            7. 【技能探索流程】
+               - 查询、浏览、搜索、查看、添加、删除或修改数据时，必须使用工具获取真实结果
+               - 先调用 `loadSkill`，再从返回的 SKILL.md 获取 method、url 和参数
+               - 分层 Skill 还必须调用 `readSkillReference` 读取具体操作文档
+               - URL 必须来自 Skill 文档，禁止猜测
+               - 每轮最多调用一次 `httpRequest`；拿到结果后直接回答
 
-               **【关键格式要求 - 必须严格遵守】**：
-               - http-request（JSON）代码块的格式必须是：
-                 ```http-request
-                 {"method":"POST","url":"/api/xxx",...}
-                 ```
-               - 语言标识符 `http-request` 后面必须有一个**换行符**，JSON 必须在新的一行
-               - 禁止将 JSON 紧跟在语言标识符后面（如 ```http-request{...} ``` 是错误的）
+            8. 【httpRequest 参数格式】
+               - `method` 是 HTTP 方法字符串
+               - `url` 必须是 Skill API index 中的相对路径
+               - `params` 和 `body` 必须是合法 JSON 字符串，不能传对象
 
-            8. 【用户认证状态 - 重要说明】
-               - 用户已通过前端登录，前端会携带用户的 access token
-               - 当你在回复中输出 http-request 代码块后，前端会使用用户的 token 执行请求
-               - **禁止**说"需要认证"、"无法访问"、"需要用户登录"之类的话
-               - **禁止**使用 httpRequest 工具直接执行（会返回 403 错误）
-               - **必须**通过 buildHttpRequest 构建请求，让前端确认后执行
+            9. 【错误和输出规则】
+               - URL 校验失败时重新调用 `loadSkill` 获取正确路径
+               - 调用工具前不要输出文本；拿到结果后用中文组织回答
+               - 严禁输出推理文本、`[TOOL_CALL]` 或 XML 工具调用草稿
 
-               **正确示例**（从下一行开始直到 `---` 为止，之间的内容都是需返回的内容的示例)：
-               我现在帮你添加 iPhone15 到购物车：
-
-               ```http-request
-               {"method":"POST","url":"/api/products/cart","queryParams":{"productId":"1"}}
-               ```
-               ---
-
-            9. 【错误示例 - 绝对禁止这样做】
-               ❌ 错误做法：直接调用 httpRequest 工具添加购物车
-                  结果：返回 403 错误，因为后端无法透传用户 token
-               ❌ 错误做法：告诉用户"需要登录"、"无法访问"、"需要认证"
-                  结果：违反规则，前端已携带用户 token
-               ❌ 错误做法：不调用 buildHttpRequest 就直接输出 http-request 代码块
-                  结果：必须先调用工具获取元数据
-
-               ✅ 正确做法：先调用 buildHttpRequest 工具 → 获取 JSON → 输出 http-request 代码块
+            10. `loadSkill` 的 `skillName` 必须从 `<available_skills>` 列表逐字复制
             """;
 
     /** P3: Vision Prompt with hint */

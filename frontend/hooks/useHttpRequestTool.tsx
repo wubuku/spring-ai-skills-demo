@@ -3,6 +3,7 @@
 import React from "react";
 import { useHumanInTheLoop } from "@copilotkit/react-core/v2";
 import { z } from "zod";
+import { validateSkillApiUrl } from "@/lib/api-index-validation.mjs";
 
 /**
  * HTTP 请求参数 Schema
@@ -31,7 +32,7 @@ const HttpRequestParams = z.object({
   url: z
     .string()
     .describe(
-      "API 路径（相对路径如 /api/products 或完整 URL 如 http://example.com/foo）"
+      "API 路径（必须是 Skill API index 中的相对路径，如 /api/products）"
     ),
   // 注意：使用 "string" 而非 "object"，LLM 传入 JSON 字符串（如 '{"productId":"1"}'）
   params: z
@@ -81,11 +82,9 @@ async function fetchApiIndex(): Promise<Record<string, ApiIndexEntry>> {
 }
 interface UrlValidationResult {
   valid: boolean;
-  correctedUrl?: string;
   error?: string;
 }
-async function validateAndCorrectUrl(method: string, url: string): Promise<UrlValidationResult> {
-  if (url.startsWith("http")) return { valid: true };
+async function validateUrl(method: string, url: string): Promise<UrlValidationResult> {
   let index = await fetchApiIndex();
   if (!index || Object.keys(index).length === 0) {
     _apiIndexPromise = null; _apiIndexCache = null;
@@ -94,44 +93,7 @@ async function validateAndCorrectUrl(method: string, url: string): Promise<UrlVa
   if (!index || Object.keys(index).length === 0) {
     return { valid: false, error: "无法获取 API 端点索引，请稍后重试。" };
   }
-  const urlPath = url.split("?")[0];
-  const exactKey = `${method.toUpperCase()} ${urlPath}`;
-  if (index[exactKey]) { return { valid: true }; }
-  // Pattern match (e.g., /api/products/1 matches /api/products/{id})
-  for (const [key] of Object.entries(index)) {
-    const [m, p] = key.split(" ");
-    if (m !== method.toUpperCase()) continue;
-    const pattern = p.replace(/\{[^}]+\}/g, "[^/]+");
-    if (new RegExp(`^${pattern}$`).test(urlPath)) { return { valid: true }; }
-  }
-  // Auto-correct: find best matching endpoint by path segment overlap
-  const guessedSegments = urlPath.split("/").filter(Boolean);
-  let bestKey = "";
-  let bestScore = 0;
-  for (const [key] of Object.entries(index)) {
-    const [m, p] = key.split(" ");
-    if (m !== method.toUpperCase()) continue;
-    const candidateSegments = p.split("/").filter(Boolean);
-    const maxLen = Math.max(guessedSegments.length, candidateSegments.length);
-    let overlap = 0;
-    for (let i = 0; i < Math.min(guessedSegments.length, candidateSegments.length); i++) {
-      if (guessedSegments[i] === candidateSegments[i]) { overlap++; }
-      // Only match {param} wildcards for actual values (numbers, UUIDs), not path names
-      else if (candidateSegments[i].startsWith("{") && /^\d+$/.test(guessedSegments[i])) { overlap++; }
-    }
-    const score = overlap / maxLen;
-    if (score > bestScore) { bestScore = score; bestKey = key; }
-  }
-  if (bestKey && bestScore >= 0.5) {
-    const correctedPath = bestKey.split(" ")[1];
-    console.log(`[validateUrl] 🔄 AUTO-CORRECT: ${method} ${urlPath} → ${correctedPath} (score=${bestScore.toFixed(2)})`);
-    return { valid: true, correctedUrl: correctedPath };
-  }
-  const hint = Object.entries(index)
-    .filter(([k]) => k.startsWith(method.toUpperCase()))
-    .map(([k, e]) => `  ${k} → loadSkill("${e.skillName}")`)
-    .join("\n");
-  return { valid: false, error: `URL "${url}" 不是已注册的 API 端点。请先调用 loadSkill 获取正确的 API 路径。\n可用的 ${method.toUpperCase()} 端点：\n${hint}` };
+  return validateSkillApiUrl(method, url, index);
 }
 
 /**
@@ -162,14 +124,14 @@ async function executeHttpRequest(params: {
 }): Promise<HttpExecutionResult> {
   const { method, url, params: paramsJson, body } = params;
 
-  // Validate and auto-correct URL against registered API endpoints
-  const urlResult = await validateAndCorrectUrl(method, url);
+  // Validate the exact URL against the registered Skill API endpoints.
+  const urlResult = await validateUrl(method, url);
   if (!urlResult.valid) {
     console.warn("[executeHttpRequest] URL validation failed:", urlResult.error);
     return { success: false, status: 0, body: "", error: urlResult.error };
   }
-  // Use corrected URL if auto-corrected
-  const effectiveUrl = urlResult.correctedUrl || url;
+  // Keep the exact path supplied by the Skill/API index contract.
+  const effectiveUrl = url;
 
   // 解析 params JSON 字符串
   let pathParams: Record<string, string> = {};
@@ -185,10 +147,8 @@ async function executeHttpRequest(params: {
     }
   }
 
-  // 解析 URL：绝对 URL 直接使用，相对路径拼接 Java 后端地址
-  let fullUrl = effectiveUrl.startsWith("http")
-    ? effectiveUrl
-    : `${JAVA_BACKEND_BASE}${effectiveUrl.startsWith("/") ? "" : "/"}${effectiveUrl}`;
+  // 只执行已通过 API index 校验的相对路径。
+  let fullUrl = `${JAVA_BACKEND_BASE}${effectiveUrl.startsWith("/") ? "" : "/"}${effectiveUrl}`;
 
   // 拼接查询参数
   if (Object.keys(pathParams).length > 0) {
@@ -324,35 +284,27 @@ function HttpRequestRender(props: {
     );
   }
 
-  // Pre-validate and auto-correct URL before showing confirmation dialog
-  const [correctedUrl, setCorrectedUrl] = React.useState<string | null>(null);
-  const [urlValidated, setUrlValidated] = React.useState(false);
+  // Validate the exact URL before showing the confirmation dialog.
   React.useEffect(() => {
-    validateAndCorrectUrl(args.method, args.url).then(result => {
-      setUrlValidated(true);
+    validateUrl(args.method, args.url).then(result => {
       if (!result.valid) {
         // Truly unknown endpoint — auto-reject silently (no error display on page)
         console.warn("[HttpRequestRender] URL truly invalid, auto-rejecting:", result.error);
         respond?.(JSON.stringify({ success: false, status: 0, body: "", error: result.error }));
-      } else if (result.correctedUrl) {
-        console.log(`[HttpRequestRender] 🔄 Auto-corrected: ${args.url} → ${result.correctedUrl}`);
-        setCorrectedUrl(result.correctedUrl);
       }
     });
   }, [args.method, args.url]);
 
-  const displayUrl = correctedUrl || args.url;
-
   return (
     <HttpConfirmationDialog
       method={args.method}
-      url={displayUrl}
+      url={args.url}
       params={args.params}
       body={args.body}
       onConfirm={async () => {
         const res = await executeHttpRequest({
           method: args.method,
-          url: displayUrl,
+          url: args.url,
           params: args.params,
           body: args.body,
         });

@@ -70,7 +70,8 @@ AG-UI 模式下，后端只注册：
 - GET 自动执行。
 - POST、PUT、PATCH、DELETE 显示确认界面后执行。
 - 从浏览器 `localStorage` 读取 `auth_token` 并透传 `Authorization`。
-- 执行前调用 `/api/agui/skills/api-index` 校验和纠正 URL。
+- 执行前调用 `/api/agui/skills/api-index` 校验相对 URL；未知、绝对或非法路径直接拒绝，
+  不再自动改写模型提供的 URL。
 
 `SpringAIAgent` 关闭 Spring AI 内部工具执行，手动执行已注册后端工具；遇到前端工具时结束当前 SSE run，等待前端 `respond()` 触发下一轮。该逻辑还包含：
 

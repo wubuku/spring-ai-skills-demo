@@ -23,6 +23,25 @@ cp .env.example .env
 set -a && source .env && set +a
 ```
 
+### 一键启动开发环境
+
+推荐使用根目录脚本统一启动后端和前端：
+
+```bash
+./dev.sh
+```
+
+脚本读取根目录 `.env`，默认启动：
+
+- Spring Boot：`http://localhost:8080`
+- Next.js：`http://localhost:4000`
+
+默认 profile 为 `postgresql`；如果 `.env` 提供 `SPRING_DATASOURCE_URL`、
+`SPRING_DATASOURCE_DRIVER_CLASS_NAME` 以及 `POSTGRES_USER`/`POSTGRES_PASSWORD`，
+脚本会补齐 Spring datasource 用户名和密码。可使用
+`./dev.sh --backend-only`、`./dev.sh --frontend-only` 或
+`./dev.sh --stop` 控制组件。端口可通过 `BACKEND_PORT` 和 `FRONTEND_PORT` 覆盖。
+
 ### 编译和运行
 
 ```bash
@@ -80,6 +99,19 @@ npm run dev
 - Java 后端地址：由 `JAVA_BACKEND_URL` 和 `NEXT_PUBLIC_JAVA_BACKEND_URL` 分别控制服务端与浏览器端访问。
 
 如果 `frontend/scripts/transform-v2-css.mjs` 或 `frontend/patches/` 下的支持文件缺失，先恢复这些本地支持文件再运行 `npm ci`/`npm run build`。它们会被 `package.json`、`next.config.js` 或 postinstall 流程引用。
+
+## 传统页面 Playwright E2E
+
+内嵌在 Spring Boot 的传统页面使用普通 Agent 的同步接口
+`POST /api/chat/text`。完成 Mock/构建门槛并确认 `.env` 中的真实模型可用后：
+
+```bash
+./dev.sh --backend-only
+cd frontend
+npm run test:e2e:traditional
+```
+
+测试覆盖页面 DOM、登录、认证网络请求、真实聊天响应状态和商品结果 DOM；不使用截图。
 
 ## 常用开发顺序
 

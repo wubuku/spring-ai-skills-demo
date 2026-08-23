@@ -131,6 +131,70 @@ test-*.sh        端到端、回归和专项诊断脚本
 - 运行时 Skills 位于 `src/main/resources/skills/`；可移植 Agent Skills 位于 `.agents/skills/`；社区子模块只作参考。三者不能在文档或实现中混称。
 - `CLAUDE.md` 必须继续保持为指向本文件的兼容重定向，不在其中新增重复的 Agent 规则。
 
+## 实施与验收原则
+
+这些原则适用于后端、前端、运行时 Skill、API 校验和跨端联调等需要修改实现的任务。
+
+### 先设计验收，再修改实现
+
+1. 在规划阶段充分阅读本次改动涉及的 Java/TypeScript、配置、资源、Controller、Skill
+   文档和现有脚本，明确修改范围、风险、验收证据和回滚边界。
+2. 在改动生产代码前，一次性设计并编写覆盖本次行为的验收测试。优先使用尽可能端到端的
+   后端集成测试；不能依赖真实 LLM、Embedding、数据库或浏览器截图来证明离线契约。
+3. 前端验收至少包括 TypeScript 检查、生产构建和 Mock Playwright。前端证据只采用 DOM
+   可见性与可访问状态、网络请求/响应、接口 JSON、数据库只读查询和自动化断言；截图
+   不能作为验收依据。
+4. 测试应覆盖本次修改的公开行为和边界，不以简单 getter 或重复 review 代替验收测试。
+   外部 LLM 烟测可以补充真实链路证据，但必须与离线/Mock 质量门槛分开报告。
+5. 真实 LLM 集成测试必须后置：先让 Mock/确定性测试在秒级通过，再按改动范围选择必要
+   的真实模型场景。真实调用用于验证模型、工具协议和跨服务链路，不替代离线契约测试；
+   需要用户明确允许时，才使用仓库 `.env` 中的本地凭证。
+
+### 基本集成验证是硬门槛
+
+代码检查前必须先通过与改动相关的基本验证：
+
+```bash
+mvn clean compile test-compile
+mvn -Dtest='*Skill*Test,*Api*Test' test
+cd frontend && npx tsc --noEmit && npm run build
+```
+
+前端核心 Mock Playwright 必须在构建后运行。若命令因外部凭证、数据库、浏览器或依赖
+缺失失败，必须明确记录环境原因，不得把未验证的实现报告为完成。必要时可以使用
+`.env` 中的本地凭证启动非 Mock 后端并用 `curl` 验证，但不得提交密钥。
+
+### Mock 之后的真实 LLM 验证
+
+真实 LLM 验证遵循固定顺序和边界：
+
+1. 先完成本次相关的后端确定性/Mock 测试、前端构建和 Mock Playwright；Mock 未通过时
+   不启动真实模型，避免把流程错误变成昂贵且缓慢的外部等待。
+2. 用户允许使用本地凭证后，再选择最小但能证明本次行为的真实场景，例如 Skill
+   `loadSkill`、AG-UI SSE 工具回合、API index 和最终业务端点结果。控制调用次数和
+   输入规模，不把无关的多模态、RAG 或全量回归混入本次证据。
+3. 启动开发服务时优先使用根目录 `dev.sh`，并记录 profile、端口和 `.env` 提供的
+   数据库/模型配置；只有需要特殊隔离数据库或专项参数时，才使用显式 Maven 命令。
+4. 真实调用期间必须持续观察服务日志和 SSE/HTTP 输出。发现启动失败、认证失败、
+   外部凭证 401/403、工具重复循环、异常增长或服务无响应时立即停止等待，保存最小
+   诊断信息并区分外部依赖失败与实现失败。
+5. 非 `main` 工作区或其他分支不得复用 main 的端口、进程、测试数据库或可变数据；
+   使用隔离端口、临时数据库/数据目录和独立日志。当前 main 工作区的 `.env` 只可在
+   用户授权的本地验证中读取，密钥不得打印、写入日志或提交。
+
+### 硬门槛后的三轮收敛检查
+
+只有基本集成验证通过后，才进入固定范围、只读、互不重叠的三轮代码检查：
+
+1. 正确性与 API 兼容：检查本次修改的行为、错误处理、现有端点和工具契约。
+2. 安全与一致性：检查路径边界、URL allowlist、认证/确认边界、并发状态和数据一致性。
+3. 测试与交付：检查测试是否覆盖修改、构建/启动边界、文档状态、提交范围和回滚条件。
+
+检查阶段不得发散式探索，也不得采用“发现一个问题就临时补一个测试再全量重跑”的
+循环。只修复会影响本任务正确性、成本安全、兼容性或数据一致性的缺陷；风格和可选
+优化留待后续。使用从 `0` 开始的计数器，只有连续三轮无此类问题且未修改任何代码时
+才能结束；一旦修改代码，计数器重置为 `0`，修复后重新通过基本集成验证，再开始三轮。
+
 ## 后端启动与构建
 
 ### 环境变量
@@ -153,7 +217,9 @@ OPENAI_MODEL=gpt-4o
 
 - 图片理解：`VISION_BASE_URL`、`VISION_API_KEY`、`VISION_MODEL`。
 - 语音转写：`TRANSCRIPTION_BASE_URL`、`TRANSCRIPTION_API_KEY`、`TRANSCRIPTION_MODEL`。
-- 向量记忆/RAG：`SILICONFLOW_API_KEY`、`SILICONFLOW_URL`、`SILICONFLOW_MODEL`、`SILICONFLOW_DIMENSIONS`。
+- 向量记忆/RAG：`SILICONFLOW_API_KEY`、`SILICONFLOW_URL`、`SILICONFLOW_MODEL`；
+  `SILICONFLOW_DIMENSIONS` 仅在 provider 支持自定义维度且同时设置
+  `SILICONFLOW_DIMENSIONS_ENABLED=true` 时发送。
 
 在 zsh 中加载 `.env` 使用：
 
@@ -163,7 +229,23 @@ set -a && source .env && set +a
 
 不要把 `export $(cat .env ... )` 作为默认操作；复杂值和 zsh 的解析会使这种写法不可靠。
 
-### Maven 命令
+### 一键开发环境与 Maven 命令
+
+根目录 `dev.sh` 会读取 `.env`，默认以 `postgresql` profile 启动后端 `8080` 和前端
+`4000`，等待两个 HTTP 服务健康后返回。若 `.env` 使用
+`SPRING_DATASOURCE_URL`/`SPRING_DATASOURCE_DRIVER_CLASS_NAME` 加
+`POSTGRES_USER`/`POSTGRES_PASSWORD`，脚本会将后两个变量映射为 Spring datasource
+用户名/密码；不会打印密钥。
+
+```bash
+./dev.sh                 # 后端 + frontend
+./dev.sh --backend-only  # 只启动后端
+./dev.sh --frontend-only # 只启动 frontend
+./dev.sh --stop          # 精确停止 8080/4000 的监听进程
+```
+
+可用 `BACKEND_PORT`、`FRONTEND_PORT` 和 `DEV_RUNTIME_DIR` 覆盖端口/临时日志目录。
+开发服务日志写入系统临时目录，不写入仓库。
 
 ```bash
 # 编译、打包，不访问外部 LLM API
@@ -366,10 +448,12 @@ CopilotKit 使用 v2 `CopilotKitProvider` 和 `useSingleEndpoint`。不要把 v1
 Java 单元/集成测试：
 
 ```bash
-mvn test
+mvn clean compile test-compile
+mvn -Dtest='*Skill*Test,*Api*Test' test
 ```
 
-会自行启动后端的脚本（通常会占用或清理 `8080`，启动配置继承当前 shell 和 `.env`）：
+`mvn test` 还会自行启动后端的脚本（通常会占用或清理 `8080`，启动配置继承当前 shell
+和 `.env`）：
 
 ```bash
 ./test.sh                     # 已有健康服务则复用，否则启动；商品、聊天、认证和基础回归
@@ -389,9 +473,21 @@ mvn test
 ./test-sse-jwt.sh              # AG-UI SSE 认证透传；不会启动 Java 后端
 ```
 
-这些专项脚本通常还要求 `.env`、有效的 LLM/Embedding/视觉/转写服务或 PostgreSQL。`test-multimodal.sh`、`test-streaming.sh` 的多模态场景需要 `TEST_IMAGE_PATH`、`TEST_AUDIO_PATH`；`test-e2e-frontend.py` 需要后端 8080、前端 4000 和 Playwright。运行任何脚本前确认 8080 没有不应被清理的旧进程，并确认 profile 与数据库依赖匹配。
+这些专项脚本通常还要求 `.env`、有效的 LLM/Embedding/视觉/转写服务或 PostgreSQL。`test-multimodal.sh`、`test-streaming.sh` 的多模态场景需要 `TEST_IMAGE_PATH`、`TEST_AUDIO_PATH`；传统内嵌页面的真实浏览器验收使用：
 
-测试脚本和现有 `src/test` 都可能访问真实 LLM、视觉、ASR、Embedding 或 PostgreSQL。报告失败时先区分：
+```bash
+./dev.sh --backend-only
+cd frontend && npm run test:e2e:traditional
+./dev.sh --stop
+```
+
+该 E2E 使用 Playwright headless Chromium，通过 DOM、可访问状态、`/api/auth/verify`
+和 `/api/chat/text` 的网络状态，以及页面消费 JSON 后的商品结果完成断言，不使用截图。
+`test-e2e-frontend.py` 仍用于 Next.js/CopilotKit AG-UI 页面。运行任何脚本前确认目标端口
+没有不应被清理的旧进程，并确认 profile 与数据库依赖匹配。
+
+本次 SKILL 改进的离线确定性测试不得访问真实 LLM、视觉、ASR、Embedding 或 PostgreSQL。
+其他测试脚本和现有 `src/test` 可能访问这些外部服务。报告失败时先区分：
 
 - 编译/应用上下文失败。
 - 外部服务凭证或网络失败。
@@ -399,6 +495,19 @@ mvn test
 - 真实 Agent/前端行为失败。
 
 不要把一次外部 API 烟测失败直接归因于业务代码。
+
+前端构建与 Mock 验收：
+
+```bash
+cd frontend
+npx tsc --noEmit
+npm run build
+npm run test:skills
+```
+
+`test:skills` 只验证 Skill API index Mock、浏览器 URL allowlist 和工具 UI 的 DOM/网络
+行为，不使用截图作为证据。需要真实 AG-UI、认证或模型时，再运行已有专项脚本，并把
+环境依赖与实现结果分开记录。
 
 ## AG-UI 子模块与同步边界
 
@@ -425,7 +534,8 @@ mvn test
 - 小范围手工修改使用 `apply_patch`；不要用 shell 重定向覆盖源文件。
 - 保持现有包名、Spring Bean 名称、端点和配置键，除非任务明确要求迁移。
 - 提示词、Skill 文档、前端工具 schema 和后端工具执行逻辑必须一起检查。
-- 涉及 API 路径时，同时检查 `SkillRegistry` API index 和前端 `validateAndCorrectUrl`。
+- 涉及 API 路径时，同时检查 `SkillRegistry` API index 和前端
+  `frontend/lib/api-index-validation.mjs`/`validateUrl`。
 - `.agents/skills/` 下的 Agent Skill 包必须自包含、使用相对引用，不能包含源机器绝对路径或密钥。
 - 不要提交 `.env`、`data/`、`target/`、`node_modules/`、Playwright 截图和调试产物。
 - 提交前至少运行 `mvn -DskipTests clean package`，并检查相关专项测试是否具备所需外部依赖。

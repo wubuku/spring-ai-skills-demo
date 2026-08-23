@@ -1,9 +1,9 @@
 package com.example.demo.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -28,10 +28,17 @@ public class SkillCoreTools {
 
     private final SkillRegistry registry;
     private final SkillTools skillTools;
+    private final SkillReferenceReader referenceReader;
 
-    public SkillCoreTools(SkillRegistry registry, SkillTools skillTools) {
+    @Autowired
+    public SkillCoreTools(
+        SkillRegistry registry,
+        SkillTools skillTools,
+        SkillReferenceReader referenceReader
+    ) {
         this.registry = registry;
         this.skillTools = skillTools;
+        this.referenceReader = referenceReader;
     }
 
     public void reset() {
@@ -61,6 +68,7 @@ public class SkillCoreTools {
         }
         return registry.get(skillName)
             .map(skill -> {
+                boolean alreadyLoaded = skillTools.getLoadedSkills().contains(skillName);
                 skillTools.markSkillLoaded(skillName);
                 String linksHint = skill.getMeta().getLinks() == null ||
                     skill.getMeta().getLinks().isEmpty() ? "" :
@@ -75,7 +83,10 @@ public class SkillCoreTools {
                     mutationReminder = "\n\n⚠️ **关键提醒**：此技能涉及写操作。你**必须**调用 `httpRequest` 工具实际执行 API 调用，" +
                         "然后等待用户确认。**禁止**只用文字回复而不实际调用 API！";
                 }
-                return "✓ 技能 `" + skillName + "` 已加载" + linksHint +
+                String loadStatus = alreadyLoaded
+                    ? "⚠️ 技能 `" + skillName + "` 已在本轮加载。请不要再次调用 `loadSkill`，直接使用下方指令。"
+                    : "✓ 技能 `" + skillName + "` 已加载";
+                return loadStatus + linksHint +
                        "\n\n---\n" + skill.getBody() + mutationReminder;
             })
             .orElse("✗ 错误：技能 `" + skillName + "` 不存在。可用技能：" +
@@ -88,14 +99,6 @@ public class SkillCoreTools {
         @ToolParam(description = "技能名称，例如 swagger-petstore-openapi-3-0") String skillName,
         @ToolParam(description = "相对于该技能 references 目录的路径，例如 resources/pet.md 或 operations/addPet.md") String relativePath
     ) {
-        try {
-            var resource = new ClassPathResource("skills/" + skillName + "/references/" + relativePath);
-            String content = new String(resource.getInputStream().readAllBytes());
-            return content.length() > 4000
-                ? content.substring(0, 4000) + "\n...[文件过长已截断]"
-                : content;
-        } catch (Exception e) {
-            return "✗ 读取参考文件失败：skills/" + skillName + "/references/" + relativePath + " — " + e.getMessage();
-        }
+        return referenceReader.read(skillName, relativePath);
     }
 }

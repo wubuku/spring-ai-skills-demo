@@ -1,10 +1,12 @@
 # 当前项目 SKILL 支持改进规划
 
-> **状态**: 规划中，尚未实施
+> **状态**: P0 已实施并通过离线硬门槛；P1/P2/P3 按本文规划继续推进
 > **目的**: 在不直接替换生产链路的前提下，系统改进当前项目运行时 Skills 的正确性、安全性、可测试性、可发现性和未来迁移能力。
 > **最后核对**: 2026-08-23
 > **规划对应审计**: [Spring AI Community `SkillsTool` 审计报告](../spring-ai-agent-utils-audit.md)
-> **执行规则**: 本文依照根 [AGENTS.md 的规划与文档评审原则](../../AGENTS.md#规划与文档评审原则) 编写；实施前必须完成“三轮连续无修改”检查。
+> **执行规则**: 本文依照根 [AGENTS.md 的规划与文档评审原则](../../AGENTS.md#规划与文档评审原则)
+> 编写和维护；每次继续实施前都必须重新核对源码、测试和本文状态，并完成规划/实现的
+> 三轮连续无修改检查。
 
 ## 1. 决策摘要
 
@@ -62,24 +64,35 @@ path: spring-ai-agent-utils/
 - API 执行：普通链路由 Java 端 `SkillTools.httpRequest` 执行；AG-UI 后端只暴露
   `loadSkill`/`readSkillReference`，由浏览器侧 `httpRequest` 携带 Token 并处理写操作确认。
 
-### 2.3 当前已知缺口
+### 2.3 P0 实施后的当前状态
 
-以下缺口是本规划的实施依据，不等同于已修复：
+本次已完成并验证的 P0 范围：
 
-- frontmatter 在 `SkillRegistry` 中以字符串分隔符切分，缺少严格文档结构校验；
-- `SkillMeta` 只建模 `name`、`description`、`version`、`links`，OpenAPI Skill 的 metadata
-  目前未形成明确的领域模型；
-- `readSkillReference` 直接把用户/模型输入拼入 classpath 资源路径，未显式拒绝
-  `..`、绝对路径、反斜杠和越过目标 Skill 的路径；
-- 参考文件和 HTTP 响应通过字符数截断，没有统一的 UTF-8 字节、行数和错误类型契约；
-- API index 通过 Markdown 正则推断端点，平面与分层 Skill 的索引规则不同，缺少冲突、
-  方法和无效 URL 的集中校验；
-- 当前 `SkillTools.loadedSkills` 是组件字段，虽然每轮 reset，但并发请求隔离和流式/
-  普通/AG-UI 组合行为没有确定性单元测试；
-- 当前 `src/test` 主要是外部模型工具烟测，没有围绕 Skills 的离线单元测试；
-- SkillRegistry 的 classpath/fat-JAR/可复用包来源抽象不足；
-- 文档与 Skill 实现之间已有入口，但“当前实现 -> 社区对应代码 -> 评估 -> 改进计划”
-  的发现链此前不完整，本规划和审计报告补齐该链。
+- `SkillRegistry` 使用结构化 Jackson YAML frontmatter 解析，要求文档开头的独占
+  `---` 分隔线，校验 `name`、`description`、`links`，保留 `license`、`metadata` 和
+  额外 metadata；重复 Skill name 和 API index 冲突会启动失败。
+- `SkillReferenceReader` 将 Level 3 限制在已注册 Skill 的 `references/` 下，拒绝未知
+  Skill、绝对路径、反斜杠、空路径段、`.`、`..`、编码的点号/分隔符和超大资源；读取
+  上限为 64 KiB，模型返回上限为 4000 字符，普通 Agent 与 AG-UI 共用同一实现。
+- `SkillRegistry` 建立稳定排序的 API index，集中处理 method、相对路径、查询串、
+  fragment、路径参数、绝对 URL、目录跳转和未索引端点校验；路径参数替换后还会再次
+  校验最终 URL，防止模板校验被替换值绕过。
+- `AgUiController` 暴露 `hierarchical` 和 `referencePath`，`SpringAIAgent` 委托同一
+  后端校验；前端 `api-index-validation.mjs` 使用同等的 exact/template matching 语义，
+  不再自动纠正或执行绝对 URL。
+- `PromptLoader` 的 Java fallback 已与当前 AG-UI 唯一浏览器 `httpRequest` 工具契约
+  对齐，资源文件缺失时不会退回旧的 `buildHttpRequest`/代码块确认流程。
+
+仍未完成的缺口：
+
+- `SkillTools.loadedSkills` 仍是组件字段，尚无真正的请求/运行范围 context 和并发隔离
+  证据；这是 P1-B，不应由当前 P0 测试结果推断已解决。
+- 尚未抽象 `SkillSource`/`SkillProvider`，也没有独立 filesystem/classpath/JAR fixture
+  测试；这是 P1-C。
+- `SkillsAdvisor` 尚未加入 Level 1/2/3 指标、links 去重/循环保护、能力分类或风险标签；
+  这是 P2-A/P2-C。
+- 尚未升级 Spring AI 或直接引入社区库；Spring AI 2.x + 社区 `SkillsTool` 仍只允许在
+  独立 PoC 中评估。
 
 ## 3. 目标、非目标与成功定义
 
@@ -111,17 +124,72 @@ path: spring-ai-agent-utils/
 P0/P1 阶段完成的最低证据：
 
 ```text
-mvn -DskipTests clean package
-mvn -Dtest=<Skills-related deterministic tests> test
+mvn clean compile test-compile
+mvn -Dtest='SkillRegistryTest,SkillReferenceReaderTest' test
+cd frontend && npm run build
+cd frontend && npx tsc --noEmit
+cd frontend && npm run test:skills
 git diff --check
 ```
 
 并且测试能够证明：错误 frontmatter 可诊断、非法 references 路径被拒绝、合法
-references 可读取、API index 能区分方法和路径参数、并发请求不会互相污染 loaded state。
+references 可读取、API index 能区分方法和路径参数。并发请求不会互相污染 loaded state
+属于尚未完成的 P1-B，不在本次 P0 完成声明中。
+
+### 3.4 本次实施记录
+
+本次已落地的文件边界：
+
+| 范围 | 实现/测试证据 | 状态 |
+|---|---|---|
+| frontmatter、Skill 注册和 API index | `SkillRegistry.java`、`Skill.java`、`SkillDefinitionException.java`、`SkillRegistryTest.java` | 已完成 |
+| Level 3 reference 安全 | `SkillReferenceReader.java`、`SkillTools.java`、`SkillCoreTools.java`、`SkillReferenceReaderTest.java` | 已完成 |
+| Java/AG-UI URL 校验 | `SkillRegistry.java`、`SpringAIAgent.java`、`AgUiController.java` | 已完成 |
+| 浏览器 API index 校验 | `frontend/lib/api-index-validation.mjs`、`useHttpRequestTool.tsx`、`frontend/tests/skills-url-mock.mjs` | 已完成 |
+| Prompt fallback 兼容 | `PromptLoader.java` | 已完成 |
+| `.env` 一键开发环境 | `dev.sh` | 已完成 |
+| 传统页面真实浏览器验收 | `frontend/tests/traditional-ui-e2e.mjs`、`frontend/package.json` | 已完成 |
+| Embedding provider 参数兼容 | `EmbeddingModelConfig.java`、`application.yml` | 已完成 |
+| 资源 provider/JAR、turn context、指标 | 本文 P1/P2 设计 | 未实施 |
+
+离线硬门槛结果（2026-08-23）：
+
+```text
+mvn clean compile test-compile                         PASS
+mvn -Dtest='SkillRegistryTest,SkillReferenceReaderTest' test
+  SkillRegistryTest: 5 passed
+  SkillReferenceReaderTest: 5 passed
+  total: 10 passed                                     PASS
+cd frontend && npx tsc --noEmit                       PASS
+cd frontend && npm run build                          PASS
+cd frontend && npm run test:skills                    PASS
+git diff --check                                      PASS
+```
+
+真实服务补充验证（2026-08-23，用户已授权读取 main 工作区 `.env`）：
+
+- 直接用同一 `SILICONFLOW_API_KEY` 调用 `/v1/models` 返回 HTTP 200；调用
+  `BAAI/bge-m3` Embedding 时，不带 `dimensions` 返回 HTTP 200，带
+  `dimensions: 1024` 返回 HTTP 400 `parameter is invalid`。因此
+  `EmbeddingModelConfig` 增加了 `SILICONFLOW_DIMENSIONS_ENABLED` 开关，默认不发送
+  该参数；API key 仍只记录 `apiKeyConfigured=true/false`。
+- `./dev.sh` 已实际读取 `.env` 启动：默认 `postgresql` profile、PostgreSQL JDBC
+  连接成功、pgvector schema 可用、3 篇知识库文档加载成功；脚本将
+  `POSTGRES_USER`/`POSTGRES_PASSWORD` 映射为 Spring datasource 凭证，并健康检查
+  后端 `8080` 和前端 `4000`。`./dev.sh --stop` 能精确停止两个端口。
+- 使用内嵌传统页面 `/` 的 Playwright headless Chromium E2E：
+  页面 DOM 和登录通过，`GET /api/auth/verify` 返回 HTTP 200，页面发起
+  `POST /api/chat/text` 并返回 HTTP 200；页面消费 JSON 后在 DOM 显示商品结果。
+  后端同一轮日志显示 `loadSkill` 1 次、`httpRequest` 1 次，没有重复工具循环。
+- 另用 curl 验证 `GET /api/auth/verify` 的 JSON `valid=true`，并调用
+  `/api/chat/text` 得到 HTTP 200、非空 `response` 和实际商品表格。该普通 Agent
+  真实闭环覆盖了本次 Skill 的 Skill 选择、API 调用和结果呈现。
+- 此外，前一轮已完成独立 AG-UI 真实 SSE 工具交接烟测；本次不把它冒充为传统页面
+  闭环，也不宣称未执行浏览器 `respond()` 的 AG-UI 后续回合已完成。
 
 ## 4. 推荐实施顺序
 
-### P0-A：建立 Skill 文档契约与 frontmatter 校验
+### P0-A：建立 Skill 文档契约与 frontmatter 校验（已完成）
 
 **目标**：在不改变现有业务 Skill 内容语义的前提下，先让输入数据可靠。
 
@@ -157,7 +225,7 @@ references 可读取、API index 能区分方法和路径参数、并发请求�
 **回滚边界**：只要新校验使现有 Skill 内容无法加载，先修复 Skill 文件或提供兼容
 解析，不放宽到静默接受错误输入；整个阶段可以独立回滚，不影响工具执行代码。
 
-### P0-B：修复 `readSkillReference` 的路径和大小安全
+### P0-B：修复 `readSkillReference` 的路径和大小安全（已完成）
 
 **目标**：把 Level 3 明确限制在 `skills/<skillName>/references/` 内。
 
@@ -190,7 +258,7 @@ references 可读取、API index 能区分方法和路径参数、并发请求�
 **回滚边界**：保留工具名和参数名；若底层 Resource 在 fat JAR 下行为不一致，只替换
 资源解析适配，不降低路径限制。
 
-### P0-C：集中 API index、URL 和方法校验
+### P0-C：集中 API index、URL 和方法校验（已完成）
 
 **目标**：让 Skill 文档描述、Java 请求和浏览器请求共享同一份可验证规则。
 
@@ -213,8 +281,8 @@ references 可读取、API index 能区分方法和路径参数、并发请求�
 - 同一 `METHOD + path` 冲突默认启动时失败并列出来源 Skill；
 - 未被 API index 注册的相对 URL 默认拒绝；绝对 URL 默认也应按 allowlist 决定，
   不能只因以 `http` 开头就放行；
-- Java 与浏览器侧不各自发明“自动纠错”规则；若保留纠错，必须返回明确的校正结果
-  并有回归测试。
+- Java 与浏览器侧不各自发明“自动纠错”规则；当前默认严格拒绝未索引、绝对、非法
+  或路径参数未解析的 URL，不自动改写模型提供的路径。
 
 **验收**：
 
@@ -226,7 +294,7 @@ references 可读取、API index 能区分方法和路径参数、并发请求�
 **回滚边界**：先以只读校验和日志模式上线测试，确认误拒绝率后再强化生产拒绝；
 不要在没有 index 诊断信息时让模型陷入重复调用。
 
-### P1-A：补齐确定性测试基础设施
+### P1-A：补齐确定性测试基础设施（已完成最小基线，仍需扩展）
 
 **目标**：让 Skills 逻辑脱离外部 LLM 也可验证。
 
@@ -250,6 +318,10 @@ references 可读取、API index 能区分方法和路径参数、并发请求�
 - 测试名称描述行为，不只描述实现方法；
 - 任何修复先添加能复现问题的回归测试。
 
+本次已完成 `SkillRegistryTest` 和 `SkillReferenceReaderTest` 的离线基线、前端
+Mock Playwright 的 API index/DOM/网络/访问性断言，以及传统页面真实 Playwright
+E2E；`SkillsAdvisor`、`SkillTools` HTTP 执行和 JAR/fat-JAR 仍按本节矩阵留待 P1 扩展。
+
 ### P1-B：验证 loaded Skill 状态隔离
 
 **背景**：`SkillTools.loadedSkills` 是 Spring 组件字段，当前通过每次请求前 reset
@@ -262,6 +334,11 @@ references 可读取、API index 能区分方法和路径参数、并发请求�
 - AG-UI 请求与普通 Agent 请求互不污染；
 - 工具调用重跑时，本轮 Level 2 内容仍可见；
 - 请求异常、取消和超时后不会把状态留给下一个请求。
+
+本次 P0 实施同时修复了同一请求内的重复记录：普通 Agent 与 AG-UI
+共享 `CopyOnWriteArrayList.addIfAbsent` 语义，重复的 Skill 名称不会再次进入
+loaded 列表。跨请求状态隔离仍由请求开始时的 reset 逻辑保证；后续应继续用并发
+和多轮请求测试覆盖这一边界。
 
 **推荐默认**：先用请求范围的 `SkillTurnContext` 替代共享 `List`，由
 `SkillTools`/`SkillCoreTools` 委托；如果 Spring request scope 不覆盖异步 Agent
@@ -370,7 +447,7 @@ docs/README.md
 - Level 1 prompt 大小；
 - `loadSkill`、`readSkillReference` 调用次数与耗时；
 - reference 拒绝原因；
-- API index 命中、拒绝和自动纠错次数；
+- API index 命中、拒绝和未索引 URL 次数；当前不记录自动纠正，因为生产实现不再改写 URL；
 - 普通 Agent 与 AG-UI 的工具调用结果。
 
 日志规则：
@@ -500,12 +577,14 @@ git -C spring-ai-agent-utils status --short --branch
 
 | 优先级 | 待办 | 依赖 | 完成标志 |
 |---|---|---|---|
-| P0 | frontmatter parser/validator | 无 | 解析和错误测试全绿 |
-| P0 | reference reader 安全 | SkillRegistry name lookup | traversal/size tests 全绿 |
-| P0 | API index/URL 统一 | 先稳定索引模型 | Java/浏览器语义一致 |
-| P1 | deterministic tests | P0 契约 | 不依赖 LLM 可运行 |
-| P1 | turn state isolation | 测试基座 | 并发和异常隔离有证据 |
-| P1 | source/provider abstraction | P0 registry | classpath/filesystem/JAR fixture |
-| P2 | Level 1/2/3 观测与排序 | P1 tests | prompt 和耗时可观测 |
-| P2 | 文档发现链维护 | 当前文档入口 | 从 README/AGENTS 可到达 |
-| P3 | Spring AI 2.x PoC | 独立升级条件 | PoC 报告决定是否继续 |
+| 优先级 | 待办 | 依赖 | 完成标志 | 状态 |
+|---|---|---|---|---|
+| P0 | frontmatter parser/validator | 无 | 解析和错误测试全绿 | 已完成 |
+| P0 | reference reader 安全 | SkillRegistry name lookup | traversal/size tests 全绿 | 已完成 |
+| P0 | API index/URL 统一 | 先稳定索引模型 | Java/浏览器语义一致 | 已完成 |
+| P1 | deterministic tests | P0 契约 | 不依赖 LLM 可运行 | 已完成最小基线，待扩展 |
+| P1 | turn state isolation | 测试基座 | 并发和异常隔离有证据 | 待实施 |
+| P1 | source/provider abstraction | P0 registry | classpath/filesystem/JAR fixture | 待实施 |
+| P2 | Level 1/2/3 观测与排序 | P1 tests | prompt 和耗时可观测 | 待实施 |
+| P2 | 文档发现链维护 | 当前文档入口 | 从 README/AGENTS 可到达 | 本次已补齐入口，持续维护 |
+| P3 | Spring AI 2.x PoC | 独立升级条件 | PoC 报告决定是否继续 | 待触发 |

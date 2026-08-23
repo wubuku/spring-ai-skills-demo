@@ -184,11 +184,15 @@ public class AgUiController {
     public ResponseEntity<Map<String, Object>> apiIndex() {
         Map<String, Object> result = new java.util.LinkedHashMap<>();
         skillRegistry.getApiIndex().forEach((key, entry) -> {
-            Map<String, String> item = new java.util.LinkedHashMap<>();
+            Map<String, Object> item = new java.util.LinkedHashMap<>();
             item.put("skillName", entry.getSkillName());
             item.put("path", entry.getPath());
             item.put("method", entry.getMethod());
             item.put("description", entry.getDescription());
+            item.put("hierarchical", entry.isHierarchical());
+            if (entry.getReferencePath() != null) {
+                item.put("referencePath", entry.getReferencePath());
+            }
             result.put(key, item);
         });
         return ResponseEntity.ok(result);
