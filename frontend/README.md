@@ -81,6 +81,12 @@ AG-UI 模式下后端只注册 `loadSkill` 和 `readSkillReference`。浏览器�
 
 不要恢复 v1 `useCopilotAction.renderAndWaitForResponse`，也不要在后端 AG-UI 配置中再次注册同名 `httpRequest` 或 `buildHttpRequest`。
 
+## 认证状态同步限制
+
+`AuthProvider` 登录或登出时会更新 React state 和 localStorage，但当前没有派发 `auth-changed` 自定义事件；`CopilotProvider` 的 BFF headers 可能因此继续使用页面首次加载时的 Token。浏览器侧 `httpRequest` 每次直接读取 localStorage，表现可能与 BFF 不一致。
+
+如果同一个页面内刚登录就出现 AG-UI 401/403，先刷新页面再重试。这个说明描述的是当前实现限制，不代表认证 Token 已具备 JWT 的签名、过期或完整性保护。
+
 ## CSS 和构建支持文件
 
 `next.config.js` 为 CopilotKit v2 CSS 和 Mermaid 入口配置了 webpack alias。`postinstall` 会调用：

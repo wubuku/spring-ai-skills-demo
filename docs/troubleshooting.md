@@ -79,6 +79,16 @@ Embedding 404 时重点检查 `SILICONFLOW_URL`：它不应包含 `/v1`，Spring
 
 当前 Token 是 Demo Base64 token，不是 JWT。旧报告中使用“JWT”一词的内容属于历史命名，不能据此修改实现。
 
+### 登录后 AG-UI 仍提示未认证
+
+这是当前前端状态同步的已知限制：
+
+- `CopilotProvider` 初始化时读取一次 `localStorage.auth_token`，并监听 `storage` 与 `auth-changed` 事件。
+- `AuthProvider` 当前登录和登出逻辑没有派发 `auth-changed` 自定义事件。
+- 浏览器侧 `httpRequest` 每次读取 localStorage，可能仍能使用新 Token；但 CopilotKit BFF 的 headers 可能仍保留页面初始化时的旧值。
+
+先刷新前端页面，再重新发起 AG-UI 请求。如果刷新后仍然 401/403，再检查 `JAVA_BACKEND_URL`、`NEXT_PUBLIC_JAVA_BACKEND_URL`、`Authorization` 头和后端认证日志。
+
 ## SSE 卡住、空响应或 `INCOMPLETE_STREAM`
 
 ### 检查

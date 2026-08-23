@@ -132,9 +132,12 @@ mkdir -p /tmp/test-knowledge-base
 printf '%s\n' '# 商店营业时间' '- 周末上午 10:00 开门。' \
   > /tmp/test-knowledge-base/store-hours.md
 
-export KNOWLEDGE_BASE_PATHS="classpath:knowledge-base/*.md,file:/tmp/test-knowledge-base/*.md"
+SPRING_PROFILES_ACTIVE=local \
+KNOWLEDGE_BASE_PATHS="classpath:knowledge-base/*.md,file:/tmp/test-knowledge-base/*.md" \
 mvn spring-boot:run -DskipTests
 ```
+
+上面的命令显式选择非 `postgresql` profile，适合没有 PostgreSQL 的本地验证。若当前 shell 已经有后端占用 8080，先停止旧进程或选择其他端口；不要在同一端口直接启动第二个实例。若你已经准备好 PostgreSQL，也可以去掉 `SPRING_PROFILES_ACTIVE=local`，但必须确认当前 profile、JDBC 凭证、`vector` 扩展和 Embedding 维度匹配。仅执行 `export KNOWLEDGE_BASE_PATHS=...` 后运行 `mvn spring-boot:run` 会继承根配置的 `postgresql` profile，仍可能尝试连接 PostgreSQL。
 
 应用启动日志会报告各路径加载的文档数量。RAG 端到端验证：
 

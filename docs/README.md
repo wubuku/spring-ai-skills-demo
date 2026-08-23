@@ -35,7 +35,7 @@
 | [COPILOTKIT_INTEGRATION_GUIDE.md](COPILOTKIT_INTEGRATION_GUIDE.md) | 通用 CopilotKit/AG-UI 集成参考；当前项目事实以稳定指南为准 |
 | [frontend/README.md](../frontend/README.md) | 前端目录的开发入口 |
 | [TEST_REPORT.md](../TEST_REPORT.md) | 带日期的测试记录，不替代当前验证命令 |
-| [spring-ai-model-abstraction.md](spring-ai-model-abstraction.md) | Spring AI Provider 和模型抽象补充说明，修改前需回到配置类核对 |
+| [spring-ai-model-abstraction.md](spring-ai-model-abstraction.md) | Spring AI Provider 和模型抽象补充说明；参考文档，修改前需回到配置类核对 |
 | [project-docs Skill](../.agents/skills/project-docs/SKILL.md) | 本仓库文档整理工作流 |
 
 ## 草稿与历史材料

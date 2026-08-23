@@ -171,6 +171,8 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
 
 普通链路的 `AgentService` 使用 `MessageWindowChatMemory(maxMessages=20)`。
 
+普通链路注册的是完整 `SkillTools`：`loadSkill` 负责加载技能，`readSkillReference` 读取分层参考文件，`httpRequest` 在 Java 端直接执行请求，`buildHttpRequest` 只构建请求元数据供确认流程使用。不要把这组工具与 AG-UI 路径的 `SkillCoreTools` 混为一谈。
+
 ### AG-UI/CopilotKit 链路
 
 `frontend/` 的请求路径是：
@@ -261,7 +263,10 @@ AG-UI Agent 的 `MessageWindowChatMemory` 当前只保留最近 4 条消息。�
 这是演示认证，不是生产认证：
 
 - 用户和密码硬编码在 `AuthService`：`user1/password1`、`user2/password2`、`admin/admin123`。
-- 当前 token 是简单的 Base64 两段字符串，不是 JWT，不提供签名、过期时间或可靠的完整性保护。
+- 当前 token 是 Base64 编码的两段字符串，不是 JWT，不提供签名、过期时间或可靠的完整性保护。
+- `POST /api/auth/login` 返回的载荷是 `username:displayName`，例如 `user1:张三`。
+- `frontend/components/AuthProvider.tsx` 和多数回归脚本直接生成 `username:password`，例如 `user1:password1`。
+- 当前 `validateToken()` 只检查解码后的第一段用户名是否存在，并不校验第二段内容，因此上述两种格式目前都可能通过验证；这不是可靠的密码校验或 Token 完整性机制。
 - 前端把 token 放在 `localStorage`，CopilotKit BFF 和浏览器侧 `httpRequest` 会透传 `Authorization`。
 - `AuthFilter` 将认证放入 `SecurityContextHolder` 和 `UserContextHolder`。
 - `ReactorBoundedElasticHookConfig` 在 Reactor/boundedElastic 线程间传递用户上下文。
@@ -301,6 +306,8 @@ npm run dev
 - `NEXT_PUBLIC_JAVA_BACKEND_URL`：浏览器侧登录和 `httpRequest` 访问 Java 后端。
 - 两者默认都是 `http://localhost:8080`。
 
+认证状态同步有一个当前实现限制：`CopilotProvider` 会在初始化时读取一次 `localStorage.auth_token`，并监听 `storage`/`auth-changed` 事件；`AuthProvider` 当前登录和登出逻辑没有派发 `auth-changed`。因此同一个页面内登录后，CopilotKit BFF 的 Authorization headers 可能仍是旧值，直到刷新页面或触发其他同步；浏览器侧 `httpRequest` 每次直接读取 localStorage，可能仍然可以正常携带最新 Token。遇到 AG-UI 登录后仍提示未认证时，先刷新前端页面。
+
 CopilotKit 使用 v2 `CopilotKitProvider` 和 `useSingleEndpoint`。不要把 v1 的 `useCopilotAction.renderAndWaitForResponse` 方案重新引入。
 
 当前工作区存在但未被 Git 跟踪的前端辅助文件：
@@ -319,22 +326,27 @@ Java 单元/集成测试：
 mvn test
 ```
 
-常用回归脚本：
+会自行启动后端的脚本（通常会占用或清理 `8080`，启动配置继承当前 shell 和 `.env`）：
 
 ```bash
-./test.sh                    # 商品、聊天、认证和基础回归
-./test-petstore.sh           # 分层 Swagger Petstore Skill
-./test-vector-store-memory.sh
-./test-rag-knowledge-base.sh
-./test-multimodal.sh
-./test-streaming.sh
-./test-streaming-transcribe.sh
-./test-jwt-get.sh
-./test-agui-jwt-full.sh
-./test-sse-jwt.sh
+./test.sh                     # 已有健康服务则复用，否则启动；商品、聊天、认证和基础回归
+./test-petstore.sh            # 清理 8080 后启动；分层 Swagger Petstore Skill
+./test-vector-store-memory.sh # 清理 8080 后启动；向量记忆
+./test-rag-knowledge-base.sh  # 清理 8080 后启动；知识库问答
+./test-streaming.sh           # 已有健康服务则复用，否则启动；普通/多模态 SSE
 ```
 
-专项脚本通常要求后端已经启动、`.env` 已配置，部分脚本会自行启动/停止端口 8080。多模态脚本还需要 `TEST_IMAGE_PATH`、`TEST_AUDIO_PATH`。AG-UI 浏览器测试 `test-e2e-frontend.py` 需要先启动 `frontend` 的 4000 端口，并安装 Playwright。
+要求已有后端运行的脚本：
+
+```bash
+./test-multimodal.sh           # 同步多模态；不会启动 Java 后端
+./test-streaming-transcribe.sh # 纯转写 SSE；不会启动 Java 后端
+./test-jwt-get.sh              # 同步/AG-UI GET 认证透传；不会启动 Java 后端
+./test-agui-jwt-full.sh        # AG-UI 认证透传；不会启动 Java 后端
+./test-sse-jwt.sh              # AG-UI SSE 认证透传；不会启动 Java 后端
+```
+
+这些专项脚本通常还要求 `.env`、有效的 LLM/Embedding/视觉/转写服务或 PostgreSQL。`test-multimodal.sh`、`test-streaming.sh` 的多模态场景需要 `TEST_IMAGE_PATH`、`TEST_AUDIO_PATH`；`test-e2e-frontend.py` 需要后端 8080、前端 4000 和 Playwright。运行任何脚本前确认 8080 没有不应被清理的旧进程，并确认 profile 与数据库依赖匹配。
 
 测试脚本和现有 `src/test` 都可能访问真实 LLM、视觉、ASR、Embedding 或 PostgreSQL。报告失败时先区分：
 

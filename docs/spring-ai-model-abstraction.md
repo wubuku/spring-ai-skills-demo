@@ -1,5 +1,8 @@
 # Spring AI 模型适配架构文档
 
+> **文档状态**: 参考说明；其中的接口示例和 Provider 行为在修改前必须回到当前配置类、`pom.xml` 和 Spring AI 版本核对。
+> **最后核对**: 2026-08-23
+
 ## 概述
 
 本文档阐述 Spring AI 如何通过抽象层适配不同的 LLM Provider（如 OpenAI、Anthropic、MiniMax 等），以及当前项目如何利用这些抽象实现多模型支持。

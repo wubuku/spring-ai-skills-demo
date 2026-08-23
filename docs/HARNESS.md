@@ -14,11 +14,35 @@
 | 前端构建 | `cd frontend && npm run build` | Next.js、CopilotKit、CSS、TypeScript | Node 依赖和本地 patch |
 | 基础回归 | `./test.sh` | 商品、聊天、认证 | 后端、`.env`、LLM |
 | PetStore | `./test-petstore.sh` | 分层 OpenAPI Skill | 后端、LLM |
-| 记忆/RAG | `./test-vector-store-memory.sh`, `./test-rag-knowledge-base.sh` | 向量记忆和知识库 | Embedding、数据库/profile |
+| 记忆/RAG | `./test-vector-store-memory.sh`, `./test-rag-knowledge-base.sh` | 向量记忆和知识库 | Embedding、数据库/profile；脚本会启动后端 |
 | 多模态 | `./test-multimodal.sh`, `./test-streaming-transcribe.sh` | 图片、音频、转写 | 视觉/转写服务和测试文件 |
-| 流式 | `./test-streaming.sh` | 普通和多模态 SSE | 后端、LLM、测试文件 |
-| AG-UI | `./test-agui-jwt-full.sh`, `./test-sse-jwt.sh` | AG-UI、认证和 SSE | 后端、LLM、认证 |
+| 流式 | `./test-streaming.sh` | 普通和多模态 SSE | 后端、LLM、测试文件；无服务时脚本会启动 |
+| AG-UI | `./test-agui-jwt-full.sh`, `./test-sse-jwt.sh` | AG-UI、认证和 SSE | 已运行的后端、LLM、认证 |
 | 浏览器 E2E | `python test-e2e-frontend.py` | Next.js + CopilotKit | 后端 8080、前端 4000、Playwright |
+
+## 脚本启动策略
+
+### 可以自行启动后端
+
+- `test.sh`：如果 `/api/products` 已健康则复用，否则清理端口后启动；默认测试结束后保留服务。
+- `test-petstore.sh`：清理 8080 后自行启动 Spring Boot。
+- `test-vector-store-memory.sh`：清理 8080 后自行启动 Spring Boot，需要 Embedding 配置。
+- `test-rag-knowledge-base.sh`：清理 8080 后自行启动 Spring Boot，需要 Embedding 配置。
+- `test-streaming.sh`：已有健康服务时复用，否则自行启动；多模态场景还需要测试媒体文件。
+
+### 必须先启动后端
+
+以下脚本只发送请求，不负责启动 Java 服务；直接执行时若 8080 没有服务，会得到连接失败：
+
+- `test-multimodal.sh`
+- `test-streaming-transcribe.sh`
+- `test-jwt-get.sh`
+- `test-agui-jwt-full.sh`
+- `test-sse-jwt.sh`
+
+这些脚本依赖的后端必须已经使用匹配的 LLM、视觉、转写、数据库和认证配置启动。`test-e2e-frontend.py` 还需要另行启动 `frontend` 的 4000 端口。
+
+会启动 Spring Boot 的脚本继承当前 shell 和 `.env` 中的 profile。由于根 `application.yml` 当前显式激活 `postgresql`，本地没有 PostgreSQL 时，应在 `.env` 或启动环境中明确设置 `SPRING_PROFILES_ACTIVE=local`，再执行脚本。
 
 ## 标准序列
 
@@ -29,6 +53,8 @@ git diff --check
 mvn -DskipTests clean package
 git status --short
 ```
+
+即使只做文档改动，也应运行 `git diff --check` 和本地链接检查；后端打包用于确认文档中的命令和资源路径仍对应当前构建基线。
 
 ### 前端改动
 

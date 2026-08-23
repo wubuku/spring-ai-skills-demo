@@ -17,7 +17,9 @@
 
 1. `POST /api/auth/login` 提交 `username`、`password`。
 2. 响应中的 `token` 通过 `Authorization: Bearer <token>` 使用。
-3. Token 是 Base64 编码的 Demo 数据，当前用户来自 `AuthService` 内存表。
+3. 登录 API 返回的 Token 载荷是 Base64 编码的 `username:displayName`，例如 `user1:张三`。
+4. 前端和测试脚本常用 Base64 编码的 `username:password`，例如 `user1:password1`；当前后端只检查第一段用户名是否存在，因此两种格式都可能通过验证。
+5. 当前实现没有签名、过期时间或可靠的密码完整性校验，不能作为生产认证方案。
 
 公开商品查询不需要认证；购物车和结算由 `@PreAuthorize("isAuthenticated()")` 保护。浏览器前端会从 `localStorage` 读取 token，AG-UI BFF 转发 Authorization。
 
@@ -97,7 +99,7 @@ curl -s -H 'Authorization: Bearer <token>' \
 | Store | `/api/v3/store` | inventory、下单、订单详情、删除订单 |
 | User | `/api/v3/user` | 创建、批量创建、登录、登出、详情、更新、删除 |
 
-完整参数以 [Swagger UI](../README.md) 和 `src/main/resources/petstore.yaml`/运行时 OpenAPI Skill 为准。
+完整参数以 [Swagger UI](http://localhost:8080/swagger-ui.html)、`src/main/resources/petstore.yaml` 和运行时 OpenAPI Skill 为准。
 
 ## 结果解释
 

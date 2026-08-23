@@ -31,6 +31,20 @@ README.md
 | P2 | `docs/OPERATIONS.md` | Controllers、测试脚本、Dockerfile/Compose | 已完成 | 操作示例和前置条件审阅 |
 | P2 | `frontend/README.md` | `frontend/package.json`、App Router、hooks | 已完成 | 4000 端口和 v2 工具边界 |
 
+## 二次审计任务
+
+本轮不是重建目录，而是针对上一轮稳定文档做源码对照和可执行性修正：
+
+| 主题 | 事实来源 | 状态 | 处理 |
+|---|---|---|---|
+| Demo Token 两种生成格式及校验边界 | `AuthService`、`AuthProvider.tsx`、测试脚本 | 已完成 | 在 `AGENTS.md`、架构、REST、前端和故障排查文档中统一说明 |
+| 普通 Agent 与 AG-UI 工具清单 | `SkillTools`、`SkillCoreTools`、`AgUiConfig` | 已完成 | 补全普通链路的 `buildHttpRequest`、`readSkillReference` 边界 |
+| 测试脚本是否自动启动后端 | `test-*.sh` | 已完成 | 在验证手册中拆分自启动/已有服务两类 |
+| Profile 与 RAG 启动示例 | `application.yml`、`application-*.yml`、操作文档 | 已完成 | 明确 `postgresql` 根配置和 `local` 覆盖方式 |
+| 前端同 tab 登录后的 BFF Token 同步 | `AuthProvider.tsx`、`CopilotProvider.tsx` | 已完成 | 增加当前限制和刷新排查路径 |
+| 参考文档生命周期 | `docs/spring-ai-model-abstraction.md` | 已完成 | 增加状态和最后核对日期 |
+| 链接、格式、构建和工作区复核 | project-docs checklist | 已完成 | `git diff --check`、214 个 Markdown 相对链接、Maven 打包和前端构建均通过 |
+
 ## 明确不做的事
 
 - 不把所有 `docs/drafts/` 重写成稳定文档。
@@ -49,7 +63,7 @@ cd frontend && npm run build
 
 前端构建和行为测试依赖本地 `frontend/scripts/`、`frontend/patches/`、Node 依赖及必要的外部服务；缺少这些前置条件时，记录为环境限制，不把失败误判为文档问题。
 
-## 本轮结果
+## 上一轮结果
 
 - 已建立根 README -> `docs/README.md` -> 稳定指南/组件入口/草稿索引的导航链。
 - 已将根 README 和 `frontend/README.md` 收敛为当前事实入口。
@@ -62,3 +76,12 @@ cd frontend && npm run build
 - `docs/drafts/` 中的历史方案仍可能包含不平衡代码围栏、旧端口、绝对路径或旧认证命名；它们已被索引明确为非当前事实，本轮不进行大规模重写。
 - `docs/COPILOTKIT_INTEGRATION_GUIDE.md` 是通用 CopilotKit 集成参考，代码示例仍可能与项目专用配置不同；当前端口和工具边界以稳定指南为准。
 - Docker Compose 与当前 `application.yml` 仍存在历史默认值差异，详见 [配置参考](../configuration.md)。
+
+## 二次审计结果
+
+- 已修正登录 API、前端和测试脚本之间的 Token 载荷描述差异，并明确当前校验逻辑的局限。
+- 已补全普通 `SkillTools` 与 AG-UI `SkillCoreTools` 的工具边界。
+- 已将测试脚本按后端启动责任拆分，避免直接运行 AG-UI/多模态专项脚本时误判为代码故障。
+- 已修正无 PostgreSQL 时的 RAG 启动示例，补充 8080 端口冲突提醒。
+- 已补充前端同 tab 登录后的 BFF headers 同步限制。
+- 已通过 project-docs Skill 的绝对路径/密钥扫描、Markdown 相对链接检查、`mvn -DskipTests clean package` 和 `cd frontend && npm run build`。

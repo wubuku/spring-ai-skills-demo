@@ -37,11 +37,11 @@
   -> AgentService
   -> SkillsAdvisor + ChatMemory Advisors + QuestionAnswerAdvisor
   -> ChatClient / ChatModel
-  -> SkillTools.loadSkill/httpRequest 或普通文本
+  -> SkillTools.loadSkill/readSkillReference/httpRequest/buildHttpRequest 或普通文本
   -> 商品/PetStore API
 ```
 
-`AgentService` 每轮清理已加载 Skill 状态。普通会话使用 `MessageWindowChatMemory` 保存最近窗口，并可叠加 JDBC 记忆、语义记忆和知识库检索。
+`AgentService` 每轮清理已加载 Skill 状态。普通会话使用 `MessageWindowChatMemory` 保存最近窗口，并可叠加 JDBC 记忆、语义记忆和知识库检索。该链路注册完整 `SkillTools`：`httpRequest` 在 Java 端执行请求，`buildHttpRequest` 只构建供确认流程使用的请求元数据；二者都不应被描述成 AG-UI 浏览器工具。
 
 ## AG-UI/CopilotKit 请求流
 
@@ -120,7 +120,9 @@ Level 3: 读取 OpenAPI Skill references 下的资源/操作/schema 文档
 认证是 Demo 机制：
 
 - 用户写死在 `AuthService`。
-- Token 是 Base64 编码的 `username:displayName`，不是 JWT。
+- 登录 API 返回 Base64 编码的 `username:displayName`，例如 `user1:张三`。
+- 前端和多数测试脚本生成 Base64 编码的 `username:password`，例如 `user1:password1`。
+- 当前 `validateToken()` 只检查第一段用户名是否存在，不校验第二段，因此两种载荷都可能通过；这不提供签名、过期或密码完整性保障。
 - 前端存储在 `localStorage`。
 - `AuthFilter`、`SecurityContextHolder`、`UserContextHolder` 和 Reactor hook 负责异步透传。
 
