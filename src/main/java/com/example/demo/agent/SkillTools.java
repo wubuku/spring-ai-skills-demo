@@ -1,6 +1,7 @@
 package com.example.demo.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.demo.model.PendingHttpRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
@@ -157,13 +158,18 @@ public class SkillTools {
         }
     }
 
-    @Tool(description = "为 POST/PUT/PATCH/DELETE 写操作生成 JSON 元数据，交给传统页面展示并由用户确认后执行。")
+    @Tool(
+        description = "为 POST/PUT/PATCH/DELETE 写操作生成待确认请求；结果直接返回给应用，"
+            + "由传统页面展示并由用户确认后执行。",
+        returnDirect = true
+    )
     public String buildHttpRequest(
         @ToolParam(description = "HTTP 写方法：POST/PUT/PATCH/DELETE") String method,
         @ToolParam(description = "API 路径（相对路径）") String url,
         @ToolParam(description = "路径参数") Map<String, String> pathParams,
         @ToolParam(description = "查询参数") Map<String, String> queryParams,
-        @ToolParam(description = "请求体（JSON 对象）") Map<String, Object> body
+        @ToolParam(description = "请求体（JSON 对象）") Map<String, Object> body,
+        ToolContext toolContext
     ) {
         String normalizedMethod = normalizeMethod(method);
         if (!MUTATION_METHODS.contains(normalizedMethod)) {
@@ -182,6 +188,13 @@ public class SkillTools {
             return "构建请求被拒绝：" + validationError;
         }
 
+        PendingHttpRequest pendingRequest = new PendingHttpRequest(
+            normalizedMethod,
+            resolvedUrl,
+            queryParams,
+            body
+        );
+
         String confirmUrl = apiBaseUrl + resolvedUrl;
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("method", normalizedMethod);
@@ -191,7 +204,16 @@ public class SkillTools {
         if (body != null && !body.isEmpty()) meta.put("body", body);
 
         try {
-            return objectMapper.writeValueAsString(meta);
+            String serialized = objectMapper.writeValueAsString(meta);
+            MutationConfirmationSession confirmationSession =
+                confirmationSession(toolContext);
+            if (confirmationSession == null) {
+                return "构建请求被拒绝：缺少当前请求的写操作确认上下文。";
+            }
+            if (!confirmationSession.register(pendingRequest)) {
+                return "构建请求被拒绝：本轮已经存在待确认的写操作，请等待用户处理。";
+            }
+            return serialized;
         } catch (Exception e) {
             return "构建请求失败：无法序列化请求元数据。";
         }
@@ -323,6 +345,16 @@ public class SkillTools {
         Object session = toolContext.getContext().get(SKILL_SESSION_CONTEXT_KEY);
         return session instanceof SkillLoadSession skillLoadSession
             ? skillLoadSession
+            : null;
+    }
+
+    private MutationConfirmationSession confirmationSession(ToolContext toolContext) {
+        if (toolContext == null) {
+            return null;
+        }
+        Object session = toolContext.getContext().get(MutationConfirmationSession.CONTEXT_KEY);
+        return session instanceof MutationConfirmationSession confirmationSession
+            ? confirmationSession
             : null;
     }
 

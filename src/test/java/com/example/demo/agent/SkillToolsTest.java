@@ -1,5 +1,6 @@
 package com.example.demo.agent;
 
+import com.example.demo.model.PendingHttpRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
@@ -103,21 +104,84 @@ class SkillToolsTest {
 
     @Test
     void buildsOnlyValidatedMutationMetadataForBrowserConfirmation() {
+        MutationConfirmationSession confirmationSession = new MutationConfirmationSession();
         String metadata = tools.buildHttpRequest(
             "POST",
             "/api/products/cart",
             Map.of(),
             Map.of("productId", "3"),
-            Map.of()
+            Map.of(),
+            toolContext(null, confirmationSession)
         );
 
         assertThat(metadata)
             .contains("\"method\":\"POST\"")
             .contains("\"url\":\"http://localhost:18080/api/products/cart\"")
             .contains("\"productId\":\"3\"");
+        assertThat(confirmationSession.pending())
+            .get()
+            .extracting(PendingHttpRequest::url)
+            .isEqualTo("/api/products/cart");
         assertThat(tools.buildHttpRequest(
-            "GET", "/api/products", Map.of(), Map.of(), Map.of()
+            "GET", "/api/products", Map.of(), Map.of(), Map.of(),
+            toolContext(null, new MutationConfirmationSession())
         )).contains("只接受写操作");
+    }
+
+    @Test
+    void rejectsASecondMutationAndKeepsConfirmationContextsIsolated() {
+        MutationConfirmationSession firstSession = new MutationConfirmationSession();
+        MutationConfirmationSession secondSession = new MutationConfirmationSession();
+
+        String first = tools.buildHttpRequest(
+            "POST",
+            "/api/products/cart",
+            Map.of(),
+            Map.of("productId", "3"),
+            Map.of(),
+            toolContext("token-a", firstSession)
+        );
+        String duplicate = tools.buildHttpRequest(
+            "POST",
+            "/api/products/checkout",
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            toolContext("token-a", firstSession)
+        );
+        String second = tools.buildHttpRequest(
+            "POST",
+            "/api/products/checkout",
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            toolContext("token-b", secondSession)
+        );
+
+        assertThat(first).contains("\"url\":\"http://localhost:18080/api/products/cart\"");
+        assertThat(duplicate).contains("本轮已经存在待确认");
+        assertThat(firstSession.pending()).get()
+            .extracting(PendingHttpRequest::url)
+            .isEqualTo("/api/products/cart");
+        assertThat(second).contains("\"url\":\"http://localhost:18080/api/products/checkout\"");
+        assertThat(secondSession.pending()).get()
+            .extracting(PendingHttpRequest::url)
+            .isEqualTo("/api/products/checkout");
+    }
+
+    @Test
+    void invalidMutationDoesNotPolluteConfirmationSession() {
+        MutationConfirmationSession session = new MutationConfirmationSession();
+
+        assertThat(tools.buildHttpRequest(
+            "POST",
+            "/api/unknown",
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            toolContext(null, session)
+        )).contains("不是已注册");
+        assertThat(session.pending()).isEmpty();
     }
 
     @Test
@@ -149,8 +213,16 @@ class SkillToolsTest {
     }
 
     private ToolContext toolContext(String token) {
+        return toolContext(token, new MutationConfirmationSession());
+    }
+
+    private ToolContext toolContext(
+        String token,
+        MutationConfirmationSession confirmationSession
+    ) {
         Map<String, Object> context = new HashMap<>();
         context.put(SkillTools.SKILL_SESSION_CONTEXT_KEY, new SkillLoadSession());
+        context.put(MutationConfirmationSession.CONTEXT_KEY, confirmationSession);
         if (token != null) {
             context.put(SkillTools.AUTH_TOKEN_CONTEXT_KEY, token);
         }

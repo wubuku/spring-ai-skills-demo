@@ -94,7 +94,7 @@ test-*.sh        端到端、回归和专项诊断脚本
 - [docs/configuration.md](docs/configuration.md)：环境变量、数据库、向量库和外部模型。
 - [docs/rest-api.md](docs/rest-api.md)：Controller 端点、认证和 SSE 入口。
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)：REST、聊天、记忆/RAG、多模态和 Docker 操作示例。
-- [docs/HARNESS.md](docs/HARNESS.md)：构建、测试和专项回归矩阵。
+- [docs/HARNESS.md](docs/HARNESS.md)：构建、测试和专项回归矩阵，包括普通 Agent 写操作确认的真实传统 UI E2E。
 - [docs/troubleshooting.md](docs/troubleshooting.md)：按症状排查启动、模型、工具、SSE 和前端问题。
 - [docs/knowledge-and-skills.md](docs/knowledge-and-skills.md)：知识库问答、运行时 Skills、扩展步骤和 Spring AI 能力边界。
 - [docs/learning-path.md](docs/learning-path.md)：从 REST、Tool Calling、Skills 到记忆、RAG、SSE 和 AG-UI 的学习主线。
@@ -305,11 +305,19 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
    `QuestionAnswerAdvisor`。
 5. 通过 `ToolCallAdvisor` 驱动 Spring AI 工具回合；记忆/RAG Advisor 的顺序位于工具循环之前。
 6. 使用 `SkillTools` 执行只读 GET，或使用 `buildHttpRequest` 生成写操作确认元数据。
-7. 返回同步文本，或由 `/api/chat/stream` 以 SSE 流式返回。
+7. `POST /api/chat/text` 对待确认写操作返回后端生成的 `response` 和结构化
+   `confirmation`；旧 `/api/chat` 与普通 SSE 使用后端生成的 `[CONFIRM_REQUIRED]`
+   文本兼容协议。
+8. 传统页面通过当前 Skill API index 二次校验确认元数据，只有用户点击确认后才使用
+   最新浏览器 token 发送真实写请求。
 
 普通链路的 `AgentService` 使用 `MessageWindowChatMemory(maxMessages=20)`。
 
-普通链路注册的是完整 `SkillTools`：`loadSkill` 负责加载技能，`readSkillReference` 读取分层参考文件，`httpRequest` 在 Java 端直接执行请求，`buildHttpRequest` 只构建请求元数据供确认流程使用。不要把这组工具与 AG-UI 路径的 `SkillCoreTools` 混为一谈。
+普通链路注册的是完整 `SkillTools`：`loadSkill` 负责加载技能，`readSkillReference`
+读取分层参考文件，`httpRequest` 在 Java 端只执行已登记的 GET，`buildHttpRequest`
+只构建并登记请求级写操作确认元数据，不执行写 API。不要把这组工具与 AG-UI 路径的
+`SkillCoreTools` 混为一谈。详细协议见
+[系统架构](docs/ARCHITECTURE.md) 和 [REST/SSE API](docs/rest-api.md)。
 
 ### AG-UI/CopilotKit 链路
 

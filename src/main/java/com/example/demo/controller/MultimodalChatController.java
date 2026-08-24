@@ -4,6 +4,7 @@ import com.example.demo.dto.MultimodalChatRequest;
 import com.example.demo.dto.MultimodalChatResponse;
 import com.example.demo.model.MultimodalToken;
 import com.example.demo.service.AgentService;
+import com.example.demo.service.AgentChatResult;
 import com.example.demo.service.ConversationIdResolver;
 import com.example.demo.service.MultimodalAgentService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -121,11 +122,14 @@ public class MultimodalChatController {
     public MultimodalChatResponse chatText(
         @Valid @RequestBody MultimodalChatRequest request
     ) {
-        String answer = agentService.chat(
+        AgentChatResult result = agentService.chatResult(
                 request.query(),
                 request.conversationId()
         );
-        return new MultimodalChatResponse(answer);
+        return new MultimodalChatResponse(
+            result.response(),
+            result.confirmation()
+        );
     }
 
     /**

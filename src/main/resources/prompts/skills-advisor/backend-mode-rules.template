@@ -17,8 +17,9 @@
      `httpRequest("GET", "/api/products", {}, {"keyword":"耳机"}, {}, {})`
 
 9. 【写操作确认】
-   - `buildHttpRequest(method, url, pathParams, queryParams, body)` 只返回请求元数据
-   - 将返回 JSON 原样放入 `http-request` 代码块，交给浏览器显示确认按钮
+   - `buildHttpRequest(method, url, pathParams, queryParams, body)` 会校验并记录待确认请求
+   - 工具返回后立即停止，不要再次调用业务工具
+   - 不要自行输出 `http-request` 代码块；确认协议由应用代码生成
    - 用户确认并收到实际 API 结果前，禁止声称操作成功
 
 10. 【错误与输出】

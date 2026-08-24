@@ -1,6 +1,9 @@
 package com.example.demo.service;
 
 import com.example.demo.agent.*;
+import com.example.demo.model.PendingHttpRequest;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
@@ -39,6 +42,7 @@ public class AgentService {
 
     private final ChatClient chatClient;
     private final ConversationIdResolver conversationIdResolver;
+    private final ObjectMapper objectMapper;
 
     public AgentService(ChatClient.Builder builder,
                         SkillTools skillTools,
@@ -48,10 +52,12 @@ public class AgentService {
                         @Qualifier("chatMemoryVectorStore") VectorStore chatMemoryVectorStore,
                         ToolCallingManager toolCallingManager,
                         ConversationIdResolver conversationIdResolver,
+                        ObjectMapper objectMapper,
                         @Value("${app.ai.rag.enabled:false}") boolean ragEnabled,
                         @Value("${app.ai.vector-memory.enabled:false}")
                         boolean vectorMemoryEnabled) {
         this.conversationIdResolver = conversationIdResolver;
+        this.objectMapper = objectMapper;
 
         // 使用 JDBC 存储，保留最近 20 条消息的窗口
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
@@ -91,27 +97,53 @@ public class AgentService {
     }
 
     public String chat(String userMessage, String conversationId) {
+        AgentChatResult result = chatResult(userMessage, conversationId);
+        return compatibleText(result);
+    }
+
+    public AgentChatResult chatResult(String userMessage, String conversationId) {
         Authentication authentication = currentAuthentication();
         String resolvedConversationId =
             conversationIdResolver.resolve(conversationId, authentication);
-        return chatResolved(userMessage, resolvedConversationId, authentication);
+        return chatResultResolved(userMessage, resolvedConversationId, authentication);
     }
 
     String chatResolved(String userMessage, String resolvedConversationId) {
-        return chatResolved(userMessage, resolvedConversationId, currentAuthentication());
+        return compatibleText(
+            chatResultResolved(
+                userMessage,
+                resolvedConversationId,
+                currentAuthentication()
+            )
+        );
     }
 
-    private String chatResolved(String userMessage,
-                                String resolvedConversationId,
-                                Authentication authentication) {
-        return chatClient.prompt()
+    private AgentChatResult chatResultResolved(String userMessage,
+                                               String resolvedConversationId,
+                                               Authentication authentication) {
+        Map<String, Object> toolContext = toolContext(authentication);
+        MutationConfirmationSession confirmationSession =
+            confirmationSession(toolContext);
+        String content;
+        try {
+            content = chatClient.prompt()
                 .user(userMessage)
                 .advisors(a -> a
                     .param(ChatMemory.CONVERSATION_ID, resolvedConversationId)
                     .param(SkillsAdvisor.EXECUTION_MODE, SkillsAdvisor.MODE_BACKEND))
-                .toolContext(toolContext(authentication))
+                .toolContext(toolContext)
                 .call()
                 .content();
+        } catch (RuntimeException exception) {
+            if (confirmationSession.pending().isEmpty()) {
+                throw exception;
+            }
+            content = "";
+        }
+        String finalContent = content;
+        return confirmationSession.pending()
+            .map(request -> new AgentChatResult(confirmationDescription(request), request))
+            .orElseGet(() -> new AgentChatResult(finalContent, null));
     }
 
     public Flux<String> streamChat(String userMessage) {
@@ -137,7 +169,9 @@ public class AgentService {
                                             String resolvedConversationId,
                                             Authentication authentication) {
         Map<String, Object> toolContext = toolContext(authentication);
-        return chatClient.prompt()
+        MutationConfirmationSession confirmationSession =
+            confirmationSession(toolContext);
+        Flux<String> content = chatClient.prompt()
                 .user(userMessage)
                 .advisors(a -> a
                     .param(ChatMemory.CONVERSATION_ID, resolvedConversationId)
@@ -145,6 +179,15 @@ public class AgentService {
                 .toolContext(toolContext)
                 .stream()
                 .content();
+        return content
+            .onErrorResume(error -> confirmationSession.pending().isPresent()
+                ? Flux.empty()
+                : Flux.error(error))
+            .concatWith(Flux.defer(() -> confirmationSession.pending()
+                .map(request -> Flux.just(compatibleText(
+                    new AgentChatResult(confirmationDescription(request), request)
+                )))
+                .orElseGet(() -> Flux.empty())));
     }
 
     private Authentication currentAuthentication() {
@@ -158,6 +201,10 @@ public class AgentService {
     private Map<String, Object> toolContext(Authentication authentication) {
         Map<String, Object> context = new HashMap<>();
         context.put(SkillTools.SKILL_SESSION_CONTEXT_KEY, new SkillLoadSession());
+        context.put(
+            MutationConfirmationSession.CONTEXT_KEY,
+            new MutationConfirmationSession()
+        );
         if (authentication != null) {
             Object credentials = authentication.getCredentials();
             if (credentials instanceof String token && !token.isBlank()) {
@@ -166,5 +213,33 @@ public class AgentService {
             context.put(SkillTools.AUTH_USERNAME_CONTEXT_KEY, authentication.getName());
         }
         return context;
+    }
+
+    private MutationConfirmationSession confirmationSession(
+        Map<String, Object> toolContext
+    ) {
+        return (MutationConfirmationSession) toolContext.get(
+            MutationConfirmationSession.CONTEXT_KEY
+        );
+    }
+
+    private String compatibleText(AgentChatResult result) {
+        if (result.confirmation() == null) {
+            return result.response();
+        }
+        try {
+            return "[CONFIRM_REQUIRED]\n"
+                + result.response()
+                + "\n\n```http-request\n"
+                + objectMapper.writeValueAsString(result.confirmation())
+                + "\n```";
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("无法序列化待确认写操作", exception);
+        }
+    }
+
+    private String confirmationDescription(PendingHttpRequest request) {
+        return "已准备执行写操作 `" + request.method() + " " + request.url()
+            + "`，等待用户确认。确认后浏览器才会发送真实请求。";
     }
 }

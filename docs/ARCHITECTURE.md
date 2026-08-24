@@ -1,7 +1,7 @@
 # 系统架构
 
 > **目的**: 说明当前系统的模块边界、请求路径和工具执行方式，帮助定位改动影响范围。
-> **最后核对**: 2026-08-23
+> **最后核对**: 2026-08-24
 
 ## 系统上下文
 
@@ -46,6 +46,25 @@
 普通会话使用 `MessageWindowChatMemory` 保存最近窗口，并可按配置叠加 JDBC 记忆、语义记忆
 和知识库检索。该链路注册完整 `SkillTools`：`httpRequest` 只执行已登记的 GET，
 `buildHttpRequest` 只构建经校验的写操作请求元数据；二者都不应被描述成 AG-UI 浏览器工具。
+
+普通 Agent 的写操作采用“模型提议、应用确认、浏览器执行”的教学边界：
+
+```text
+loadSkill
+  -> buildHttpRequest(POST/PUT/PATCH/DELETE)
+  -> MutationConfirmationSession（请求级 ToolContext）
+  -> AgentChatResult.confirmation
+  -> 传统页面读取 api-index 并再次校验
+  -> 用户确认后浏览器发送真实 API 请求
+  -> /api/explain-result 解释真实 HTTP 结果
+```
+
+`buildHttpRequest` 不发送写请求，也不把认证信息写入待确认元数据。一个 ChatClient
+调用最多登记一个待确认写操作；非法 API、参数或第二个写操作不会污染或替换已有状态。
+同步 `/api/chat/text` 返回结构化 `confirmation`，旧 `/api/chat` 和普通 SSE 仍提供
+`[CONFIRM_REQUIRED]` 文本兼容协议。待确认状态存在时，后端生成“等待用户确认”的说明，
+不采信模型可能提前输出的“已成功”文本。传统页面在展示和执行前都读取当前 Skill API
+index、限制同源写 API，并在点击确认的瞬间读取最新 `localStorage` token。
 
 Advisor 顺序固定为：Skills -> JDBC 短期记忆 -> 可选语义记忆 -> 可选 RAG ->
 `ToolCallAdvisor`。这样检索上下文和会话消息在工具循环外构造，避免真实

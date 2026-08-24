@@ -56,6 +56,7 @@ class BackendApiIntegrationTest {
 
     private static final int PORT = availablePort();
     private static final List<Prompt> PROMPTS = new CopyOnWriteArrayList<>();
+    private static final List<String> SCRIPTED_TOOL_CALLS = new CopyOnWriteArrayList<>();
     private String scenario;
 
     @DynamicPropertySource
@@ -82,6 +83,7 @@ class BackendApiIntegrationTest {
     @BeforeEach
     void setUpModel() {
         PROMPTS.clear();
+        SCRIPTED_TOOL_CALLS.clear();
         scenario = "search";
         reset(chatModel);
         when(chatModel.call(any(Prompt.class))).thenAnswer(invocation ->
@@ -312,12 +314,20 @@ class BackendApiIntegrationTest {
 
         assertThat(chat.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(chat.getBody().path("response").asText())
-            .contains("等待用户确认");
-        String confirmation = findToolResponse("buildHttpRequest");
-        assertThat(confirmation)
-            .contains("\"method\":\"POST\"")
-            .contains("/api/products/cart")
-            .contains("\"productId\":\"3\"");
+            .contains("等待用户确认")
+            .doesNotContain("已成功添加");
+        assertThat(chat.getBody().path("confirmation").path("method").asText())
+            .isEqualTo("POST");
+        assertThat(chat.getBody().path("confirmation").path("url").asText())
+            .isEqualTo("/api/products/cart");
+        assertThat(chat.getBody().path("confirmation").path("queryParams").path("productId").asText())
+            .isEqualTo("3");
+        assertThat(SCRIPTED_TOOL_CALLS).contains("buildHttpRequest");
+        assertThat(PROMPTS).anyMatch(prompt -> {
+            String systemText = prompt.getSystemMessage().getText();
+            return systemText.contains("不要自行输出 `http-request` 代码块")
+                && systemText.contains("buildHttpRequest");
+        });
 
         ResponseEntity<JsonNode> beforeConfirmation = rest.exchange(
             "/api/products/cart",
@@ -416,10 +426,12 @@ class BackendApiIntegrationTest {
         PROMPTS.add(prompt.copy());
         Set<String> completedTools = completedToolNames(prompt);
         if (!completedTools.contains("loadSkill")) {
+            SCRIPTED_TOOL_CALLS.add("loadSkill");
             return toolCall("call-load-skill", "loadSkill",
                 "{\"skillName\":\"add-to-cart\"}");
         }
         if (!completedTools.contains("buildHttpRequest")) {
+            SCRIPTED_TOOL_CALLS.add("buildHttpRequest");
             return toolCall("call-build-http-request", "buildHttpRequest", """
                 {
                   "method":"POST",
@@ -436,7 +448,7 @@ class BackendApiIntegrationTest {
             .contains("/api/products/cart")
             .contains("\"productId\":\"3\"");
         return new ChatResponse(List.of(new Generation(
-            new AssistantMessage("已生成加入购物车请求，等待用户确认。")
+            new AssistantMessage("已成功添加到购物车。")
         )));
     }
 

@@ -19,7 +19,8 @@
 | 前端生产依赖审计 | `cd frontend && npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org` | critical/high 生产依赖门槛 | npm 官方 registry |
 | 前端构建 | `cd frontend && npm run build` | Next.js、CopilotKit、CSS、TypeScript | Node 依赖和本地 patch |
 | 前端 Skills Mock 验收 | `cd frontend && npm run test:skills` | API index、URL 校验和工具 DOM/网络行为 | Node 依赖、Playwright |
-| 传统页面真实 E2E | `cd frontend && npm run test:e2e:traditional` | 内嵌页面登录、普通 Agent、DOM 商品结果 | 已启动后端、真实 LLM/Embedding、Playwright |
+| 传统页面真实只读 E2E | `cd frontend && npm run test:e2e:traditional` | 内嵌页面登录、普通 Agent、DOM 商品结果 | 已启动后端、真实 LLM/Embedding、Playwright |
+| 传统页面真实写操作 E2E | `cd frontend && npm run test:e2e:traditional:mutation` | Tool Calling、取消/确认、认证透传、结果解释和购物车清理 | 已启动后端、真实 LLM、PostgreSQL/商品 API、Playwright |
 | 基础回归 | `./test.sh` | 商品、聊天、认证 | 后端、`.env`、LLM |
 | PetStore | `./test-petstore.sh` | 分层 OpenAPI Skill | 后端、LLM |
 | 记忆/RAG | `./test-vector-store-memory.sh`, `./test-rag-knowledge-base.sh` | 向量记忆和知识库 | Embedding、数据库/profile；脚本会启动后端 |
@@ -122,11 +123,15 @@ Playwright 默认启动其安装的 Chromium，首次运行可执行
 ```bash
 ./dev.sh --backend-only
 (cd frontend && npm run test:e2e:traditional)
+(cd frontend && npm run test:e2e:traditional:mutation)
 ./dev.sh --stop
 ```
 
-该测试以 DOM、可访问状态、认证/聊天网络响应和页面消费 JSON 后的商品结果为证据，
-不使用截图；它覆盖内嵌传统页面的 `/api/chat/text`，不替代 AG-UI/Next.js E2E。
+这些测试以 DOM、可访问状态、认证/聊天网络响应、页面消费 JSON 后的商品结果和只读
+购物车查询为证据，不使用截图；它们覆盖内嵌传统页面的 `/api/chat/text`，不替代
+AG-UI/Next.js E2E。写操作脚本先取消一次确认，证明没有业务 POST；再确认一次，证明
+页面使用最新 token 发送 POST、调用 `/api/explain-result`，并在结束时调用 checkout
+清理当前用户购物车。
 
 如果仓库可复现性检查失败，先确认
 `scripts/transform-v2-css.mjs`、`patches/copilotkit-v2-v3.css` 和锁定的

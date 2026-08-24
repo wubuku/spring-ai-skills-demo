@@ -80,6 +80,31 @@ mvn -Dtest='BackendApiIntegrationTest,SkillToolsTest' test
 这个边界很重要：模型只能提出写操作，`buildHttpRequest` 不会执行 POST。传统页面或
 浏览器确认后才由客户端发出真正的写请求。
 
+同步纯文本入口返回的 JSON 形状是：
+
+```json
+{
+  "response": "已准备执行写操作 `POST /api/products/cart`，等待用户确认。",
+  "confirmation": {
+    "method": "POST",
+    "url": "/api/products/cart",
+    "queryParams": { "productId": "3" },
+    "body": {}
+  }
+}
+```
+
+这是一个值得单独观察的 Spring AI 教学点：模型仍负责选择
+`loadSkill -> buildHttpRequest`，但确认协议由 Java 应用从请求级 `ToolContext` 生成。
+因此最终模型文本即使误报“已经加入购物车”，后端也不会把它当作业务事实。传统页面
+还会重新读取 `/api/agui/skills/api-index`，校验 method/path/query/body 后才显示按钮；
+取消只移除确认控件，确认才会发送带当前 token 的业务 POST，之后再请求结果解释端点。
+
+旧客户端若只消费字符串，`POST /api/chat` 和普通 SSE 仍可使用
+`[CONFIRM_REQUIRED]` 加 `http-request` 代码块的兼容格式。该格式是后端生成的兼容层，
+不是要求模型自行复制 JSON。完整端点契约和验证命令见
+[REST 与 SSE API](rest-api.md) 与 [验证手册](HARNESS.md)。
+
 ### 4. 观察 API 结果解释的展示层后处理
 
 传统 Web UI 执行 `httpRequest` 后，会把真实请求的 method、URL、HTTP 状态和响应体提交

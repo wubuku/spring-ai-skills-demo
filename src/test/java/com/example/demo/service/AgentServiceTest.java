@@ -13,6 +13,7 @@ import org.springframework.ai.chat.client.advisor.vectorstore.VectorStoreChatMem
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.vectorstore.VectorStore;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
@@ -42,6 +43,7 @@ class AgentServiceTest {
             mock(VectorStore.class),
             mock(ToolCallingManager.class),
             mock(ConversationIdResolver.class),
+            new ObjectMapper(),
             true,
             true
         );

@@ -100,8 +100,9 @@ public class PromptLoader {
                - 没有参数时传空对象
 
             9. 【写操作确认】
-               - `buildHttpRequest(method, url, pathParams, queryParams, body)` 只构建元数据
-               - 将返回 JSON 原样放入 `http-request` 代码块，等待浏览器确认
+               - `buildHttpRequest(method, url, pathParams, queryParams, body)` 会校验并记录待确认请求
+               - 工具返回后立即停止，不要再次调用业务工具
+               - 不要自行输出 `http-request` 代码块；确认协议由应用代码生成
                - 未收到实际 API 结果前，禁止声称操作成功
 
             10. 调用工具前不输出说明；拿到结果后用中文回答。每次回复最多执行一次业务 API。

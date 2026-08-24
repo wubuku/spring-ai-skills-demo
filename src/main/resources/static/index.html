@@ -682,20 +682,104 @@
             return div;
         }
 
-        /** 检测响应中是否包含 ```http-request 代码块，提取描述和请求元数据 */
+        const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+        function isPlainObject(value) {
+            if (value === null || typeof value !== 'object') return false;
+            const prototype = Object.getPrototypeOf(value);
+            return prototype === Object.prototype || prototype === null;
+        }
+
+        function matchesSkillApiIndex(method, path, apiIndex) {
+            const exactKey = method + ' ' + path;
+            if (apiIndex && apiIndex[exactKey]) return true;
+
+            return Object.entries(apiIndex || {}).some(([key]) => {
+                const separator = key.indexOf(' ');
+                if (separator < 0 || key.slice(0, separator) !== method) return false;
+                const patternParts = key.slice(separator + 1).split('/');
+                const pathParts = path.split('/');
+                return patternParts.length === pathParts.length &&
+                    patternParts.every((part, index) =>
+                        part === pathParts[index] ||
+                        (/^\{[^/{}]+\}$/.test(part) && pathParts[index] !== ''));
+            });
+        }
+
+        async function validateConfirmationMeta(meta) {
+            if (!isPlainObject(meta)) {
+                return { valid: false, error: '确认元数据必须是 JSON 对象。' };
+            }
+            const method = String(meta.method || '').toUpperCase();
+            if (!MUTATION_METHODS.has(method)) {
+                return { valid: false, error: '确认操作只允许 HTTP 写方法。' };
+            }
+
+            let resolvedUrl;
+            try {
+                resolvedUrl = new URL(String(meta.url || ''), window.location.origin);
+            } catch (error) {
+                return { valid: false, error: '确认 URL 无法解析。' };
+            }
+            if (resolvedUrl.origin !== window.location.origin ||
+                resolvedUrl.username || resolvedUrl.password ||
+                resolvedUrl.hash || resolvedUrl.search ||
+                !resolvedUrl.pathname.startsWith('/api/')) {
+                return { valid: false, error: '确认 URL 不是当前应用的合法 API 路径。' };
+            }
+
+            const queryParams = meta.queryParams || meta.params || {};
+            if (!isPlainObject(queryParams) ||
+                Object.entries(queryParams).some(([key, value]) =>
+                    !key || value === null || typeof value === 'object')) {
+                return { valid: false, error: '确认查询参数格式非法。' };
+            }
+            if (meta.body !== undefined && !isPlainObject(meta.body)) {
+                return { valid: false, error: '确认请求体必须是 JSON 对象。' };
+            }
+
+            let apiIndex;
+            try {
+                const indexResponse = await fetch('/api/agui/skills/api-index');
+                if (!indexResponse.ok) {
+                    return { valid: false, error: '无法读取当前 Skill API index。' };
+                }
+                apiIndex = await indexResponse.json();
+            } catch (error) {
+                return { valid: false, error: '读取 Skill API index 失败。' };
+            }
+            if (!matchesSkillApiIndex(method, resolvedUrl.pathname, apiIndex)) {
+                return { valid: false, error: '确认 URL 不在当前 Skill API index 中。' };
+            }
+
+            return {
+                valid: true,
+                meta: {
+                    method,
+                    url: resolvedUrl.pathname,
+                    queryParams,
+                    ...(meta.body !== undefined ? { body: meta.body } : {})
+                }
+            };
+        }
+
+        /** 检测响应中是否包含确认协议或旧版 ```http-request 代码块 */
         function parseConfirmAction(text) {
-            // 简单方案：只要包含 http-request 就尝试解析
             if (!text.includes("http-request")) return null;
 
-            // 提取 ```http-request 到 ``` 之间的内容
-            const start = text.indexOf("```http-request");
+            const marker = '[CONFIRM_REQUIRED]';
+            const markerIndex = text.lastIndexOf(marker);
+            const searchStart = markerIndex >= 0 ? markerIndex + marker.length : 0;
+            const start = text.indexOf("```http-request", searchStart);
             const end = text.indexOf("```", start + 16);
             if (start === -1 || end === -1) return null;
 
             try {
                 const jsonStr = text.substring(start + 16, end).trim();
                 const requestMeta = JSON.parse(jsonStr);
-                const description = text.substring(0, start).trim();
+                const description = (markerIndex >= 0
+                    ? text.substring(searchStart, start)
+                    : text.substring(0, start)).trim();
                 return { description, requestMeta };
             } catch (e) {
                 console.log('[解析错误]', e);
@@ -705,16 +789,14 @@
 
         /** 前端版 httpRequest —— 根据元数据构造并发送 HTTP 请求 */
         async function executeHttpRequest(meta) {
-            const method = String(meta.method || '').toUpperCase();
-            if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-                throw new Error('确认操作只允许 HTTP 写方法');
+            const validation = await validateConfirmationMeta(meta);
+            if (!validation.valid) {
+                throw new Error(validation.error);
             }
-            const resolvedUrl = new URL(meta.url, window.location.origin);
-            if (resolvedUrl.origin !== window.location.origin) {
-                throw new Error('拒绝执行跨站请求');
-            }
-            // 支持 queryParams 和 params 两种格式
-            let queryParams = meta.queryParams || meta.params || {};
+            const safeMeta = validation.meta;
+            const method = safeMeta.method;
+            const resolvedUrl = new URL(safeMeta.url, window.location.origin);
+            const queryParams = safeMeta.queryParams;
 
             if (queryParams && Object.keys(queryParams).length > 0) {
                 Object.entries(queryParams).forEach(([key, value]) =>
@@ -733,9 +815,8 @@
                 method: method,
                 headers: headers
             };
-            // GET/HEAD 请求不能带 body
-            if (meta.body) {
-                opts.body = JSON.stringify(meta.body);
+            if (safeMeta.body) {
+                opts.body = JSON.stringify(safeMeta.body);
             }
             const resp = await fetch(resolvedUrl, opts);
             const responseText = await resp.text();
@@ -746,22 +827,30 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        method: meta.method,
-                        url: meta.url,  // 原始 URL（不带查询参数）
+                        method: safeMeta.method,
+                        url: safeMeta.url,
                         queryParams: queryParams,
                         statusCode: resp.status,
                         responseBody: responseText
                     })
                 });
                 if (explainResp.ok) {
-                    return await explainResp.text();
+                    return {
+                        ok: resp.ok,
+                        status: resp.status,
+                        text: await explainResp.text()
+                    };
                 }
             } catch (e) {
                 console.error('解释结果失败:', e);
             }
 
             // 降级：返回原始响应
-            return responseText;
+            return {
+                ok: resp.ok,
+                status: resp.status,
+                text: responseText
+            };
         }
 
         // ==================== 多模态支持：图片和语音 ====================
@@ -1133,9 +1222,20 @@
                 }
 
                 // 检测是否包含需要用户确认的操作
-                const confirmAction = parseConfirmAction(data.response);
+                const confirmAction = data.confirmation
+                    ? { description: data.response || '请确认即将执行的写操作。', requestMeta: data.confirmation }
+                    : parseConfirmAction(data.response);
                 if (confirmAction) {
-                    showConfirmAction(confirmAction);
+                    const validation = await validateConfirmationMeta(confirmAction.requestMeta);
+                    if (validation.valid) {
+                        showConfirmAction({
+                            description: confirmAction.description,
+                            requestMeta: validation.meta
+                        });
+                    } else {
+                        appendMessage('assistant',
+                            (data.response || '写操作未执行。') + '\n\n⚠️ ' + validation.error);
+                    }
                 } else {
                     appendMessage('assistant', data.response);
                 }
@@ -1254,9 +1354,17 @@
                 // 检测是否包含需要用户确认的操作
                 const confirmAction = parseConfirmAction(fullText);
                 if (confirmAction) {
-                    // 替换消息内容为确认操作
-                    messageDiv.innerHTML = '';
-                    showConfirmAction(confirmAction, messageDiv);
+                    const validation = await validateConfirmationMeta(confirmAction.requestMeta);
+                    if (validation.valid) {
+                        messageDiv.innerHTML = '';
+                        showConfirmAction({
+                            description: confirmAction.description,
+                            requestMeta: validation.meta
+                        }, messageDiv);
+                    } else {
+                        messageDiv.textContent = confirmAction.description +
+                            '\n\n⚠️ ' + validation.error;
+                    }
                 }
 
             } catch (error) {
@@ -1326,7 +1434,10 @@
                     try {
                         const result = await executeHttpRequest(action.requestMeta);
                         messages.removeChild(loading);
-                        appendMessage('assistant', '✅ 操作结果：' + result);
+                        const marker = /^[✅❌]/.test(result.text)
+                            ? ''
+                            : (result.ok ? '✅ ' : '❌ ');
+                        appendMessage('assistant', marker + result.text);
                     } catch (e) {
                         messages.removeChild(loading);
                         appendMessage('assistant', '❌ 操作失败：' + e.message);
@@ -1359,7 +1470,10 @@
                     try {
                         const result = await executeHttpRequest(action.requestMeta);
                         messages.removeChild(loading);
-                        appendMessage('assistant', '✅ 操作结果：' + result);
+                        const marker = /^[✅❌]/.test(result.text)
+                            ? ''
+                            : (result.ok ? '✅ ' : '❌ ');
+                        appendMessage('assistant', marker + result.text);
                     } catch (e) {
                         messages.removeChild(loading);
                         appendMessage('assistant', '❌ 操作失败：' + e.message);

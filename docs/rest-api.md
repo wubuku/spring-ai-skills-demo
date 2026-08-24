@@ -1,7 +1,7 @@
 # REST 与 SSE API 参考
 
 > **目的**: 提供当前 Controller 层的端点地图；详细业务参数以 Swagger/OpenAPI 和运行时 Skill 为准。
-> **最后核对**: 2026-08-23
+> **最后核对**: 2026-08-24
 
 ## 基础地址
 
@@ -45,7 +45,7 @@ curl -s -X POST http://localhost:8080/api/auth/login \
 | `GET` | `/api/chat/test` | - | 观察日志测试入口，会调用模型 |
 | `POST` | `/api/chat` | `application/json` | 普通同步聊天，字段为 `content`、可选 `conversationId` |
 | `POST` | `/api/chat` | `multipart/form-data` | 多模态同步聊天，字段为 `query`、`conversationId`、可选 `image`、`audio` |
-| `POST` | `/api/chat/text` | `application/json` | 多模态 Controller 提供的纯文本兼容入口 |
+| `POST` | `/api/chat/text` | `application/json` | 传统页面使用的纯文本结构化入口，字段为 `query`、可选 `conversationId` |
 | `POST` | `/api/chat/stream` | `application/json` | 普通文本 SSE |
 | `POST` | `/api/chat/multimodal/stream` | `multipart/form-data` | 图片、音频和文本 SSE |
 | `POST` | `/api/transcribe/stream` | `multipart/form-data` | 音频字段 `audio`，流式转写 SSE |
@@ -57,6 +57,51 @@ curl -s -X POST http://localhost:8080/api/auth/login \
 ```
 
 结束时发送 `[DONE]`。多模态流额外带有 `type` 字段；转写流发送 `transcribed`、`error` 和完成事件。
+
+### 普通 Agent 写操作确认
+
+普通 Agent 不直接执行 POST、PUT、PATCH 或 DELETE。模型调用
+`buildHttpRequest` 后，应用会在当前请求的 `ToolContext` 中登记一个经 Skill API index
+校验的 `PendingHttpRequest`，等待用户确认。
+
+`POST /api/chat/text` 在普通文本请求中返回：
+
+```json
+{
+  "response": "已准备执行写操作 `POST /api/products/cart`，等待用户确认。确认后浏览器才会发送真实请求。",
+  "confirmation": {
+    "method": "POST",
+    "url": "/api/products/cart",
+    "queryParams": {
+      "productId": "3"
+    },
+    "body": {}
+  }
+}
+```
+
+只读对话没有待确认动作时，响应只包含 `response`；`confirmation` 不会序列化为
+`null`。这个字段是应用生成的结构化协议，不是模型自由文本，且不包含认证头。
+
+传统页面在显示按钮和真正执行前都会读取 `/api/agui/skills/api-index`，拒绝未知 API、
+绝对 URL、跨站 URL、非法方法和非法参数。用户点击取消时不会发送业务请求，也不会调用
+`/api/explain-result`；点击确认时才用点击瞬间的 `localStorage.auth_token` 发送请求，
+然后把真实 HTTP 状态和响应体交给结果解释端点。
+
+兼容端点 `/api/chat` 仍把待确认动作编码为：
+
+````text
+[CONFIRM_REQUIRED]
+已准备执行写操作 `POST /api/products/cart`，等待用户确认。
+
+```http-request
+{"method":"POST","url":"/api/products/cart","queryParams":{"productId":"3"},"body":{}}
+```
+````
+
+普通 SSE 也使用同一后端生成的兼容文本。标记前的模型文本不属于确认说明，不能作为
+“写操作已经成功”的证据。该确认链路的后端集成测试和传统页面 Playwright 测试见
+[验证手册](HARNESS.md)。
 
 ## 商品 API
 
@@ -76,7 +121,8 @@ curl -s -H 'Authorization: Bearer <token>' \
   'http://localhost:8080/api/products/cart'
 ```
 
-运行时 Skill 的 API 路径必须与这些 Controller 保持一致；前端 `httpRequest` 会通过 `/api/agui/skills/api-index` 校验路径。
+运行时 Skill 的 API 路径必须与这些 Controller 保持一致；普通 Agent 和前端
+`httpRequest` 都会通过 `/api/agui/skills/api-index` 校验路径。
 
 ## AG-UI
 

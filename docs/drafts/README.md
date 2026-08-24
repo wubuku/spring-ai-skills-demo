@@ -17,6 +17,8 @@
   知识库 UTF-8/去重/排序和 Skill 目录/frontmatter 资源契约加固规划。
 - [api-result-explanation-hardening-plan.md](api-result-explanation-hardening-plan.md)：
   API 结果解释链路的状态正确降级和真实 Skill 目录提示加固规划。
+- [ordinary-agent-mutation-confirmation-hardening-plan.md](ordinary-agent-mutation-confirmation-hardening-plan.md)：
+  普通 Agent 写操作确认协议、传统页面安全校验和真实 Tool Calling 教学闭环加固规划。
 - [frontend-reproducibility-hardening-plan.md](frontend-reproducibility-hardening-plan.md)：
   前端构建支持文件、全新 clone 和真实 LLM 闭环的可复现性加固记录。
 
