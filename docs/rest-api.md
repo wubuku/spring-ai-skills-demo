@@ -137,6 +137,12 @@ curl -s -H 'Authorization: Bearer <token>' \
 Level 2 详情可以包含分层条目的 `referencePath`，但不会返回 reference 正文。
 Level 3 仍通过 `readSkillReference` 的受限工具边界读取。
 
+这些观察端点不代表当前普通 Agent 已加载对应 Skill。普通 Agent 的
+`httpRequest`、`buildHttpRequest` 和 `readSkillReference` 会在各自的请求级
+`SkillLoadSession` 中再次检查 Skill 所属关系；未加载、加载错误 Skill 或缺少上下文
+都会被工具拒绝，且 GET 不会发送下游请求，写操作不会登记确认元数据。这个门禁是
+Tool Calling 协议约束，不是 `/api/products` 的用户认证替代品。
+
 ## AG-UI
 
 | 方法 | 路径 | 说明 |

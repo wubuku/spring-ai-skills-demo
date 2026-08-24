@@ -201,6 +201,33 @@ class BackendApiIntegrationTest {
     }
 
     @Test
+    void ordinaryChatRejectsAnHttpToolCallThatSkipsSkillLoading() {
+        scenario = "skip-load";
+        HttpHeaders json = new HttpHeaders();
+        json.setContentType(MediaType.APPLICATION_JSON);
+
+        ResponseEntity<JsonNode> response = rest.postForEntity(
+            "/api/chat/text",
+            new HttpEntity<>(
+                """
+                {
+                  "query":"请直接调用商品 API，不要先加载 Skill",
+                  "conversationId":"integration-skill-gate"
+                }
+                """,
+                json
+            ),
+            JsonNode.class
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().path("response").asText())
+            .contains("Skill 门禁已阻止")
+            .doesNotContain("iPhone 15");
+        assertThat(PROMPTS).hasSize(2);
+    }
+
+    @Test
     void runtimeSkillApiIndexMatchesSpringMvcHandlersAndSerializesReferences() {
         ResponseEntity<JsonNode> response = rest.getForEntity(
             "/api/agui/skills/api-index", JsonNode.class);
@@ -521,6 +548,9 @@ class BackendApiIntegrationTest {
         if ("mutation".equals(scenario)) {
             return scriptedMutationResponse(prompt);
         }
+        if ("skip-load".equals(scenario)) {
+            return scriptedSkipLoadResponse(prompt);
+        }
 
         PROMPTS.add(prompt.copy());
         Set<String> completedTools = prompt.getInstructions().stream()
@@ -588,6 +618,28 @@ class BackendApiIntegrationTest {
             .contains("\"productId\":\"3\"");
         return new ChatResponse(List.of(new Generation(
             new AssistantMessage("已成功添加到购物车。")
+        )));
+    }
+
+    private ChatResponse scriptedSkipLoadResponse(Prompt prompt) {
+        PROMPTS.add(prompt.copy());
+        if (completedToolNames(prompt).isEmpty()) {
+            return toolCall("call-skip-load", "httpRequest", """
+                {
+                  "method":"GET",
+                  "url":"/api/products",
+                  "pathParams":{},
+                  "queryParams":{},
+                  "headers":{},
+                  "body":{}
+                }
+                """);
+        }
+
+        assertThat(findToolResponse(prompt, "httpRequest"))
+            .contains("尚未加载技能 `search-products`");
+        return new ChatResponse(List.of(new Generation(
+            new AssistantMessage("Skill 门禁已阻止未先加载 Skill 的业务请求。")
         )));
     }
 

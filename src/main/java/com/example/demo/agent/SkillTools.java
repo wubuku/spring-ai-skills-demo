@@ -121,6 +121,12 @@ public class SkillTools {
         if (validationError != null) {
             return "HTTP 请求被拒绝：" + validationError;
         }
+        validationError = requireLoadedApiSkill(
+            normalizedMethod, resolvedUrl, toolContext, "HTTP 请求被拒绝："
+        );
+        if (validationError != null) {
+            return validationError;
+        }
 
         UriComponentsBuilder uriBuilder = UriComponentsBuilder
             .fromUriString(apiBaseUrl + resolvedUrl);
@@ -187,6 +193,12 @@ public class SkillTools {
         if (validationError != null) {
             return "构建请求被拒绝：" + validationError;
         }
+        validationError = requireLoadedApiSkill(
+            normalizedMethod, resolvedUrl, toolContext, "构建请求被拒绝："
+        );
+        if (validationError != null) {
+            return validationError;
+        }
 
         PendingHttpRequest pendingRequest = new PendingHttpRequest(
             normalizedMethod,
@@ -222,8 +234,17 @@ public class SkillTools {
     @Tool(description = "读取技能的参考文件（适用于具有分层结构的技能，如 OpenAPI 生成的技能）")
     public String readSkillReference(
         @ToolParam(description = "技能名称，例如 swagger-petstore-openapi-3-0") String skillName,
-        @ToolParam(description = "相对于该技能 references 目录的路径，例如 resources/pet.md 或 operations/addPet.md") String relativePath
+        @ToolParam(description = "相对于该技能 references 目录的路径，例如 resources/pet.md 或 operations/addPet.md") String relativePath,
+        ToolContext toolContext
     ) {
+        if (skillName != null && registry.get(skillName).isPresent()) {
+            String validationError = requireLoadedSkill(
+                skillName, toolContext, "读取参考文件失败："
+            );
+            if (validationError != null) {
+                return validationError;
+            }
+        }
         return referenceReader.read(skillName, relativePath);
     }
 
@@ -346,6 +367,35 @@ public class SkillTools {
         return session instanceof SkillLoadSession skillLoadSession
             ? skillLoadSession
             : null;
+    }
+
+    private String requireLoadedApiSkill(
+        String method,
+        String resolvedUrl,
+        ToolContext toolContext,
+        String prefix
+    ) {
+        SkillRegistry.ApiIndexEntry entry = registry.findApiEntry(resolvedUrl, method);
+        if (entry == null) {
+            return prefix + "API index 中没有找到对应的 Skill。";
+        }
+        return requireLoadedSkill(entry.getSkillName(), toolContext, prefix);
+    }
+
+    private String requireLoadedSkill(
+        String skillName,
+        ToolContext toolContext,
+        String prefix
+    ) {
+        SkillLoadSession session = skillSession(toolContext);
+        if (session == null) {
+            return prefix + "缺少当前请求的 Skill 会话上下文。";
+        }
+        if (!session.loadedSkills().contains(skillName)) {
+            return prefix + "当前请求尚未加载技能 `" + skillName + "`。"
+                + "请先调用 loadSkill(\"" + skillName + "\") 获取完整操作指令。";
+        }
+        return null;
     }
 
     private MutationConfirmationSession confirmationSession(ToolContext toolContext) {

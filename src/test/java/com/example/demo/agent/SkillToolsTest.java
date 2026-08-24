@@ -62,6 +62,8 @@ class SkillToolsTest {
     @Test
     void executesOnlyAllowlistedGetAndInjectsTheValidatedToken() {
         String token = "validated-demo-token";
+        ToolContext context = toolContext(token);
+        tools.loadSkill("search-products", context);
         server.expect(requestTo("http://localhost:18080/api/products?keyword=Sony"))
             .andExpect(method(HttpMethod.GET))
             .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
@@ -77,7 +79,7 @@ class SkillToolsTest {
             Map.of("keyword", "Sony"),
             Map.of("Accept", "application/json"),
             Map.of(),
-            toolContext(token)
+            context
         );
 
         assertThat(response).contains("Sony WH-1000XM5");
@@ -103,15 +105,58 @@ class SkillToolsTest {
     }
 
     @Test
+    void rejectsAllowlistedGetUntilItsOwningSkillIsLoaded() {
+        ToolContext context = toolContext(null);
+
+        String response = tools.httpRequest(
+            "GET",
+            "/api/products",
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            context
+        );
+
+        assertThat(response)
+            .contains("尚未加载技能 `search-products`")
+            .contains("loadSkill(\"search-products\")");
+        server.verify();
+    }
+
+    @Test
+    void rejectsAnApiWhenOnlyAnotherSkillWasLoaded() {
+        ToolContext context = toolContext(null);
+        tools.loadSkill("get-product-detail", context);
+
+        String response = tools.httpRequest(
+            "GET",
+            "/api/products",
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            context
+        );
+
+        assertThat(response)
+            .contains("尚未加载技能 `search-products`")
+            .contains("loadSkill(\"search-products\")");
+        server.verify();
+    }
+
+    @Test
     void buildsOnlyValidatedMutationMetadataForBrowserConfirmation() {
         MutationConfirmationSession confirmationSession = new MutationConfirmationSession();
+        ToolContext context = toolContext(null, confirmationSession);
+        tools.loadSkill("add-to-cart", context);
         String metadata = tools.buildHttpRequest(
             "POST",
             "/api/products/cart",
             Map.of(),
             Map.of("productId", "3"),
             Map.of(),
-            toolContext(null, confirmationSession)
+            context
         );
 
         assertThat(metadata)
@@ -132,6 +177,11 @@ class SkillToolsTest {
     void rejectsASecondMutationAndKeepsConfirmationContextsIsolated() {
         MutationConfirmationSession firstSession = new MutationConfirmationSession();
         MutationConfirmationSession secondSession = new MutationConfirmationSession();
+        ToolContext firstContext = toolContext("token-a", firstSession);
+        ToolContext secondContext = toolContext("token-b", secondSession);
+        tools.loadSkill("add-to-cart", firstContext);
+        tools.loadSkill("checkout", firstContext);
+        tools.loadSkill("checkout", secondContext);
 
         String first = tools.buildHttpRequest(
             "POST",
@@ -139,7 +189,7 @@ class SkillToolsTest {
             Map.of(),
             Map.of("productId", "3"),
             Map.of(),
-            toolContext("token-a", firstSession)
+            firstContext
         );
         String duplicate = tools.buildHttpRequest(
             "POST",
@@ -147,7 +197,7 @@ class SkillToolsTest {
             Map.of(),
             Map.of(),
             Map.of(),
-            toolContext("token-a", firstSession)
+            firstContext
         );
         String second = tools.buildHttpRequest(
             "POST",
@@ -155,7 +205,7 @@ class SkillToolsTest {
             Map.of(),
             Map.of(),
             Map.of(),
-            toolContext("token-b", secondSession)
+            secondContext
         );
 
         assertThat(first).contains("\"url\":\"http://localhost:18080/api/products/cart\"");
@@ -185,14 +235,36 @@ class SkillToolsTest {
     }
 
     @Test
+    void rejectsMutationMetadataUntilItsOwningSkillIsLoaded() {
+        MutationConfirmationSession session = new MutationConfirmationSession();
+        ToolContext context = toolContext(null, session);
+
+        String response = tools.buildHttpRequest(
+            "POST",
+            "/api/products/cart",
+            Map.of(),
+            Map.of("productId", "3"),
+            Map.of(),
+            context
+        );
+
+        assertThat(response)
+            .contains("尚未加载技能 `add-to-cart`")
+            .contains("loadSkill(\"add-to-cart\")");
+        assertThat(session.pending()).isEmpty();
+    }
+
+    @Test
     void boundsParametersAndSanitizesRemoteErrors() {
         Map<String, String> tooManyQueryParams = new HashMap<>();
         for (int i = 0; i < 33; i++) {
             tooManyQueryParams.put("key" + i, "value");
         }
+        ToolContext context = toolContext(null);
+        tools.loadSkill("search-products", context);
         assertThat(tools.httpRequest(
             "GET", "/api/products", Map.of(), tooManyQueryParams, Map.of(), Map.of(),
-            toolContext(null)
+            context
         )).contains("查询参数").contains("上限");
 
         server.expect(requestTo("http://localhost:18080/api/products"))
@@ -203,13 +275,43 @@ class SkillToolsTest {
 
         String response = tools.httpRequest(
             "GET", "/api/products", Map.of(), Map.of(), Map.of(), Map.of(),
-            toolContext(null)
+            context
         );
         assertThat(response)
             .startsWith("HTTP 502")
             .contains("响应过长已截断")
             .hasSizeLessThan(17_000);
         server.verify();
+    }
+
+    @Test
+    void rejectsMissingSkillContextInsteadOfExecutingAllowlistedApi() {
+        String response = tools.httpRequest(
+            "GET",
+            "/api/products",
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            Map.of(),
+            null
+        );
+
+        assertThat(response).contains("缺少当前请求的 Skill 会话上下文");
+        server.verify();
+    }
+
+    @Test
+    void rejectsAReferenceWhenOnlyAnotherSkillWasLoaded() {
+        ToolContext context = toolContext(null);
+        tools.loadSkill("search-products", context);
+
+        assertThat(tools.readSkillReference(
+            "swagger-petstore-openapi-3-0",
+            "operations/addPet.md",
+            context
+        ))
+            .contains("尚未加载技能 `swagger-petstore-openapi-3-0`")
+            .contains("loadSkill(\"swagger-petstore-openapi-3-0\")");
     }
 
     private ToolContext toolContext(String token) {

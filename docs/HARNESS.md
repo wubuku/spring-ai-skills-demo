@@ -11,7 +11,7 @@
 | 文档格式 | `git diff --check` | 所有文档改动 | 无 |
 | Git 范围 | `git status --short` | 提交前 | 无 |
 | 后端硬门槛 | `mvn clean compile test-compile` | Java、配置、资源和 Skill | Maven 仓库 |
-| Skills 确定性测试 | `mvn -Dtest='*Skill*Test,*Api*Test' test` | Skill、reference、API index 契约 | Maven 仓库，无 LLM |
+| Skills 确定性测试 | `mvn -Dtest='*Skill*Test,*Api*Test' test` | Skill、reference、API index、普通 Agent 加载门禁契约 | Maven 仓库，无 LLM |
 | 后端教育闭环 | `mvn -Dtest='BackendApiIntegrationTest,ChatControllerTest' test` | API index mapping、Tool Calling 确认边界、购物车结算、普通文本 SSE | Maven 仓库；使用 Scripted ChatModel |
 | Maven 测试 | `mvn test` | 默认确定性 Java 测试和上下文 | Maven 仓库；排除 live-llm/container |
 | 前端类型检查 | `cd frontend && npx tsc --noEmit` | TypeScript/React | Node 依赖 |
@@ -85,10 +85,11 @@ RUN_LIVE_LLM_TESTS=true \
 `RUN_LIVE_LLM_TESTS=true` 只满足 JUnit 条件，不能自行覆盖 Surefire 默认排除组；命令输出
 必须明确显示 `Tests run: 1`，`Tests run: 0` 不算通过。
 
-例如本次 Skill 改动的真实证据应优先覆盖：`/api/skills` 的 Level 1 目录、
+例如本次普通 Skill 改动的确定性证据应覆盖：`/api/skills` 的 Level 1 目录、
 `/api/skills/{name}` 的 Level 2 正文、`/api/skills/api-index` 与旧兼容别名一致、
-AG-UI `loadSkill` 调用次数、必要的 `readSkillReference`、浏览器/后端工具回合，以及
-最终 API 路径或结果。Embedding、RAG、多模态和全量回归只有在确实属于改动范围时才加入。
+普通 Agent 的 `loadSkill` -> 业务工具回合、错误 Skill/跳过加载时的拒绝、
+`readSkillReference` 的请求级门禁，以及最终 API 路径或结果。Embedding、RAG、多模态和
+AG-UI/CopilotKit 只有在确实属于改动范围时才加入。
 
 ## 标准序列
 

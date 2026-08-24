@@ -318,6 +318,10 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
 只构建并登记请求级写操作确认元数据，不执行写 API。不要把这组工具与 AG-UI 路径的
 `SkillCoreTools` 混为一谈。详细协议见
 [系统架构](docs/ARCHITECTURE.md) 和 [REST/SSE API](docs/rest-api.md)。
+普通工具还会按 API index 检查 API/参考文件所属 Skill 是否已在当前请求加载；只加载
+其他 Skill、跳过 `loadSkill` 或缺少请求上下文都不能绕过门禁。对应正常/负向回路见
+[`SkillToolsTest`](src/test/java/com/example/demo/agent/SkillToolsTest.java) 和
+[`BackendApiIntegrationTest`](src/test/java/com/example/demo/BackendApiIntegrationTest.java)。
 
 ### AG-UI/CopilotKit 链路
 

@@ -71,14 +71,58 @@ class SkillReferenceReaderTest {
             reader
         );
         SkillCoreTools agUiTools = new SkillCoreTools(registry, reader);
+        SkillLoadSession session = new SkillLoadSession();
+        ToolContext context = new ToolContext(Map.of(
+            SkillTools.SKILL_SESSION_CONTEXT_KEY, session
+        ));
+        ordinaryTools.loadSkill("swagger-petstore-openapi-3-0", context);
 
         String ordinary = ordinaryTools.readSkillReference(
-            "swagger-petstore-openapi-3-0", "operations/addPet.md");
+            "swagger-petstore-openapi-3-0", "operations/addPet.md", context);
         String agUi = agUiTools.readSkillReference(
             "swagger-petstore-openapi-3-0", "operations/addPet.md");
 
         assertThat(ordinary).isEqualTo(agUi);
         assertThat(ordinary).contains("# POST /pet");
+    }
+
+    @Test
+    void ordinaryReferenceReadRequiresTheSkillToBeLoadedInTheCurrentContext() {
+        SkillTools ordinaryTools = new SkillTools(
+            registry,
+            new RestTemplate(),
+            "http://localhost:8080",
+            reader
+        );
+        ToolContext context = new ToolContext(Map.of(
+            SkillTools.SKILL_SESSION_CONTEXT_KEY, new SkillLoadSession()
+        ));
+
+        assertThat(ordinaryTools.readSkillReference(
+            "swagger-petstore-openapi-3-0",
+            "operations/addPet.md",
+            context
+        ))
+            .contains("尚未加载技能 `swagger-petstore-openapi-3-0`")
+            .contains("loadSkill(\"swagger-petstore-openapi-3-0\")");
+    }
+
+    @Test
+    void ordinaryReferenceReadKeepsInvalidSkillNameErrorsStable() {
+        SkillTools ordinaryTools = new SkillTools(
+            registry,
+            new RestTemplate(),
+            "http://localhost:8080",
+            reader
+        );
+
+        assertThat(ordinaryTools.readSkillReference(
+            null,
+            "operations/addPet.md",
+            new ToolContext(Map.of(
+                SkillTools.SKILL_SESSION_CONTEXT_KEY, new SkillLoadSession()
+            ))
+        )).contains("技能名称非法");
     }
 
     @Test

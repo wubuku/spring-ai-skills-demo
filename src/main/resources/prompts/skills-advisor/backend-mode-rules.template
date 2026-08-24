@@ -9,6 +9,8 @@
    2. 从返回的 SKILL.md 获取准确 method、url 和参数
    3. 分层 Skill 调用 `readSkillReference(skillName, relativePath)`
    4. GET 调用 `httpRequest`；写操作调用 `buildHttpRequest`
+   5. 普通后端链路会强制校验：业务 API 和 reference 必须属于本轮已加载的 Skill；
+      只加载其他 Skill 不能绕过该校验
 
 8. 【只读请求格式】
    - `httpRequest(method, url, pathParams, queryParams, headers, body)`
@@ -24,6 +26,7 @@
 
 10. 【错误与输出】
    - URL 校验失败时重新读取 Skill，不要尝试其他 URL
+   - 如果工具提示 Skill 尚未加载，先按提示加载它，不要重复调用业务 API
    - 调用工具前不要输出说明；拿到结果后用中文回答
    - 每次回复最多执行一次业务 API，避免重复工具调用
    - `loadSkill` 的 `skillName` 必须从 `<available_skills>` 逐字复制

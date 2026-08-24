@@ -69,6 +69,7 @@ POST /api/chat/text
 
 - 商品查询：`loadSkill -> httpRequest(GET) -> final answer`；
 - 写操作：`loadSkill -> buildHttpRequest(POST) -> confirmation metadata`；
+- 跳过 `loadSkill` 或只加载错误 Skill：后端工具返回 Skill 门禁错误，不发送业务请求；
 - 用户确认之后，测试才直接调用商品 POST，再验证购物车和 checkout。
 
 运行这些测试不访问真实 LLM：
@@ -178,10 +179,19 @@ curl -s http://localhost:8080/api/skills/api-index
 
 这三个端点展示“应用已经知道什么”，真实模型回合展示“模型何时选择加载什么”。
 Level 3 仍通过 `readSkillReference` 受限读取，不存在通用 HTTP reference 下载端点。
+注意：观察 `/api/skills` 或 `/api/skills/api-index` 不会自动为当前 Agent 请求加载 Skill；
+普通工具仍按请求级 `SkillLoadSession` 强制要求先调用对应的 `loadSkill`。可用下面的
+测试复现“错误 Skill 不能访问另一个 Skill”的边界：
+
+```bash
+mvn -Dtest='SkillToolsTest#rejectsAnApiWhenOnlyAnotherSkillWasLoaded+rejectsAReferenceWhenOnlyAnotherSkillWasLoaded' test
+```
 
 frontmatter、links、reference 安全和 API index 的确定性测试见
 [SkillRegistryTest.java](../src/test/java/com/example/demo/agent/SkillRegistryTest.java) 和
 [SkillReferenceReaderTest.java](../src/test/java/com/example/demo/agent/SkillReferenceReaderTest.java)。
+普通 Agent 的加载门禁、请求级状态隔离和下游请求未发送证据见
+[SkillToolsTest.java](../src/test/java/com/example/demo/agent/SkillToolsTest.java)。
 
 ### 6. 走一遍认证和用户确认
 

@@ -47,6 +47,10 @@
 普通会话使用 `MessageWindowChatMemory` 保存最近窗口，并可按配置叠加 JDBC 记忆、语义记忆
 和知识库检索。该链路注册完整 `SkillTools`：`httpRequest` 只执行已登记的 GET，
 `buildHttpRequest` 只构建经校验的写操作请求元数据；二者都不应被描述成 AG-UI 浏览器工具。
+在 API index 校验成功后，两个工具还必须确认该 API 所属 Skill 已在当前
+`SkillLoadSession` 中加载；普通 `readSkillReference` 同样要求传入的 Skill 已加载。
+因此“先 `loadSkill`”是后端运行时契约，不只是 `SkillsAdvisor` 的提示词建议，加载错误
+Skill 也不能访问另一个 Skill 的 API 或 reference。
 
 普通 Agent 的写操作采用“模型提议、应用确认、浏览器执行”的教学边界：
 
@@ -135,6 +139,13 @@ GET /api/skills/api-index
 `RuntimeSkillCatalogService` 只映射 `SkillRegistry` 已解析的数据，不重新解析 Markdown。
 HTTP 详情不会返回 reference 正文；Level 3 仍只能通过受限 `readSkillReference` 读取。
 旧 `/api/agui/skills/api-index` 委托同一 service，仅用于现有客户端兼容。
+
+上述观察 API 与普通 Agent 的工具门禁是两个不同边界：观察 API 可以公开目录和
+method/path 索引，但不会替代当前请求中的 `loadSkill`，也不会使 Level 3 reference
+变成通用下载端点。对应的确定性回路和负向测试见
+[`SkillToolsTest`](../src/test/java/com/example/demo/agent/SkillToolsTest.java)、
+[`SkillReferenceReaderTest`](../src/test/java/com/example/demo/agent/SkillReferenceReaderTest.java)
+和 [`BackendApiIntegrationTest`](../src/test/java/com/example/demo/BackendApiIntegrationTest.java)。
 
 当前运行时 Skill：
 

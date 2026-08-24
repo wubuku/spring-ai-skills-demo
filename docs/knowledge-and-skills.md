@@ -128,6 +128,13 @@ src/main/resources/skills/*/SKILL.md
   -> 商品、PetStore 或其他业务 API
 ```
 
+普通 Agent 的这条顺序由后端强制执行：`httpRequest`、`buildHttpRequest` 会根据
+`SkillRegistry` API index 找到 API 所属 Skill，只有该 Skill 已在本轮
+`SkillLoadSession` 中加载才会继续；普通 `readSkillReference` 也要求对应 Skill 已加载。
+加载了 `get-product-detail` 不能访问 `search-products` 的 API，加载了任意其他 Skill
+也不能读取 PetStore reference。未加载或缺少 `ToolContext` 时工具返回可读错误，且不会
+发送下游 HTTP 请求或登记待确认写操作。
+
 对应源码：
 
 - Skill 注册和 API 索引：`src/main/java/com/example/demo/agent/SkillRegistry.java`
@@ -187,6 +194,17 @@ src/main/resources/skills/*/SKILL.md
 
 详情中的 `referencePath` 只是 Level 3 导航指针。HTTP API 不返回 reference 正文，
 模型仍必须调用受限 `readSkillReference`，因此观察能力不会扩大文件读取权限。
+
+建议用确定性测试观察完整边界，而不是只看提示词：
+
+```bash
+mvn -Dtest='SkillToolsTest,SkillReferenceReaderTest,BackendApiIntegrationTest' test
+```
+
+其中正常回路证明 `loadSkill -> httpRequest/buildHttpRequest` 可以继续，负向回路证明
+跳过 `loadSkill`、加载错误 Skill 或缺少请求上下文时不会执行 API。该门禁属于普通 Agent
+工具边界，不是商品 Controller 的登录认证；它解决的是“是否先披露了操作指令”，而不是
+“当前用户是否有权限访问业务资源”。
 
 ## 两条路径如何组合
 
