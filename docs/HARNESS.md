@@ -12,6 +12,7 @@
 | Git 范围 | `git status --short` | 提交前 | 无 |
 | 后端硬门槛 | `mvn clean compile test-compile` | Java、配置、资源和 Skill | Maven 仓库 |
 | Prompt fallback 契约 | `mvn -Dtest=PromptLoaderTest test` | SkillsAdvisor 资源模板、Java fallback、占位符和缓存 | Maven 仓库，无 LLM |
+| Advisor/Prompt 契约 | `mvn -Dtest='SkillsAdvisorTest,AgentServiceTest' test` | backend/frontend 模式提示词、Level 1 目录、Advisor 顺序、可选开关、SkillTools 注册 | Maven 仓库，无 LLM |
 | Skills 确定性测试 | `mvn -Dtest='*Skill*Test,*Api*Test' test` | Skill、reference、API index、普通 Agent 加载门禁契约 | Maven 仓库，无 LLM |
 | 后端教育闭环 | `mvn -Dtest='BackendApiIntegrationTest,ChatControllerTest' test` | API index mapping、Tool Calling 确认边界、购物车结算、普通文本 SSE | Maven 仓库；使用 Scripted ChatModel |
 | Maven 测试 | `mvn test` | 默认确定性 Java 测试和上下文 | Maven 仓库；排除 live-llm/container |
@@ -89,6 +90,18 @@ RUN_LIVE_LLM_TESTS=true \
 Prompt 资源改动的确定性证据应先覆盖：正常 classpath 与 fallback-only ResourceLoader
 返回的三份 SkillsAdvisor 模板完全一致、占位符替换正确、清空缓存后重新读取资源。
 这项测试不替代普通 Agent 的 Skill 门禁测试；两者分别验证 Prompt 指导和后端强制边界。
+
+普通 Agent Advisor 和模式选择的快速证据是：
+
+```bash
+mvn -Dtest='SkillsAdvisorTest,AgentServiceTest' test
+```
+
+`SkillsAdvisorTest` 直接观察生成后的 `Prompt`，证明 backend 模式使用
+`buildHttpRequest` 和结构化参数，frontend/缺省模式使用浏览器 `httpRequest` 规则；
+`AgentServiceTest` 证明 `SkillsAdvisor -> memory -> optional retrieval -> ToolCallAdvisor`
+的绝对 order 和 `.defaultTools(skillTools)` 注册。它们不替代
+`BackendApiIntegrationTest` 的真实 Spring Context Tool Calling 回合。
 
 例如本次普通 Skill 改动的确定性证据应覆盖：`/api/skills` 的 Level 1 目录、
 `/api/skills/{name}` 的 Level 2 正文、`/api/skills/api-index` 与旧兼容别名一致、

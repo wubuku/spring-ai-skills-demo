@@ -25,6 +25,8 @@
   前端构建支持文件、全新 clone 和真实 LLM 闭环的可复现性加固记录。
 - [prompt-fallback-contract-hardening-plan.md](prompt-fallback-contract-hardening-plan.md)：
   `PromptLoader` 的 SkillsAdvisor 资源模板与 Java fallback 契约加固规划及实施记录。
+- [advisor-and-tool-loop-contract-hardening-plan.md](advisor-and-tool-loop-contract-hardening-plan.md)：
+  普通 SkillsAdvisor 模式提示词、Advisor 绝对顺序和 ChatClient 默认工具注册契约规划。
 
 ## 稳定指南的历史补充
 

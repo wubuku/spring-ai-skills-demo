@@ -99,6 +99,7 @@ test-*.sh        端到端、回归和专项诊断脚本
 - [docs/knowledge-and-skills.md](docs/knowledge-and-skills.md)：知识库问答、运行时 Skills、扩展步骤和 Spring AI 能力边界。
 - [docs/learning-path.md](docs/learning-path.md)：从 REST、Tool Calling、Skills 到记忆、RAG、SSE 和 AG-UI 的学习主线。
 - [Prompt 资源与 fallback 契约规划](docs/drafts/prompt-fallback-contract-hardening-plan.md)：`PromptLoader`、SkillsAdvisor 模板和资源缺失降级的对应关系。
+- [普通 Agent Advisor 与 Tool Calling 契约规划](docs/drafts/advisor-and-tool-loop-contract-hardening-plan.md)：`SkillsAdvisor` 模式提示词、Advisor 绝对顺序和 `defaultTools(skillTools)` 注册契约。
 - [docs/spring-ai-agent-utils-audit.md](docs/spring-ai-agent-utils-audit.md)：与固定社区子模块版本对应的 `SkillsTool` 审计报告。
 - [docs/drafts/skill-support-improvement-plan.md](docs/drafts/skill-support-improvement-plan.md)：当前项目 SKILL 支持的自包含改进规划和实施验收标准。
 - [docs/drafts/backend-demo-hardening-follow-up-plan.md](docs/drafts/backend-demo-hardening-follow-up-plan.md)：后端契约、普通 Agent 写操作、SSE 和 Demo 教育性后续加固规划。
@@ -304,7 +305,22 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
 3. 通过 `MessageChatMemoryAdvisor` 读取 JDBC 对话窗口。
 4. 按开关选择性地注入独立的 `VectorStoreChatMemoryAdvisor` 和知识库
    `QuestionAnswerAdvisor`。
-5. 通过 `ToolCallAdvisor` 驱动 Spring AI 工具回合；记忆/RAG Advisor 的顺序位于工具循环之前。
+5. 通过 `ToolCallAdvisor` 驱动 Spring AI 工具回合；Advisor 顺序固定为：
+
+   ```text
+   SkillsAdvisor (+0)
+     -> MessageChatMemoryAdvisor (+100)
+     -> VectorStoreChatMemoryAdvisor (+150，可选)
+     -> QuestionAnswerAdvisor (+200，可选)
+     -> ToolCallAdvisor (+300)
+   ```
+
+   这些数值相对于 `Ordered.HIGHEST_PRECEDENCE`；数值越小越靠外层。记忆/RAG 在工具
+   循环前准备上下文，`ToolCallAdvisor` 在链尾驱动回合；`SkillTools` 通过
+   `ChatClient.Builder.defaultTools(skillTools)` 注册。可直接运行
+   [`SkillsAdvisorTest`](src/test/java/com/example/demo/agent/SkillsAdvisorTest.java) 和
+   [`AgentServiceTest`](src/test/java/com/example/demo/service/AgentServiceTest.java) 观察该
+   契约。
 6. 使用 `SkillTools` 执行只读 GET，或使用 `buildHttpRequest` 生成写操作确认元数据。
 7. `POST /api/chat/text` 对待确认写操作返回后端生成的 `response` 和结构化
    `confirmation`；旧 `/api/chat` 与普通 SSE 使用后端生成的 `[CONFIRM_REQUIRED]`

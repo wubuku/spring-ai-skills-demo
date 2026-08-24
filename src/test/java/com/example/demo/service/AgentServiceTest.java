@@ -14,6 +14,7 @@ import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryReposito
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.vectorstore.VectorStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.core.Ordered;
 
 import java.util.List;
 
@@ -72,5 +73,124 @@ class AgentServiceTest {
                     || advisor instanceof VectorStoreChatMemoryAdvisor
                     || advisor instanceof QuestionAnswerAdvisor)
             .allMatch(advisor -> advisor.getOrder() < toolCallOrder);
+    }
+
+    @Test
+    void keepsAllEnabledAdvisorsInTheDocumentedAbsoluteOrder() {
+        ChatClient.Builder builder = builder();
+        SkillTools skillTools = mock(SkillTools.class);
+        SkillsAdvisor skillsAdvisor = mock(SkillsAdvisor.class);
+        when(skillsAdvisor.getOrder()).thenReturn(Ordered.HIGHEST_PRECEDENCE);
+
+        new AgentService(
+            builder,
+            skillTools,
+            skillsAdvisor,
+            mock(JdbcChatMemoryRepository.class),
+            mock(VectorStore.class),
+            mock(VectorStore.class),
+            mock(ToolCallingManager.class),
+            mock(ConversationIdResolver.class),
+            new ObjectMapper(),
+            true,
+            true
+        );
+
+        List<Advisor> advisors = capturedAdvisors(builder);
+
+        assertThat(advisors)
+            .extracting(Advisor::getOrder)
+            .containsExactly(
+                Ordered.HIGHEST_PRECEDENCE,
+                Ordered.HIGHEST_PRECEDENCE + 100,
+                Ordered.HIGHEST_PRECEDENCE + 150,
+                Ordered.HIGHEST_PRECEDENCE + 200,
+                Ordered.HIGHEST_PRECEDENCE + 300
+            );
+        assertThat(advisors)
+            .extracting(advisor -> advisor.getClass().getSimpleName())
+            .containsExactly(
+                "SkillsAdvisor",
+                "MessageChatMemoryAdvisor",
+                "VectorStoreChatMemoryAdvisor",
+                "QuestionAnswerAdvisor",
+                "ToolCallAdvisor"
+            );
+    }
+
+    @Test
+    void omitsOptionalRetrievalAdvisorsWhenDisabled() {
+        ChatClient.Builder builder = builder();
+        SkillsAdvisor skillsAdvisor = mock(SkillsAdvisor.class);
+        when(skillsAdvisor.getOrder()).thenReturn(Ordered.HIGHEST_PRECEDENCE);
+
+        new AgentService(
+            builder,
+            mock(SkillTools.class),
+            skillsAdvisor,
+            mock(JdbcChatMemoryRepository.class),
+            mock(VectorStore.class),
+            mock(VectorStore.class),
+            mock(ToolCallingManager.class),
+            mock(ConversationIdResolver.class),
+            new ObjectMapper(),
+            false,
+            false
+        );
+
+        List<Advisor> advisors = capturedAdvisors(builder);
+
+        assertThat(advisors)
+            .extracting(advisor -> advisor.getClass().getSimpleName())
+            .containsExactly(
+                "SkillsAdvisor",
+                "MessageChatMemoryAdvisor",
+                "ToolCallAdvisor"
+            );
+        assertThat(advisors.get(2).getOrder())
+            .isEqualTo(Ordered.HIGHEST_PRECEDENCE + 300);
+    }
+
+    @Test
+    void registersTheProvidedSkillToolsAsChatClientDefaultTools() {
+        ChatClient.Builder builder = builder();
+        SkillTools skillTools = mock(SkillTools.class);
+        SkillsAdvisor skillsAdvisor = mock(SkillsAdvisor.class);
+
+        new AgentService(
+            builder,
+            skillTools,
+            skillsAdvisor,
+            mock(JdbcChatMemoryRepository.class),
+            mock(VectorStore.class),
+            mock(VectorStore.class),
+            mock(ToolCallingManager.class),
+            mock(ConversationIdResolver.class),
+            new ObjectMapper(),
+            false,
+            false
+        );
+
+        ArgumentCaptor<Object[]> toolsCaptor =
+            ArgumentCaptor.forClass(Object[].class);
+        verify(builder).defaultTools(toolsCaptor.capture());
+
+        assertThat(toolsCaptor.getValue()).containsExactly(skillTools);
+    }
+
+    private ChatClient.Builder builder() {
+        ChatClient.Builder builder = mock(ChatClient.Builder.class);
+        doReturn(builder).when(builder).defaultAdvisors(anyList());
+        doReturn(builder).when(builder).defaultTools(any(Object[].class));
+        when(builder.build()).thenReturn(mock(ChatClient.class));
+        return builder;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Advisor> capturedAdvisors(ChatClient.Builder builder) {
+        ArgumentCaptor<List<Advisor>> advisorsCaptor =
+            ArgumentCaptor.forClass(List.class);
+        verify(builder).defaultAdvisors(advisorsCaptor.capture());
+        return advisorsCaptor.getValue();
     }
 }

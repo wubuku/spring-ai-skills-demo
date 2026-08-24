@@ -31,13 +31,13 @@ import java.util.Map;
 @Service
 public class AgentService {
 
-    private static final int JDBC_MEMORY_ADVISOR_ORDER =
+    static final int JDBC_MEMORY_ADVISOR_ORDER =
         Ordered.HIGHEST_PRECEDENCE + 100;
-    private static final int VECTOR_MEMORY_ADVISOR_ORDER =
+    static final int VECTOR_MEMORY_ADVISOR_ORDER =
         Ordered.HIGHEST_PRECEDENCE + 150;
-    private static final int RAG_ADVISOR_ORDER =
+    static final int RAG_ADVISOR_ORDER =
         Ordered.HIGHEST_PRECEDENCE + 200;
-    private static final int TOOL_CALL_ADVISOR_ORDER =
+    static final int TOOL_CALL_ADVISOR_ORDER =
         Ordered.HIGHEST_PRECEDENCE + 300;
 
     private final ChatClient chatClient;
@@ -59,6 +59,8 @@ public class AgentService {
         this.conversationIdResolver = conversationIdResolver;
         this.objectMapper = objectMapper;
 
+        // 记忆和 RAG 在 ToolCallAdvisor 之前构造上下文，避免中间 tool-call 回合
+        // 反复读写记忆；ToolCallAdvisor 留在链尾驱动完整的 Spring AI 工具循环。
         // 使用 JDBC 存储，保留最近 20 条消息的窗口
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(jdbcChatMemoryRepository)

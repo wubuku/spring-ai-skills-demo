@@ -53,6 +53,19 @@ POST /api/chat/text
 
 这一步需要模型 key 才能真实聊天；没有 key 时，先运行后面的 Mock 集成测试即可。
 
+先阅读两组不依赖模型的契约测试：
+
+- [`SkillsAdvisorTest`](../src/test/java/com/example/demo/agent/SkillsAdvisorTest.java)：
+  直接观察 `before(...)` 生成的系统提示，比较 backend/frontend 模式、Level 1 Skill
+  目录和 frontend 已加载 Skill 正文。
+- [`AgentServiceTest`](../src/test/java/com/example/demo/service/AgentServiceTest.java)：
+  观察 Advisor 的绝对顺序、可选记忆/RAG 开关和 `defaultTools(skillTools)` 注册。
+
+普通 `AgentService` 必须使用 backend 模式，因为它注册的是 Java 后端
+`SkillTools.httpRequest`、`buildHttpRequest` 和结构化对象参数；frontend 模式是浏览器
+执行 `httpRequest` 的提示协议，供 AG-UI/CopilotKit 链路使用。两套模板都由
+`PromptLoader` 管理，但不能混用。
+
 ### 3. 观察 Spring AI Tool Calling 回合
 
 普通链路注册的是 [SkillTools](../src/main/java/com/example/demo/agent/SkillTools.java)：

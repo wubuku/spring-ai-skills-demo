@@ -71,10 +71,22 @@ loadSkill
 不采信模型可能提前输出的“已成功”文本。传统页面在展示和执行前都读取当前 Skill API
 index、限制同源写 API，并在点击确认的瞬间读取最新 `localStorage` token。
 
-Advisor 顺序固定为：Skills -> JDBC 短期记忆 -> 可选语义记忆 -> 可选 RAG ->
-`ToolCallAdvisor`。这样检索上下文和会话消息在工具循环外构造，避免真实
-OpenAI-compatible provider 返回 `content=null` 的中间 tool-call 消息触发 JDBC schema
-错误。
+Advisor 顺序固定为：
+
+| 顺序 | Advisor | 当前 order | 条件 |
+|---|---|---:|---|
+| 1 | `SkillsAdvisor` | `Ordered.HIGHEST_PRECEDENCE` | 始终启用 |
+| 2 | `MessageChatMemoryAdvisor` | `Ordered.HIGHEST_PRECEDENCE + 100` | 始终启用 |
+| 3 | `VectorStoreChatMemoryAdvisor` | `Ordered.HIGHEST_PRECEDENCE + 150` | `VECTOR_MEMORY_ENABLED=true` |
+| 4 | `QuestionAnswerAdvisor` | `Ordered.HIGHEST_PRECEDENCE + 200` | `RAG_ENABLED=true` |
+| 5 | `ToolCallAdvisor` | `Ordered.HIGHEST_PRECEDENCE + 300` | 始终启用 |
+
+这里的数值越小越靠外层。记忆和 RAG 在 `ToolCallAdvisor` 之前构造上下文，避免中间
+tool-call 回合反复读写记忆；`ToolCallAdvisor` 留在链尾驱动完整的 Spring AI 工具循环。
+`AgentService` 同时通过 `defaultTools(skillTools)` 把 `SkillTools` 的 `@Tool` 方法注册
+到 ChatClient。对应的确定性契约见
+[`SkillsAdvisorTest`](../src/test/java/com/example/demo/agent/SkillsAdvisorTest.java)
+和 [`AgentServiceTest`](../src/test/java/com/example/demo/service/AgentServiceTest.java)。
 
 知识库 RAG 当前只接入这条普通链路：`AgentService` 注册了 `QuestionAnswerAdvisor` 和 `VectorStoreChatMemoryAdvisor`。下方 AG-UI 的 `AgUiConfig` 只注册 `SkillsAdvisor` 与 `MessageChatMemoryAdvisor`，所以 Next.js/CopilotKit 链路当前不能自动获得同等的知识库检索能力。
 
