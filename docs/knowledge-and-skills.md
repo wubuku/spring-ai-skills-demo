@@ -141,6 +141,7 @@ src/main/resources/skills/*/SKILL.md
 - Skill 只读观察目录：`src/main/java/com/example/demo/service/RuntimeSkillCatalogService.java`
 - Skill 发现端点：`src/main/java/com/example/demo/controller/RuntimeSkillController.java`
 - 动态目录和已加载内容：`src/main/java/com/example/demo/agent/SkillsAdvisor.java`
+- Prompt 资源和降级：`src/main/java/com/example/demo/service/PromptLoader.java`
 - 普通链路工具：`src/main/java/com/example/demo/agent/SkillTools.java`
 - AG-UI 核心工具：`src/main/java/com/example/demo/agent/SkillCoreTools.java`
 - AG-UI 工具注册：`src/main/java/com/example/demo/config/AgUiConfig.java`
@@ -182,6 +183,30 @@ src/main/resources/skills/*/SKILL.md
 目录、frontmatter、links 和当前资源图的契约由
 [`SkillRegistryTest`](../src/test/java/com/example/demo/agent/SkillRegistryTest.java)
 覆盖。
+
+### Prompt 资源与 fallback 契约
+
+当前项目把 SkillsAdvisor 的提示词模板放在
+`src/main/resources/prompts/skills-advisor/`，由
+[`PromptLoader`](../src/main/java/com/example/demo/service/PromptLoader.java) 读取。
+classpath 资源是正常运行时的事实来源；Java 中的 fallback 只用于资源缺失、测试 fixture
+或受限打包环境，不能成为另一套工具协议。
+
+因此修改以下任一内容时必须同步检查资源和 fallback：
+
+- `loadSkill`、`readSkillReference`、`httpRequest`、`buildHttpRequest` 的名称或参数；
+- frontend/AG-UI 与普通 backend 的 HTTP 执行边界；
+- “必须先加载 Skill”、API index、写操作确认和停止条件。
+
+[`PromptLoaderTest`](../src/test/java/com/example/demo/service/PromptLoaderTest.java) 使用正常
+classpath 和不可用 ResourceLoader 对比三份 SkillsAdvisor 模板，并验证占位符替换与缓存
+清理。它不调用 LLM、数据库或 Embedding，是检查 Prompt 与工具实现是否漂移的快速入口。
+本批规划和实际修复记录见
+[Prompt 资源与 fallback 契约加固规划](drafts/prompt-fallback-contract-hardening-plan.md)。
+
+这项契约的教学意义是：Prompt 负责告诉模型如何发现和使用能力，Spring AI Tool schema
+负责描述可调用形状，`SkillTools` 负责在后端强制执行 Skill/API 边界；三者不是互相替代
+的实现。
 
 ### 无需 LLM 观察 Level 1/2/API index
 

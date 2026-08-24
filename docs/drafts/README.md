@@ -23,6 +23,8 @@
   中性运行时 Skill Level 1/2/API index 发现端点、旧 AG-UI 路径兼容和 Demo 可观察性规划。
 - [frontend-reproducibility-hardening-plan.md](frontend-reproducibility-hardening-plan.md)：
   前端构建支持文件、全新 clone 和真实 LLM 闭环的可复现性加固记录。
+- [prompt-fallback-contract-hardening-plan.md](prompt-fallback-contract-hardening-plan.md)：
+  `PromptLoader` 的 SkillsAdvisor 资源模板与 Java fallback 契约加固规划及实施记录。
 
 ## 稳定指南的历史补充
 

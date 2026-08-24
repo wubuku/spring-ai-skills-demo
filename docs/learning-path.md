@@ -153,6 +153,7 @@ src/main/resources/skills/*/SKILL.md
 - 只读观察目录：[RuntimeSkillCatalogService](../src/main/java/com/example/demo/service/RuntimeSkillCatalogService.java)
 - 观察端点：[RuntimeSkillController](../src/main/java/com/example/demo/controller/RuntimeSkillController.java)
 - Prompt Advisor：[SkillsAdvisor](../src/main/java/com/example/demo/agent/SkillsAdvisor.java)
+- Prompt 加载与降级：[PromptLoader](../src/main/java/com/example/demo/service/PromptLoader.java)
 - 请求级 Skill 状态：[SkillLoadSession](../src/main/java/com/example/demo/agent/SkillLoadSession.java)
 - 分层参考读取：[SkillReferenceReader](../src/main/java/com/example/demo/agent/SkillReferenceReader.java)
 
@@ -163,6 +164,34 @@ Skill 的当前契约是：
 - `links` 必须指向已注册、非自身且不重复的 Skill；
 - Skill 正文描述真实 Controller 的 method、path、参数、认证和返回结构；
 - API index 是 Java 工具和浏览器 URL 校验的边界，不允许模型凭记忆猜测 URL。
+
+#### Prompt、工具 schema 与后端门禁必须一起看
+
+`SkillsAdvisor` 的行为规则不是散落在 Java 代码里的第二套协议，而是由
+`PromptLoader` 读取的模板注入 ChatClient。普通 Agent 通过 advisor context 选择
+`backend-mode-rules.template`；未指定 backend 模式时则选择 frontend/AG-UI 兼容的
+`mode-rules.template`。两套模板对应不同的 HTTP 工具注册边界，不能只复制其中一份规则。
+
+模板正常从 classpath 资源读取，Java fallback 只在资源不可用时生效。两条路径必须保持
+一致，否则开发环境和资源缺失/打包异常环境会向模型传递不同的工具协议。可用下面的
+确定性测试观察这一契约：
+
+```bash
+mvn -Dtest=PromptLoaderTest test
+```
+
+该测试同时证明占位符替换和模板缓存行为；fallback-only ResourceLoader 会验证
+`system-prompt.template`、`mode-rules.template` 和 `backend-mode-rules.template` 与
+资源版本一致。随后再阅读
+[`SkillTools`](../src/main/java/com/example/demo/agent/SkillTools.java) 的请求级
+`SkillLoadSession` 门禁，才能完整理解：
+
+```text
+PromptLoader/SkillsAdvisor 软性指导
+  -> Spring AI Tool schema
+  -> SkillTools 后端硬门禁
+  -> API index / 业务端点
+```
 
 启动后端后，可以先做一个完全不依赖 LLM 的观察实验：
 

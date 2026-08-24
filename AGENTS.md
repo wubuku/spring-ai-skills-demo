@@ -98,6 +98,7 @@ test-*.sh        端到端、回归和专项诊断脚本
 - [docs/troubleshooting.md](docs/troubleshooting.md)：按症状排查启动、模型、工具、SSE 和前端问题。
 - [docs/knowledge-and-skills.md](docs/knowledge-and-skills.md)：知识库问答、运行时 Skills、扩展步骤和 Spring AI 能力边界。
 - [docs/learning-path.md](docs/learning-path.md)：从 REST、Tool Calling、Skills 到记忆、RAG、SSE 和 AG-UI 的学习主线。
+- [Prompt 资源与 fallback 契约规划](docs/drafts/prompt-fallback-contract-hardening-plan.md)：`PromptLoader`、SkillsAdvisor 模板和资源缺失降级的对应关系。
 - [docs/spring-ai-agent-utils-audit.md](docs/spring-ai-agent-utils-audit.md)：与固定社区子模块版本对应的 `SkillsTool` 审计报告。
 - [docs/drafts/skill-support-improvement-plan.md](docs/drafts/skill-support-improvement-plan.md)：当前项目 SKILL 支持的自包含改进规划和实施验收标准。
 - [docs/drafts/backend-demo-hardening-follow-up-plan.md](docs/drafts/backend-demo-hardening-follow-up-plan.md)：后端契约、普通 Agent 写操作、SSE 和 Demo 教育性后续加固规划。
@@ -390,6 +391,16 @@ Next.js/CopilotKit hook 当前仍使用旧兼容别名。
 3. 关联 Skill 使用 `links`，不要把所有文档一次性塞入系统提示。
 4. OpenAPI 分层 Skill 继续使用 `references/resources`、`references/operations` 和 `references/schemas`。
 5. 不要在提示词里硬编码业务 URL；模型应从 Skill 文档获取路径，前后端 API index 负责校验。
+
+提示词本身也有明确的教育契约：`SkillsAdvisor` 通过
+[`PromptLoader`](src/main/java/com/example/demo/service/PromptLoader.java) 优先读取
+`src/main/resources/prompts/skills-advisor/` 下的 classpath 模板；`PromptLoader` 中的
+Java fallback 只用于资源不可用时，并通过
+[`PromptLoaderTest`](src/test/java/com/example/demo/service/PromptLoaderTest.java) 与资源
+版本保持一致。修改 SkillsAdvisor 的工具名、参数形状或 Skill 门禁规则时，必须同步检查
+资源模板、fallback 和该测试；普通 backend 模板与 frontend/AG-UI 模板不能互换。具体的
+问题背景、实现边界和验证记录见
+[Prompt 资源与 fallback 契约规划](docs/drafts/prompt-fallback-contract-hardening-plan.md)。
 
 ## REST 与流式端点
 

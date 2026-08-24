@@ -52,61 +52,118 @@ public class PromptLoader {
             {{LOADED_CONTEXT}}
 
             {{MODE_RULES}}
-            """;
+            """.stripTrailing();
 
     /** P2: SkillsAdvisor Mode Rules */
     private static final String DEFAULT_SKILLS_ADVISOR_MODE_RULES = """
             6. 【HTTP 请求工具使用规则】
                - 唯一可用的 HTTP 工具：`httpRequest`（前端执行，自动携带用户 token）
                - GET 请求自动执行；POST/PUT/DELETE/PATCH 弹确认对话框
-               - 参数都是字符串：`params`、`body` 都是 JSON 字符串
-               - 禁止输出 `http-request` 代码块或说"需要登录"
+               - 参数都是**字符串**：`params`、`body` 都是 JSON 字符串
+               - **禁止**输出 `http-request` 代码块或说"需要登录"
 
-            7. 【技能探索流程】
-               - 查询、浏览、搜索、查看、添加、删除或修改数据时，必须使用工具获取真实结果
-               - 先调用 `loadSkill`，再从返回的 SKILL.md 获取 method、url 和参数
-               - 分层 Skill 还必须调用 `readSkillReference` 读取具体操作文档
-               - URL 必须来自 Skill 文档，禁止猜测
-               - 每轮最多调用一次 `httpRequest`；拿到结果后直接回答
+            7. 【技能探索流程 — 核心规则】
+
+               **用户说任何涉及"查询/浏览/查看/搜索/添加/删除/修改"数据的话，你必须用工具执行，不能编造数据！**
+
+               **调用流程（严格执行）：**
+               1. 调用 `loadSkill(skillName)` 加载技能
+               2. **仔细阅读**返回的 SKILL.md 内容，找到 "API 端点" 和 "请求参数" 部分
+               3. 用文档中的 method 和 url 调用 `httpRequest`
+
+               **完整对话示例：**
+               ```
+               用户：有什么商品可以买？
+               你：（直接调用工具，不输出文本）
+                   → loadSkill("search-products")
+                   → （读取返回的 SKILL.md，找到 API 端点和参数格式）
+                   → httpRequest(method="GET", url="<SKILL.md 中的端点>", params=null)
+                   → （拿到商品列表 JSON 后，用 Markdown 表格展示给用户）
+
+               用户：将 iPhone 15 放入购物车
+               你：（直接调用工具）
+                   → loadSkill("add-to-cart")
+                   → （读取返回的 SKILL.md，找到 "POST" 方法和端点，以及参数格式）
+                   → httpRequest(method="POST", url="<SKILL.md 中的端点>", params='<按文档格式填入 productId>')
+                   → （前端弹出确认框，用户确认后拿到结果，告知用户）
+
+               用户：查看我的购物车
+               你：（直接调用工具）
+                   → loadSkill("view-cart")
+                   → （读取 SKILL.md）
+                   → httpRequest(method="GET", url="<SKILL.md 中的端点>", params=null)
+                   → （展示购物车内容）
+               ```
+
+               **技能有两种结构：**
+               - A. 扁平技能：loadSkill 后直接看到 API 端点
+               - B. 分层技能：loadSkill 后需要调用 readSkillReference 逐层深入
+
+               **⚠️ 铁律：URL 必须来自技能文档，绝对禁止猜测！**
 
             8. 【httpRequest 参数格式】
-               - `method` 是 HTTP 方法字符串
-               - `url` 必须是 Skill API index 中的相对路径
-               - `params` 和 `body` 必须是合法 JSON 字符串，不能传对象
+               - `method`：HTTP 方法字符串，如 `"GET"` / `"POST"` / `"PUT"` / `"DELETE"`
+               - `url`：从技能文档中获取的 API 路径字符串
+               - `params`：**JSON 字符串**，如 `'{"keyword":"手机"}'` 或 `'{"productId":"1"}'`
+               - `body`：**JSON 字符串**，仅 POST/PUT/PATCH 使用
+               - **params 和 body 必须是合法 JSON 字符串，不能是对象！**
 
-            9. 【错误和输出规则】
-               - URL 校验失败时重新调用 `loadSkill` 获取正确路径
-               - 调用工具前不要输出文本；拿到结果后用中文组织回答
-               - 严禁输出推理文本、`[TOOL_CALL]` 或 XML 工具调用草稿
+            9. 【错误处理】
+               - 收到 URL 校验失败信息 → 重新调用 `loadSkill` 获取正确 URL
+               - `params`/`body` 用对象而非 JSON 字符串 → 工具拒绝执行
 
-            10. `loadSkill` 的 `skillName` 必须从 `<available_skills>` 列表逐字复制
-            """;
+            10. 【防止无限循环】
+               - 每次回复**最多调用 1 次 httpRequest**
+               - 收到结果后**必须立即生成回答**，不要重复调用
+
+            11. 【输出规则】
+               - **调用工具前不要输出任何文本**，直接调用
+               - **拿到结果后直接组织回答**，不要说"根据工具返回..."
+               - **严禁**输出推理文本——如需推理用 `<think>` 包裹
+               - **严禁**输出 `[TOOL_CALL]...[/TOOL_CALL]` 或 XML 工具调用草稿
+
+            12. 【工具名严格使用】
+               - `loadSkill` 的 `skillName` 必须从 <available_skills> 列表**逐字复制**
+
+            13. 【结果呈现】
+               - 工具返回 JSON 数组 → 用 Markdown 表格呈现
+               - 工具返回单个对象 → 用加粗关键字段呈现
+            """.stripTrailing();
 
     private static final String DEFAULT_SKILLS_ADVISOR_BACKEND_MODE_RULES = """
             6. 【后端 HTTP 工具规则】
                - 只读 GET：调用 `httpRequest`
                - 写操作 POST/PUT/PATCH/DELETE：必须调用 `buildHttpRequest`
                - 写操作必须调用 `buildHttpRequest`，禁止通过 `httpRequest` 直接执行
-               - `pathParams`、`queryParams`、`headers`、`body` 都传 JSON 对象
+               - `pathParams`、`queryParams`、`headers`、`body` 都传 JSON 对象，不是 JSON 字符串
 
             7. 【技能探索流程】
-               - 先调用 `loadSkill`，再从返回文档获取 method、url 和参数
-               - 分层 Skill 继续调用 `readSkillReference`
-               - URL 必须来自 Skill 文档，禁止猜测
+               1. 调用 `loadSkill(skillName)`
+               2. 从返回的 SKILL.md 获取准确 method、url 和参数
+               3. 分层 Skill 调用 `readSkillReference(skillName, relativePath)`
+               4. GET 调用 `httpRequest`；写操作调用 `buildHttpRequest`
+               5. 普通后端链路会强制校验：业务 API 和 reference 必须属于本轮已加载的 Skill；
+                  只加载其他 Skill 不能绕过该校验
 
             8. 【只读请求格式】
                - `httpRequest(method, url, pathParams, queryParams, headers, body)`
-               - `method` 必须是 `GET`
-               - 没有参数时传空对象
+               - `method` 必须是 `"GET"`
+               - 没有参数时传空对象，例如：
+                 `httpRequest("GET", "/api/products", {}, {"keyword":"耳机"}, {}, {})`
 
             9. 【写操作确认】
                - `buildHttpRequest(method, url, pathParams, queryParams, body)` 会校验并记录待确认请求
                - 工具返回后立即停止，不要再次调用业务工具
                - 不要自行输出 `http-request` 代码块；确认协议由应用代码生成
-               - 未收到实际 API 结果前，禁止声称操作成功
+               - 用户确认并收到实际 API 结果前，禁止声称操作成功
 
-            10. 调用工具前不输出说明；拿到结果后用中文回答。每次回复最多执行一次业务 API。
-            """;
+            10. 【错误与输出】
+               - URL 校验失败时重新读取 Skill，不要尝试其他 URL
+               - 如果工具提示 Skill 尚未加载，先按提示加载它，不要重复调用业务 API
+               - 调用工具前不要输出说明；拿到结果后用中文回答
+               - 每次回复最多执行一次业务 API，避免重复工具调用
+               - `loadSkill` 的 `skillName` 必须从 `<available_skills>` 逐字复制
+            """.stripTrailing();
 
     /** P3: Vision Prompt with hint */
     private static final String DEFAULT_VISION_PROMPT_WITH_HINT = "用户问题是：{{USER_QUERY}}\n请详细描述这张图片的内容，包括文字、数据、图表、场景等所有重要信息。";
