@@ -2,7 +2,7 @@
 
 > **目的**: 说明如何通过知识库文档回答业务规则类问题，以及如何通过运行时 Skills 让 Agent 按需使用业务 API。
 > **文档状态**: 稳定指南；Spring AI 版本结论按下方“核查记录”维护。
-> **最后核对**: 2026-08-23
+> **最后核对**: 2026-08-24
 
 ## 先判断问题类型
 
@@ -101,11 +101,18 @@ mvn spring-boot:run -DskipTests
 ### 重要运行时边界
 
 - 新增或修改文档通常需要重启应用，当前没有运行时热加载或增量同步接口。
-- 当前加载器为规范化 source 生成稳定 UUID，并写入 `metadata.kind=knowledge`、
-  `source`、文件名等元数据；重复启动同一 source 会复用同一文档 ID。是否覆盖/更新由
-  当前 VectorStore 实现按 ID 处理。
+- 当前加载器按 UTF-8 读取 Markdown，为规范化 source 生成稳定 UUID，并写入
+  `metadata.kind=knowledge`、`source`、文件名等元数据。
+- 同一轮加载中，如果多个 glob 重复命中同一 normalized source，只会向 VectorStore
+  写入一次；写入前按 source 排序，使配置顺序和 Resource resolver 返回顺序不改变导入
+  顺序。重复启动同一 source 会复用同一文档 ID，是否覆盖/更新由当前 VectorStore 实现
+  按 ID 处理。
 - 文档内容会进入向量检索和模型上下文，不要放入密钥、内部账号、未脱敏个人信息或不应发送给模型的数据。
 - 知识库只负责提供上下文，不会自动执行退款、创建工单或修改订单。需要执行动作时必须另建 Skill/API 工具边界。
+
+这些导入契约由
+[`KnowledgeBaseInitializerTest`](../src/test/java/com/example/demo/knowledge/KnowledgeBaseInitializerTest.java)
+确定性验证，不需要真实 Embedding 或 LLM。
 
 ## 路径二：通过运行时 Skills 提供服务
 
@@ -156,6 +163,16 @@ src/main/resources/skills/*/SKILL.md
 7. 通过普通 `/api/chat` 和 AG-UI `/api/agui` 分别验证。普通链路注册完整 `SkillTools`；AG-UI 后端只注册 `loadSkill`/`readSkillReference`，浏览器侧 `httpRequest` 负责带 Token 的请求和写操作确认。
 
 平面 Skill 的核心是“文档描述 API”；分层 Skill 的核心是“先加载目录，再按需读取具体操作和 schema”。Skill 本身不是 Spring Bean，也不会被 Spring AI 自动扫描；它是本项目由 `SkillRegistry` 解释的资源格式。
+
+`SKILL.md` frontmatter 中的 `name` 是运行时 canonical name，必须使用小写字母、数字和
+连字符。对于 `src/main/resources/skills/<name>/SKILL.md` 这类可解析来源，目录名必须
+与 frontmatter `name` 完全一致，否则应用在启动期拒绝该 Skill；`links.name` 会先
+规范化首尾空格，再校验为已注册、非自身且不重复的 canonical name。这样分层 reference
+始终从同一个 Skill 目录解析，而不是等模型调用时才暴露路径漂移。
+
+目录、frontmatter、links 和当前资源图的契约由
+[`SkillRegistryTest`](../src/test/java/com/example/demo/agent/SkillRegistryTest.java)
+覆盖。
 
 ## 两条路径如何组合
 

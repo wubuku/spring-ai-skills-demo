@@ -47,6 +47,10 @@ public class SkillRegistry {
     private static final Pattern SKILL_NAME = Pattern.compile("[a-z0-9]+(?:-[a-z0-9]+)*");
     private static final Pattern API_METHOD = Pattern.compile("^[A-Z]+$");
     private static final Pattern API_PARAMETER_SEGMENT = Pattern.compile("\\{[^/{}]+}");
+    private static final Pattern SKILL_SOURCE_PATH = Pattern.compile(
+        "(?:^|[/\\\\\\[:])skills[/\\\\]([a-z0-9]+(?:-[a-z0-9]+)*)"
+            + "[/\\\\]SKILL\\.md(?:\\]|$)"
+    );
     private static final Set<String> SUPPORTED_METHODS =
         Set.of("GET", "POST", "PUT", "PATCH", "DELETE");
 
@@ -178,11 +182,14 @@ public class SkillRegistry {
         }
         if (meta.getLinks() != null) {
             for (Skill.SkillLink link : meta.getLinks()) {
-                if (link == null || link.getName() == null
-                    || !SKILL_NAME.matcher(link.getName().trim()).matches()) {
+                String linkName = link == null || link.getName() == null
+                    ? ""
+                    : link.getName().trim();
+                if (!SKILL_NAME.matcher(linkName).matches()) {
                     throw new SkillDefinitionException(
                         "Skill links.name 非法: " + source);
                 }
+                link.setName(linkName);
             }
         }
         meta.setName(name);
@@ -190,6 +197,7 @@ public class SkillRegistry {
 
     synchronized void registerSkill(String source, Skill skill) {
         String name = skill.getMeta().getName();
+        validateSkillSourceName(source, name);
         String previousSource = skillSources.putIfAbsent(name, source);
         if (previousSource != null) {
             throw new SkillDefinitionException(
@@ -197,6 +205,18 @@ public class SkillRegistry {
                     + previousSource + " 和 " + source);
         }
         skills.put(name, skill);
+    }
+
+    private static void validateSkillSourceName(String source, String skillName) {
+        if (source == null) {
+            return;
+        }
+        Matcher matcher = SKILL_SOURCE_PATH.matcher(source);
+        if (matcher.find() && !skillName.equals(matcher.group(1))) {
+            throw new SkillDefinitionException(
+                "Skill `" + skillName + "` 必须与资源目录名 `"
+                    + matcher.group(1) + "` 一致，来源: " + source);
+        }
     }
 
     /**

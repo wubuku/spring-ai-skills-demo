@@ -45,6 +45,25 @@ class SkillRegistryTest {
     }
 
     @Test
+    void canonicalizesLinkedSkillNames() {
+        Skill skill = SkillRegistry.parseSkillDocument("""
+            ---
+            name: sample-skill
+            description: A sample skill
+            links:
+              - name: " next-skill "
+                description: Continue with the next step
+            ---
+            body
+            """, "fixture/SKILL.md");
+
+        assertThat(skill.getMeta().getLinks())
+            .singleElement()
+            .extracting(Skill.SkillLink::getName)
+            .isEqualTo("next-skill");
+    }
+
+    @Test
     void rejectsMalformedOrUnsafeFrontmatterWithSourceContext() {
         assertThatThrownBy(() -> SkillRegistry.parseSkillDocument(
             "name: missing-delimiters\n---\nbody", "broken/SKILL.md"))
@@ -98,6 +117,26 @@ class SkillRegistryTest {
             .hasMessageContaining("duplicate-skill")
             .hasMessageContaining("one/SKILL.md")
             .hasMessageContaining("two/SKILL.md");
+    }
+
+    @Test
+    void rejectsSkillNameThatDriftsFromItsResourceDirectory() {
+        Skill skill = SkillRegistry.parseSkillDocument("""
+            ---
+            name: canonical-name
+            description: canonical
+            ---
+            body
+            """, "classpath:skills/wrong-directory/SKILL.md");
+
+        SkillRegistry registry = new SkillRegistry();
+
+        assertThatThrownBy(() ->
+            registry.registerSkill("classpath:skills/wrong-directory/SKILL.md", skill))
+            .isInstanceOf(SkillDefinitionException.class)
+            .hasMessageContaining("canonical-name")
+            .hasMessageContaining("wrong-directory")
+            .hasMessageContaining("classpath:skills/wrong-directory/SKILL.md");
     }
 
     @Test

@@ -1,7 +1,7 @@
 # 草稿与历史材料
 
 > **文档状态**: 导航索引
-> **最后核对**: 2026-08-23
+> **最后核对**: 2026-08-24
 
 `docs/drafts/` 保存计划、调查、诊断、比较和进度记录。这里的内容可能包含已替代的端口、工具、认证或配置方案，使用前必须回到源码和 `docs/` 稳定指南核对。
 
@@ -13,6 +13,8 @@
   测试和传统页面的全面加固实施记录。
 - [backend-demo-hardening-follow-up-plan.md](backend-demo-hardening-follow-up-plan.md)：后端
   Skill 契约、普通 Agent 写操作闭环、SSE 和 Demo 学习路径的后续加固规划。
+- [backend-knowledge-resource-hardening-plan.md](backend-knowledge-resource-hardening-plan.md)：
+  知识库 UTF-8/去重/排序和 Skill 目录/frontmatter 资源契约加固规划。
 - [frontend-reproducibility-hardening-plan.md](frontend-reproducibility-hardening-plan.md)：
   前端构建支持文件、全新 clone 和真实 LLM 闭环的可复现性加固记录。
 

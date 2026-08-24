@@ -104,6 +104,7 @@ src/main/resources/skills/*/SKILL.md
 Skill 的当前契约是：
 
 - frontmatter 至少包含 `name` 和 `description`；
+- 对可解析的 classpath/文件系统来源，资源目录名必须等于 frontmatter `name`；
 - `links` 必须指向已注册、非自身且不重复的 Skill；
 - Skill 正文描述真实 Controller 的 method、path、参数、认证和返回结构；
 - API index 是 Java 工具和浏览器 URL 校验的边界，不允许模型凭记忆猜测 URL。
@@ -139,6 +140,10 @@ curl -s -X POST 'http://localhost:8080/api/products/cart?productId=3' \
 Spring AI 提供 Chat Memory、VectorStore 和 `QuestionAnswerAdvisor`；本项目负责配置
 数据源、加载 Markdown、生成稳定文档 ID，并把知识库 VectorStore 与语义聊天记忆
 VectorStore 分开。
+
+知识库 Markdown 按 UTF-8 读取，以 normalized source 去重并排序后写入 VectorStore。
+因此多个 glob 重复命中同一文件不会在单次启动中重复嵌入，配置顺序也不会改变导入
+顺序；这部分由 `KnowledgeBaseInitializerTest` 在不访问真实 Embedding 的情况下验证。
 
 - 源码和边界：[知识库与运行时 Skills](knowledge-and-skills.md)
 - 配置：[configuration.md](configuration.md)

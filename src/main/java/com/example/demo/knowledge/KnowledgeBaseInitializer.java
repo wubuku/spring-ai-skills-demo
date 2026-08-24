@@ -14,9 +14,12 @@ import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -63,14 +66,20 @@ public class KnowledgeBaseInitializer {
     }
 
     void loadKnowledgeBase() {
-        List<Document> allDocuments = new ArrayList<>();
+        Map<String, Document> documentsBySource = new LinkedHashMap<>();
+        int duplicateCount = 0;
         
         log.info("开始加载知识库，配置的路径列表: {}", knowledgeBasePaths);
         
         for (String pathPattern : knowledgeBasePaths) {
             try {
                 List<Document> documents = loadFromPath(pathPattern);
-                allDocuments.addAll(documents);
+                for (Document document : documents) {
+                    String source = document.getMetadata().get("source").toString();
+                    if (documentsBySource.putIfAbsent(source, document) != null) {
+                        duplicateCount++;
+                    }
+                }
                 log.info("从路径 [{}] 加载了 {} 个文档", pathPattern, documents.size());
             } catch (Exception e) {
                 if (failFast) {
@@ -81,9 +90,16 @@ public class KnowledgeBaseInitializer {
             }
         }
 
+        List<Document> allDocuments = documentsBySource.values().stream()
+            .sorted(Comparator.comparing(
+                document -> document.getMetadata().get("source").toString()
+            ))
+            .toList();
+
         if (!allDocuments.isEmpty()) {
             vectorStore.add(allDocuments);
-            log.info("知识库加载完成，共 {} 篇文档", allDocuments.size());
+            log.info("知识库加载完成，共 {} 篇文档，忽略 {} 个重复 source",
+                allDocuments.size(), duplicateCount);
         } else {
             log.warn("知识库为空，未加载任何文档");
         }
@@ -125,8 +141,8 @@ public class KnowledgeBaseInitializer {
 
     private Document readResource(Resource resource) throws IOException {
         String content;
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(resource.getInputStream()))) {
-            content = reader.lines().collect(Collectors.joining("\n"));
+        try (InputStream input = resource.getInputStream()) {
+            content = readUtf8(input);
         }
         
         if (content.trim().isEmpty()) {
@@ -151,6 +167,13 @@ public class KnowledgeBaseInitializer {
                 "filename", filename != null ? filename : "unknown"
             ))
             .build();
+    }
+
+    static String readUtf8(InputStream input) throws IOException {
+        BufferedReader reader = new BufferedReader(
+            new InputStreamReader(input, StandardCharsets.UTF_8)
+        );
+        return reader.lines().collect(Collectors.joining("\n"));
     }
 
     private String normalizedSource(Resource resource) throws IOException {
