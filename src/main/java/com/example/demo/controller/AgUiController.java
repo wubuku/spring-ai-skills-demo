@@ -4,8 +4,9 @@ import com.agui.server.spring.AgUiParameters;
 import com.agui.server.spring.AgUiService;
 import com.agui.spring.ai.SpringAIAgent;
 import com.example.demo.agent.SkillCoreTools;
-import com.example.demo.agent.SkillRegistry;
 import com.example.demo.auth.UserContextHolder;
+import com.example.demo.dto.RuntimeSkillApiEntry;
+import com.example.demo.service.RuntimeSkillCatalogService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,13 +39,18 @@ public class AgUiController {
     private final AgUiService agUiService;
     private final SpringAIAgent enterpriseAgent;
     private final SkillCoreTools skillCoreTools;
-    private final SkillRegistry skillRegistry;
+    private final RuntimeSkillCatalogService skillCatalogService;
 
-    public AgUiController(AgUiService agUiService, SpringAIAgent enterpriseAgent, SkillCoreTools skillCoreTools, SkillRegistry skillRegistry) {
+    public AgUiController(
+            AgUiService agUiService,
+            SpringAIAgent enterpriseAgent,
+            SkillCoreTools skillCoreTools,
+            RuntimeSkillCatalogService skillCatalogService
+    ) {
         this.agUiService = agUiService;
         this.enterpriseAgent = enterpriseAgent;
         this.skillCoreTools = skillCoreTools;
-        this.skillRegistry = skillRegistry;
+        this.skillCatalogService = skillCatalogService;
     }
 
     /**
@@ -181,21 +187,8 @@ public class AgUiController {
      * 返回所有已注册的 API 端点，格式: {"GET /api/products": {"skillName":"search-products", ...}}
      */
     @GetMapping("/skills/api-index")
-    public ResponseEntity<Map<String, Object>> apiIndex() {
-        Map<String, Object> result = new java.util.LinkedHashMap<>();
-        skillRegistry.getApiIndex().forEach((key, entry) -> {
-            Map<String, Object> item = new java.util.LinkedHashMap<>();
-            item.put("skillName", entry.getSkillName());
-            item.put("path", entry.getPath());
-            item.put("method", entry.getMethod());
-            item.put("description", entry.getDescription());
-            item.put("hierarchical", entry.isHierarchical());
-            if (entry.getReferencePath() != null) {
-                item.put("referencePath", entry.getReferencePath());
-            }
-            result.put(key, item);
-        });
-        return ResponseEntity.ok(result);
+    public ResponseEntity<Map<String, RuntimeSkillApiEntry>> apiIndex() {
+        return ResponseEntity.ok(skillCatalogService.apiIndex());
     }
 
     public record AgentInfo(

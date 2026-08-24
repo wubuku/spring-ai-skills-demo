@@ -19,6 +19,8 @@
   API 结果解释链路的状态正确降级和真实 Skill 目录提示加固规划。
 - [ordinary-agent-mutation-confirmation-hardening-plan.md](ordinary-agent-mutation-confirmation-hardening-plan.md)：
   普通 Agent 写操作确认协议、传统页面安全校验和真实 Tool Calling 教学闭环加固规划。
+- [runtime-skill-discovery-api-hardening-plan.md](runtime-skill-discovery-api-hardening-plan.md)：
+  中性运行时 Skill Level 1/2/API index 发现端点、旧 AG-UI 路径兼容和 Demo 可观察性规划。
 - [frontend-reproducibility-hardening-plan.md](frontend-reproducibility-hardening-plan.md)：
   前端构建支持文件、全新 clone 和真实 LLM 闭环的可复现性加固记录。
 

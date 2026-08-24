@@ -83,7 +83,7 @@ curl -s -X POST http://localhost:8080/api/auth/login \
 只读对话没有待确认动作时，响应只包含 `response`；`confirmation` 不会序列化为
 `null`。这个字段是应用生成的结构化协议，不是模型自由文本，且不包含认证头。
 
-传统页面在显示按钮和真正执行前都会读取 `/api/agui/skills/api-index`，拒绝未知 API、
+传统页面在显示按钮和真正执行前都会读取 `/api/skills/api-index`，拒绝未知 API、
 绝对 URL、跨站 URL、非法方法和非法参数。用户点击取消时不会发送业务请求，也不会调用
 `/api/explain-result`；点击确认时才用点击瞬间的 `localStorage.auth_token` 发送请求，
 然后把真实 HTTP 状态和响应体交给结果解释端点。
@@ -122,7 +122,20 @@ curl -s -H 'Authorization: Bearer <token>' \
 ```
 
 运行时 Skill 的 API 路径必须与这些 Controller 保持一致；普通 Agent 和前端
-`httpRequest` 都会通过 `/api/agui/skills/api-index` 校验路径。
+`httpRequest` 都会通过同一 `SkillRegistry` 生成的 API index 校验路径。
+
+## 运行时 Skill 发现
+
+这些端点公开、只读，不需要模型或认证：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/skills` | Level 1 目录；不返回 Markdown body |
+| `GET` | `/api/skills/{name}` | Level 2 body、links 和该 Skill 的 API 条目；未知名称返回 404 ProblemDetail |
+| `GET` | `/api/skills/api-index` | 中性的稳定 method/path allowlist |
+
+Level 2 详情可以包含分层条目的 `referencePath`，但不会返回 reference 正文。
+Level 3 仍通过 `readSkillReference` 的受限工具边界读取。
 
 ## AG-UI
 
@@ -131,7 +144,7 @@ curl -s -H 'Authorization: Bearer <token>' \
 | `POST` | `/api/agui` | CopilotKit BFF 调用的 AG-UI SSE Agent 端点 |
 | `GET` | `/api/agui/health` | 返回服务运行状态 |
 | `GET` | `/api/agui/info` | 返回 Agent id、名称和描述 |
-| `GET` | `/api/agui/skills/api-index` | 返回运行时 Skill 注册的 API 索引，供 URL 校验 |
+| `GET` | `/api/agui/skills/api-index` | 旧 API index 兼容别名；JSON 与 `/api/skills/api-index` 相同 |
 
 `POST /api/agui` 的请求体由 `ag-ui-4j` 的 `AgUiParameters` 定义，包含 thread/run、messages 和前端工具 schema；不要手工维护一份与协议类重复的完整 schema。
 

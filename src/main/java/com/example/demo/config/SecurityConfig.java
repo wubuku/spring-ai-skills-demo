@@ -44,6 +44,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/chat/**").permitAll()
                 .requestMatchers("/api/explain-result").permitAll()
                 .requestMatchers("/api/agui/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/skills").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/skills/**").permitAll()
                 .requestMatchers("/api/transcribe/**").permitAll()
                 // 商品浏览公开
                 .requestMatchers(HttpMethod.GET, "/api/products").permitAll()

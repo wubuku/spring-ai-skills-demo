@@ -97,7 +97,7 @@ mvn -Dtest='BackendApiIntegrationTest,SkillToolsTest' test
 这是一个值得单独观察的 Spring AI 教学点：模型仍负责选择
 `loadSkill -> buildHttpRequest`，但确认协议由 Java 应用从请求级 `ToolContext` 生成。
 因此最终模型文本即使误报“已经加入购物车”，后端也不会把它当作业务事实。传统页面
-还会重新读取 `/api/agui/skills/api-index`，校验 method/path/query/body 后才显示按钮；
+还会重新读取 `/api/skills/api-index`，校验 method/path/query/body 后才显示按钮；
 取消只移除确认控件，确认才会发送带当前 token 的业务 POST，之后再请求结果解释端点。
 
 旧客户端若只消费字符串，`POST /api/chat` 和普通 SSE 仍可使用
@@ -149,6 +149,8 @@ src/main/resources/skills/*/SKILL.md
 对应源码：
 
 - 注册与索引：[SkillRegistry](../src/main/java/com/example/demo/agent/SkillRegistry.java)
+- 只读观察目录：[RuntimeSkillCatalogService](../src/main/java/com/example/demo/service/RuntimeSkillCatalogService.java)
+- 观察端点：[RuntimeSkillController](../src/main/java/com/example/demo/controller/RuntimeSkillController.java)
 - Prompt Advisor：[SkillsAdvisor](../src/main/java/com/example/demo/agent/SkillsAdvisor.java)
 - 请求级 Skill 状态：[SkillLoadSession](../src/main/java/com/example/demo/agent/SkillLoadSession.java)
 - 分层参考读取：[SkillReferenceReader](../src/main/java/com/example/demo/agent/SkillReferenceReader.java)
@@ -160,6 +162,22 @@ Skill 的当前契约是：
 - `links` 必须指向已注册、非自身且不重复的 Skill；
 - Skill 正文描述真实 Controller 的 method、path、参数、认证和返回结构；
 - API index 是 Java 工具和浏览器 URL 校验的边界，不允许模型凭记忆猜测 URL。
+
+启动后端后，可以先做一个完全不依赖 LLM 的观察实验：
+
+```bash
+# Level 1：目录，不含正文
+curl -s http://localhost:8080/api/skills
+
+# Level 2：已解析的 SKILL.md 正文和该 Skill 的 API 条目
+curl -s http://localhost:8080/api/skills/search-products
+
+# method/path allowlist；分层条目只返回 referencePath，不返回 reference 正文
+curl -s http://localhost:8080/api/skills/api-index
+```
+
+这三个端点展示“应用已经知道什么”，真实模型回合展示“模型何时选择加载什么”。
+Level 3 仍通过 `readSkillReference` 受限读取，不存在通用 HTTP reference 下载端点。
 
 frontmatter、links、reference 安全和 API index 的确定性测试见
 [SkillRegistryTest.java](../src/test/java/com/example/demo/agent/SkillRegistryTest.java) 和

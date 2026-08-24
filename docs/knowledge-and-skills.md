@@ -131,6 +131,8 @@ src/main/resources/skills/*/SKILL.md
 对应源码：
 
 - Skill 注册和 API 索引：`src/main/java/com/example/demo/agent/SkillRegistry.java`
+- Skill 只读观察目录：`src/main/java/com/example/demo/service/RuntimeSkillCatalogService.java`
+- Skill 发现端点：`src/main/java/com/example/demo/controller/RuntimeSkillController.java`
 - 动态目录和已加载内容：`src/main/java/com/example/demo/agent/SkillsAdvisor.java`
 - 普通链路工具：`src/main/java/com/example/demo/agent/SkillTools.java`
 - AG-UI 核心工具：`src/main/java/com/example/demo/agent/SkillCoreTools.java`
@@ -173,6 +175,18 @@ src/main/resources/skills/*/SKILL.md
 目录、frontmatter、links 和当前资源图的契约由
 [`SkillRegistryTest`](../src/test/java/com/example/demo/agent/SkillRegistryTest.java)
 覆盖。
+
+### 无需 LLM 观察 Level 1/2/API index
+
+运行后端后，开发者可以直接读取：
+
+- `GET /api/skills`：Level 1 目录，只返回显式目录字段、links、分层标记和 API 数量；
+- `GET /api/skills/{name}`：Level 2 Markdown body 和该 Skill 的 API index 条目；
+- `GET /api/skills/api-index`：所有已登记 method/path 的稳定 allowlist；
+- `GET /api/agui/skills/api-index`：旧兼容别名，与中性 index 返回相同 JSON。
+
+详情中的 `referencePath` 只是 Level 3 导航指针。HTTP API 不返回 reference 正文，
+模型仍必须调用受限 `readSkillReference`，因此观察能力不会扩大文件读取权限。
 
 ## 两条路径如何组合
 

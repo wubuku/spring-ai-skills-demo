@@ -141,6 +141,11 @@ try {
   const apiIndexBeforeCancel = requests.filter(
     (request) =>
       request.method === "GET" &&
+      request.url.endsWith("/api/skills/api-index"),
+  ).length;
+  const legacyApiIndexBeforeCancel = requests.filter(
+    (request) =>
+      request.method === "GET" &&
       request.url.endsWith("/api/agui/skills/api-index"),
   ).length;
   const mutationBeforeCancel = requests.filter(
@@ -156,9 +161,17 @@ try {
   const apiIndexAfterConfirmation = requests.filter(
     (request) =>
       request.method === "GET" &&
-      request.url.endsWith("/api/agui/skills/api-index"),
+      request.url.endsWith("/api/skills/api-index"),
   ).length;
   assert.ok(apiIndexAfterConfirmation > apiIndexBeforeCancel);
+  assert.equal(
+    requests.filter(
+      (request) =>
+        request.method === "GET" &&
+        request.url.endsWith("/api/agui/skills/api-index"),
+    ).length,
+    legacyApiIndexBeforeCancel,
+  );
 
   await page.locator("#messages .cancel-btn").last().click();
   assert.equal(
@@ -198,7 +211,7 @@ try {
   const apiIndexBeforeConfirm = requests.filter(
     (request) =>
       request.method === "GET" &&
-      request.url.endsWith("/api/agui/skills/api-index"),
+      request.url.endsWith("/api/skills/api-index"),
   ).length;
   const assistantCountBeforeConfirm = await page
     .locator("#messages .message.assistant")
@@ -213,8 +226,16 @@ try {
     requests.filter(
       (request) =>
         request.method === "GET" &&
-        request.url.endsWith("/api/agui/skills/api-index"),
+        request.url.endsWith("/api/skills/api-index"),
     ).length > apiIndexBeforeConfirm,
+  );
+  assert.equal(
+    requests.filter(
+      (request) =>
+        request.method === "GET" &&
+        request.url.endsWith("/api/agui/skills/api-index"),
+    ).length,
+    legacyApiIndexBeforeCancel,
   );
 
   const mutationRequest = requests.findLast(

@@ -60,9 +60,10 @@ Embedding 返回 `400 parameter is invalid` 时，检查是否发送了不被当
 
 1. 确认 Skill 文件位于 `src/main/resources/skills/<name>/SKILL.md`。
 2. 确认 frontmatter 的 `name`、`description` 和 `links`。
-3. 先调用 `loadSkill`，分层 Skill 再调用 `readSkillReference`。
-4. 检查 `/api/agui/skills/api-index` 是否包含目标方法和路径。
-5. 检查 Controller 映射、`/api/agui/skills/api-index` 和前端
+3. 用 `/api/skills` 和 `/api/skills/{name}` 确认 Level 1/2 是否按预期加载。
+4. 先调用 `loadSkill`，分层 Skill 再调用 `readSkillReference`。
+5. 检查 `/api/skills/api-index` 是否包含目标方法和路径。
+6. 检查 Controller 映射、中性 API index 和前端
    `frontend/lib/api-index-validation.mjs`。
 
 普通 Agent 和 AG-UI Agent 的 HTTP 工具不同：

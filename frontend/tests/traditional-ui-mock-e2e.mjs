@@ -52,7 +52,7 @@ const server = createServer(async (request, response) => {
     );
     return;
   }
-  if (request.url === "/api/agui/skills/api-index") {
+  if (request.url === "/api/skills/api-index") {
     response.writeHead(200, {
       "content-type": "application/json; charset=utf-8",
     });
@@ -199,8 +199,13 @@ try {
 
   const apiIndexRequests = () =>
     requests.filter(
+      (request) => request.method === "GET" && request.url === "/api/skills/api-index",
+    );
+  const legacyApiIndexRequests = () =>
+    requests.filter(
       (request) =>
-        request.method === "GET" && request.url === "/api/agui/skills/api-index",
+        request.method === "GET" &&
+        request.url === "/api/agui/skills/api-index",
     );
   const mutationRequests = () =>
     requests.filter(
@@ -237,6 +242,7 @@ try {
   assert.equal(confirmedRequest.authorization, `Bearer ${refreshedToken}`);
   assert.equal(apiIndexRequests().length >= 1, true);
   assert.equal(explainRequests().length, 1);
+  assert.equal(legacyApiIndexRequests().length, 0);
 
   await page.locator("#userInput").fill("请把商品 3 加入购物车");
   await page.locator("#sendBtn").click();
@@ -258,6 +264,7 @@ try {
   );
   assert.equal(await page.locator("#messages .confirm-btn").count(), 0);
   assert.equal(mutationRequests().length, 2);
+  assert.equal(legacyApiIndexRequests().length, 0);
 } finally {
   await context.close();
   await browser.close();

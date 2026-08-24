@@ -18,6 +18,7 @@
 |---|---|---|
 | Agent 核心 | `src/main/java/com/example/demo/agent/` | Skill 注册、渐进式提示词、后端工具和参数适配 |
 | 普通服务 | `src/main/java/com/example/demo/service/AgentService.java` | 同步/流式聊天编排、普通 ChatClient 调用 |
+| Skill 观察目录 | `RuntimeSkillCatalogService`、`RuntimeSkillController` | 把同一 registry 映射为 Level 1/2/API index 只读 HTTP 视图 |
 | 多模态服务 | `src/main/java/com/example/demo/service/MultimodalAgentService.java` | 图片、音频转文本/视觉输入后复用 Agent 能力 |
 | HTTP 边界 | `src/main/java/com/example/demo/controller/` | 聊天、流式、认证、商品、AG-UI、转写和结果解释端点 |
 | PetStore Mock | `src/main/java/com/example/demo/petstore/` | `/api/v3/pet/**`、`store/**`、`user/**` |
@@ -98,7 +99,7 @@ AG-UI 模式下，后端只注册：
 - GET 自动执行。
 - POST、PUT、PATCH、DELETE 显示确认界面后执行。
 - 从浏览器 `localStorage` 读取 `auth_token` 并透传 `Authorization`。
-- 执行前调用 `/api/agui/skills/api-index` 校验相对 URL；未知、绝对或非法路径直接拒绝，
+- 执行前调用旧兼容路径 `/api/agui/skills/api-index` 校验相对 URL；未知、绝对或非法路径直接拒绝，
   不再自动改写模型提供的 URL。
 
 `SpringAIAgent` 关闭 Spring AI 内部工具执行，手动执行已注册后端工具；遇到前端工具时结束当前 SSE run，等待前端 `respond()` 触发下一轮。该逻辑还包含：
@@ -119,6 +120,21 @@ Level 2: 返回完整 SKILL.md 和关联 links
     -> readSkillReference(name, relativePath)
 Level 3: 读取 OpenAPI Skill references 下的资源/操作/schema 文档
 ```
+
+同一数据还可以在不调用模型的情况下观察：
+
+```text
+GET /api/skills
+  -> Level 1 name/description/version/links
+GET /api/skills/{name}
+  -> Level 2 Markdown body + API 条目
+GET /api/skills/api-index
+  -> method/path allowlist + Level 3 referencePath 指针
+```
+
+`RuntimeSkillCatalogService` 只映射 `SkillRegistry` 已解析的数据，不重新解析 Markdown。
+HTTP 详情不会返回 reference 正文；Level 3 仍只能通过受限 `readSkillReference` 读取。
+旧 `/api/agui/skills/api-index` 委托同一 service，仅用于现有客户端兼容。
 
 当前运行时 Skill：
 

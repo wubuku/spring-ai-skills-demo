@@ -85,7 +85,8 @@ RUN_LIVE_LLM_TESTS=true \
 `RUN_LIVE_LLM_TESTS=true` 只满足 JUnit 条件，不能自行覆盖 Surefire 默认排除组；命令输出
 必须明确显示 `Tests run: 1`，`Tests run: 0` 不算通过。
 
-例如本次 Skill 改动的真实证据应优先覆盖：`/api/agui/skills/api-index` 返回索引、
+例如本次 Skill 改动的真实证据应优先覆盖：`/api/skills` 的 Level 1 目录、
+`/api/skills/{name}` 的 Level 2 正文、`/api/skills/api-index` 与旧兼容别名一致、
 AG-UI `loadSkill` 调用次数、必要的 `readSkillReference`、浏览器/后端工具回合，以及
 最终 API 路径或结果。Embedding、RAG、多模态和全量回归只有在确实属于改动范围时才加入。
 
@@ -145,7 +146,8 @@ AG-UI/Next.js E2E。写操作脚本先取消一次确认，证明没有业务 PO
 3. 如本次改动需要真实模型，再按“Mock 优先与真实 LLM”规则执行最小真实链路并观察日志。
 4. 启动后端并确认 `/api/agui/health`、`/api/agui/info`。
 5. 访问 `/v3/api-docs` 或 Swagger 检查 Controller 映射。
-6. 访问 `/api/agui/skills/api-index` 检查 Skill API index。
+6. 访问 `/api/skills`、`/api/skills/{name}` 和 `/api/skills/api-index` 检查运行时
+   Skill 目录；兼容性改动还要比较旧 `/api/agui/skills/api-index`。
 7. 运行与端点对应的专项脚本；如需要真实 LLM 或数据库，单独记录外部依赖。
 8. 只有以上基本集成验证通过后，才进行三轮固定范围代码收敛检查。检查阶段不补测试，
    只修复影响正确性、成本安全、兼容性或数据一致性的缺陷；发生代码修改就重置三轮。

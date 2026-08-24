@@ -86,7 +86,9 @@ AG-UI 模式下后端只注册 `loadSkill` 和 `readSkillReference`。浏览器�
 - `POST`、`PUT`、`PATCH`、`DELETE` 在 `executing` 状态显示确认 UI。
 - 确认后通过 `respond()` 将结果返回给 CopilotKit，触发后端下一轮 Agent run。
 - 从 `localStorage.auth_token` 读取 Demo token，发送 `Authorization: Bearer ...`。
-- 请求前获取 `/api/agui/skills/api-index`，只允许索引中的相对路径和路径参数匹配。
+- 请求前获取旧兼容路径 `/api/agui/skills/api-index`，只允许索引中的相对路径和路径参数
+  匹配。嵌入式传统页面和新客户端使用中性 `/api/skills/api-index`；两个端点由后端同一
+  catalog service 生成相同 JSON。
 
 不要恢复 v1 `useCopilotAction.renderAndWaitForResponse`，也不要在后端 AG-UI 配置中再次注册同名 `httpRequest` 或 `buildHttpRequest`。
 

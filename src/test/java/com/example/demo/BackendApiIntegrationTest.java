@@ -228,6 +228,145 @@ class BackendApiIntegrationTest {
     }
 
     @Test
+    void runtimeSkillCatalogExposesProgressiveDisclosureWithoutParserMetadata() {
+        ResponseEntity<JsonNode> summaries = rest.getForEntity(
+            "/api/skills", JsonNode.class);
+
+        assertThat(summaries.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(summaries.getBody()).isNotNull();
+        assertThat(summaries.getBody()).hasSize(6);
+
+        List<String> names = new java.util.ArrayList<>();
+        summaries.getBody().forEach(summary -> {
+            names.add(summary.path("name").asText());
+            assertThat(summary.has("body")).isFalse();
+            assertThat(summary.has("metadata")).isFalse();
+            assertThat(summary.has("additionalMetadata")).isFalse();
+            assertThat(summary.has("license")).isFalse();
+            assertThat(summary.path("links").isArray()).isTrue();
+            assertThat(summary.path("apiCount").asInt()).isGreaterThanOrEqualTo(0);
+        });
+        assertThat(names).isSorted().containsExactly(
+            "add-to-cart",
+            "checkout",
+            "get-product-detail",
+            "search-products",
+            "swagger-petstore-openapi-3-0",
+            "view-cart"
+        );
+
+        JsonNode searchSummary = null;
+        for (JsonNode summary : summaries.getBody()) {
+            if ("search-products".equals(summary.path("name").asText())) {
+                searchSummary = summary;
+                break;
+            }
+        }
+        assertThat(searchSummary).isNotNull();
+        assertThat(searchSummary.path("version").asText()).isEqualTo("1.0");
+        assertThat(searchSummary.path("hierarchical").asBoolean()).isFalse();
+        assertThat(searchSummary.path("apiCount").asInt()).isEqualTo(1);
+        List<String> searchLinks = new java.util.ArrayList<>();
+        searchSummary.path("links").forEach(link ->
+            searchLinks.add(link.path("name").asText()));
+        assertThat(searchLinks).containsExactly("get-product-detail", "add-to-cart");
+    }
+
+    @Test
+    void runtimeSkillDetailExposesLevelTwoBodyAndLevelThreePointersOnly() {
+        ResponseEntity<JsonNode> flat = rest.getForEntity(
+            "/api/skills/search-products", JsonNode.class);
+
+        assertThat(flat.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(flat.getBody()).isNotNull();
+        assertThat(flat.getBody().path("body").asText())
+            .startsWith("# 商品搜索技能")
+            .doesNotStartWith("---\n");
+        assertThat(flat.getBody().path("apis")).hasSize(1);
+        assertThat(flat.getBody().path("apis").get(0).path("method").asText())
+            .isEqualTo("GET");
+        assertThat(flat.getBody().path("apis").get(0).path("path").asText())
+            .isEqualTo("/api/products");
+        assertThat(flat.getBody().path("apis").get(0).has("referencePath")).isFalse();
+        assertThat(flat.getBody().has("metadata")).isFalse();
+        assertThat(flat.getBody().has("additionalMetadata")).isFalse();
+        assertThat(flat.getBody().has("license")).isFalse();
+
+        ResponseEntity<JsonNode> hierarchical = rest.getForEntity(
+            "/api/skills/swagger-petstore-openapi-3-0", JsonNode.class);
+
+        assertThat(hierarchical.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(hierarchical.getBody()).isNotNull();
+        assertThat(hierarchical.getBody().path("hierarchical").asBoolean()).isTrue();
+        assertThat(hierarchical.getBody().path("apiCount").asInt()).isEqualTo(19);
+        assertThat(hierarchical.getBody().path("body").asText())
+            .contains("references/operations")
+            .doesNotContain("Returns a single pet.");
+        JsonNode petById = null;
+        for (JsonNode api : hierarchical.getBody().path("apis")) {
+            if ("operations/getPetById.md".equals(api.path("referencePath").asText())) {
+                petById = api;
+                break;
+            }
+        }
+        assertThat(petById).isNotNull();
+        assertThat(petById.path("referencePath").asText())
+            .isEqualTo("operations/getPetById.md");
+        assertThat(petById.has("body")).isFalse();
+    }
+
+    @Test
+    void runtimeSkillCatalogReturnsProblemDetailForUnknownSkillAndKeepsIndexRouteDistinct() {
+        ResponseEntity<JsonNode> missing = rest.getForEntity(
+            "/api/skills/missing-skill", JsonNode.class);
+
+        assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(missing.getBody()).isNotNull();
+        assertThat(missing.getBody().path("status").asInt()).isEqualTo(404);
+        assertThat(missing.getBody().path("detail").asText())
+            .contains("missing-skill");
+
+        ResponseEntity<JsonNode> index = rest.getForEntity(
+            "/api/skills/api-index", JsonNode.class);
+        assertThat(index.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(index.getBody()).isNotNull();
+        assertThat(index.getBody().has("name")).isFalse();
+        assertThat(index.getBody()).hasSize(skillRegistry.getApiIndex().size());
+    }
+
+    @Test
+    void runtimeSkillIndexHasOneNeutralEndpointAndPreservesLegacyAlias() {
+        JsonNode neutral = rest.getForEntity(
+            "/api/skills/api-index", JsonNode.class).getBody();
+        JsonNode legacy = rest.getForEntity(
+            "/api/agui/skills/api-index", JsonNode.class).getBody();
+
+        assertThat(neutral).isNotNull();
+        assertThat(legacy).isNotNull();
+        assertThat(neutral).isEqualTo(legacy);
+        assertThat(neutral.fieldNames().next()).isEqualTo(
+            skillRegistry.getApiIndex().keySet().iterator().next());
+    }
+
+    @Test
+    void runtimeSkillCatalogIsReadOnlyAndAppearsInOpenApi() {
+        ResponseEntity<JsonNode> post = rest.postForEntity(
+            "/api/skills", Map.of(), JsonNode.class);
+        assertThat(post.getStatusCode().is2xxSuccessful()).isFalse();
+
+        ResponseEntity<JsonNode> openApi = rest.getForEntity(
+            "/v3/api-docs", JsonNode.class);
+        assertThat(openApi.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(openApi.getBody()).isNotNull();
+        JsonNode paths = openApi.getBody().path("paths");
+        assertThat(paths.has("/api/skills")).isTrue();
+        assertThat(paths.has("/api/skills/api-index")).isTrue();
+        assertThat(paths.has("/api/skills/{name}")).isTrue();
+        assertThat(openApi.getBody().path("info").path("title").asText())
+            .isEqualTo("Spring AI Skills Demo API");
+    }
+
+    @Test
     void explainResultKeepsHttpSuccessAndFailureSemanticsWhenModelFails() {
         scenario = "explain-failure";
         HttpHeaders json = new HttpHeaders();

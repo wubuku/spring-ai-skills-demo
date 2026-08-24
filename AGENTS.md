@@ -359,6 +359,17 @@ AG-UI Agent 的 `MessageWindowChatMemory` 当前只保留最近 4 条消息。�
 - Level 2：`loadSkill` 返回某个 Skill 的完整 `SKILL.md` 内容及关联 Skill 提示。
 - Level 3：分层 Skill 使用 `readSkillReference` 读取 `references/` 下的单个资源、操作或 schema 文档。
 
+`RuntimeSkillCatalogService` 将同一 `SkillRegistry` 映射为只读观察 API：
+
+- `GET /api/skills`：Level 1 目录，不返回正文。
+- `GET /api/skills/{name}`：Level 2 正文、links 和该 Skill 的 API index 条目。
+- `GET /api/skills/api-index`：中性的 method/path allowlist。
+- `GET /api/agui/skills/api-index`：旧兼容别名，必须委托同一 catalog service。
+
+这些 HTTP API 只用于观察和客户端 URL 校验，不提供 Level 3 reference 下载；
+`readSkillReference` 仍是受限 reference 读取边界。嵌入式传统页面使用中性路径，
+Next.js/CopilotKit hook 当前仍使用旧兼容别名。
+
 当前 Skill 包括：
 
 - `search-products`
@@ -391,7 +402,10 @@ AG-UI Agent 的 `MessageWindowChatMemory` 当前只保留最近 4 条消息。�
 | `POST /api/agui` | CopilotKit/AG-UI SSE 端点 |
 | `GET /api/agui/health` | AG-UI 健康检查 |
 | `GET /api/agui/info` | Agent 元信息 |
-| `GET /api/agui/skills/api-index` | Skill API 索引，供前端 URL 校验 |
+| `GET /api/skills` | Level 1 Skill 目录 |
+| `GET /api/skills/{name}` | Level 2 Skill 正文与 API 条目 |
+| `GET /api/skills/api-index` | 中性 Skill API 索引，供传统页面和新客户端 URL 校验 |
+| `GET /api/agui/skills/api-index` | 旧 Skill API 索引兼容别名 |
 | `POST /api/explain-result` | 解释前端刚执行的 API 结果 |
 | `GET /api/products` | 公开商品搜索 |
 | `GET /api/products/{id}` | 公开商品详情 |

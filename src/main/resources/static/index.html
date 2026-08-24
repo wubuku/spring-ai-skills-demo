@@ -740,7 +740,7 @@
 
             let apiIndex;
             try {
-                const indexResponse = await fetch('/api/agui/skills/api-index');
+                const indexResponse = await fetch('/api/skills/api-index');
                 if (!indexResponse.ok) {
                     return { valid: false, error: '无法读取当前 Skill API index。' };
                 }

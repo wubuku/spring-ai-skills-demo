@@ -5,6 +5,7 @@
 ## 项目能力
 
 - Level 1/2/3 Skills：技能目录 -> `SKILL.md` -> 分层 references。
+- 无需 LLM 即可通过只读 API 观察 Skill 目录、正文和 API index。
 - 商品搜索、详情、购物车和结算 API。
 - Swagger Petstore Mock API 和 OpenAPI 分层 Skill。
 - 普通聊天、SSE 流式聊天、图片理解、音频转写。
@@ -79,6 +80,8 @@ npm run dev
 | Spring Boot 静态页面 | `http://localhost:8080/` |
 | Swagger UI | `http://localhost:8080/swagger-ui.html` |
 | OpenAPI JSON | `http://localhost:8080/v3/api-docs` |
+| Runtime Skill Level 1 目录 | `http://localhost:8080/api/skills` |
+| Runtime Skill API index | `http://localhost:8080/api/skills/api-index` |
 | AG-UI 健康检查 | `http://localhost:8080/api/agui/health` |
 | AG-UI Agent 信息 | `http://localhost:8080/api/agui/info` |
 | Next.js/CopilotKit 前端 | `http://localhost:4000/` |
@@ -121,6 +124,7 @@ AG-UI 模式下，后端只注册 `loadSkill` 和 `readSkillReference`；浏览�
 | Demo 认证 | `/api/auth/login`、`/api/auth/verify` |
 | 商品 | `/api/products/**` |
 | PetStore Mock | `/api/v3/pet/**`、`/api/v3/store/**`、`/api/v3/user/**` |
+| Runtime Skill 发现 | `GET /api/skills`、`GET /api/skills/{name}`、`GET /api/skills/api-index` |
 | AG-UI | `/api/agui` |
 | 结果解释 | `POST /api/explain-result` |
 

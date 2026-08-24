@@ -44,6 +44,21 @@ curl -sG http://localhost:8080/api/products \
 curl -s http://localhost:8080/api/products/3
 ```
 
+### Runtime Skill 渐进式披露
+
+以下请求不调用 LLM：
+
+```bash
+# Level 1 目录
+curl -s http://localhost:8080/api/skills
+
+# Level 2 正文和该 Skill 的 API 条目
+curl -s http://localhost:8080/api/skills/search-products
+
+# 中性 API index
+curl -s http://localhost:8080/api/skills/api-index
+```
+
 ### Demo 认证与购物车
 
 登录接口使用内存中的演示用户，例如 `user1/password1`：
@@ -217,6 +232,8 @@ npm run dev
 ```bash
 curl -s http://localhost:8080/api/agui/health
 curl -s http://localhost:8080/api/agui/info
+curl -s http://localhost:8080/api/skills/api-index
+# 现有 CopilotKit hook 使用的兼容别名
 curl -s http://localhost:8080/api/agui/skills/api-index
 ```
 

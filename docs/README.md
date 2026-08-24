@@ -8,6 +8,7 @@
 |---|---|---|
 | 第一次运行项目 | [根 README](../README.md) | [开发指南](DEVELOPMENT.md)、[配置参考](configuration.md) |
 | 修改 Agent 或工具 | [架构说明](ARCHITECTURE.md) | [运行时 Skills](../src/main/resources/skills/)、[API 参考](rest-api.md) |
+| 无需 LLM 观察 Skills 渐进式披露 | [Spring AI 学习主线](learning-path.md#5-理解运行时-skills-的渐进式披露) | [运行时 Skill API](rest-api.md#运行时-skill-发现) |
 | 修改前端或 AG-UI | [架构说明](ARCHITECTURE.md) | [前端指南](../frontend/README.md)、[CopilotKit 集成说明](../COPILOTKIT_INTEGRATION.md) |
 | 运行测试或回归 | [验证手册](HARNESS.md) | [测试报告](../TEST_REPORT.md) |
 | 排查启动、模型、SSE 或工具问题 | [故障排查](troubleshooting.md) | [历史诊断材料](#草稿与历史材料) |
@@ -23,7 +24,7 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 后端、前端、AG-UI、Skills、记忆和数据流 | Java/TypeScript 源码 |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 安装、启动、profile、前端和日常开发 | `pom.xml`、`package.json`、配置文件 |
 | [configuration.md](configuration.md) | LLM、Embedding、数据库、视觉、转写和知识库配置 | `.env.example`、`application*.yml`、配置类 |
-| [rest-api.md](rest-api.md) | 当前 Controller 端点、认证边界和 SSE 形状 | Controllers、运行时 Skills、API index |
+| [rest-api.md](rest-api.md) | 当前 Controller 端点、Runtime Skill 发现、认证边界和 SSE 形状 | Controllers、运行时 Skills、API index |
 | [OPERATIONS.md](OPERATIONS.md) | REST、聊天、记忆/RAG、多模态和 Docker 操作示例 | Controllers、测试脚本、Dockerfile/Compose |
 | [HARNESS.md](HARNESS.md) | 编译、Maven、Shell、前端和 E2E 验证矩阵 | 测试源码和脚本 |
 | [troubleshooting.md](troubleshooting.md) | 按症状排查常见问题 | 当前实现和已验证记录 |

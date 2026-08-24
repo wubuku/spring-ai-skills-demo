@@ -12,8 +12,9 @@ public class OpenApiConfig {
     public OpenAPI customOpenAPI() {
         return new OpenAPI()
             .info(new Info()
-                .title("商品管理 API")
+                .title("Spring AI Skills Demo API")
                 .version("1.0")
-                .description("示例电商 API，支持商品搜索、详情查询、购物车和结算"));
+                .description("Spring AI Skills 示例应用，包含商品与 PetStore API、"
+                    + "运行时 Skill 发现、渐进式披露和 Agent 演示"));
     }
 }
