@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.net.URI;
+import java.net.URISyntaxException;
 
 /**
  * API 结果解释服务
@@ -25,7 +27,7 @@ public class ExplainResultService {
     private final PromptLoader promptLoader;
 
     public ExplainResultService(ChatClient.Builder builder, SkillRegistry skillRegistry, PromptLoader promptLoader) {
-        // 创建带有 Skills 工具的 ChatClient,让 AI 可以自己探索 Skills
+        // 这是结果解释专用客户端，只负责生成展示文本，不参与业务工具调用。
         this.chatClient = builder.build();
         this.skillRegistry = skillRegistry;
         this.promptLoader = promptLoader;
@@ -35,7 +37,7 @@ public class ExplainResultService {
      * 解释 API 结果
      * 策略:
      * 1. 优先: 直接从 Skills 匹配查找 API 描述(快速、准确)
-     * 2. 兜底: 如果找不到,让 AI 自己探索 Skills
+     * 2. 兜底: 如果找不到,向模型提供当前 Skill 的 Level 1 目录
      */
     public String explainResult(ExplainRequest request) {
         // 1. 尝试直接匹配 Skills
@@ -44,16 +46,20 @@ public class ExplainResultService {
         // 2. 构建 Prompt
         String prompt = buildPrompt(request, apiDescription);
 
-        // 3. 调用 LLM (带 Skills 工具)
+        // 3. 调用专用解释客户端；解释失败不能改变真实 API 的成功/失败语义。
         try {
-            return chatClient.prompt()
+            String content = chatClient.prompt()
                 .user(prompt)
                 .call()
                 .content();
+            if (content != null && !content.isBlank()) {
+                return content;
+            }
+            log.warn("解释模型返回空内容，将使用确定性降级: {} {}", request.getMethod(), request.getUrl());
         } catch (Exception e) {
             log.warn("解释结果失败: {}", e.getMessage());
-            return "✅ 操作已完成\n\n" + request.getResponseBody();
         }
+        return buildFallback(request);
     }
 
     /**
@@ -61,8 +67,9 @@ public class ExplainResultService {
      */
     private String tryFindApiDescription(ExplainRequest request) {
         try {
+            String lookupUrl = normalizeLookupUrl(request.getUrl());
             // 尝试精确匹配
-            ApiIndexEntry entry = skillRegistry.findApiEntry(request.getUrl(), request.getMethod());
+            ApiIndexEntry entry = skillRegistry.findApiEntry(lookupUrl, request.getMethod());
             if (entry != null) {
                 String desc = skillRegistry.getFullApiDescription(entry);
                 if (desc != null) {
@@ -72,7 +79,7 @@ public class ExplainResultService {
             }
 
             // 尝试模式匹配(支持路径参数)
-            List<ApiIndexEntry> candidates = skillRegistry.findAllApiEntries(request.getUrl(), request.getMethod());
+            List<ApiIndexEntry> candidates = skillRegistry.findAllApiEntries(lookupUrl, request.getMethod());
             if (!candidates.isEmpty()) {
                 log.info("找到 {} 个候选 API 匹配", candidates.size());
                 StringBuilder sb = new StringBuilder();
@@ -93,6 +100,21 @@ public class ExplainResultService {
         }
 
         return null;
+    }
+
+    private String normalizeLookupUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return url;
+        }
+        try {
+            URI uri = new URI(url);
+            if (uri.isAbsolute() && uri.getRawPath() != null && !uri.getRawPath().isBlank()) {
+                return uri.getRawPath();
+            }
+        } catch (URISyntaxException e) {
+            log.debug("结果解释 URL 不是可解析 URI，保留原值进行 Skill 匹配: {}", url);
+        }
+        return url;
     }
 
     /**
@@ -122,7 +144,11 @@ public class ExplainResultService {
         if (apiDescription != null) {
             apiDescriptionSection = "\n## API 描述文档\n```markdown\n" + apiDescription + "\n```\n";
         } else {
-            apiDescriptionSection = "\n**提示**: 请使用 `loadSkill` 工具查找相关的 Skill 文档。\n可用的技能包括: product-store, swagger-petstore-openapi-3-0 等。\n";
+            apiDescriptionSection = "\n**可用 Skill 目录（Level 1）**\n"
+                + "当前解释客户端只生成说明，不执行任何工具调用；以下目录仅用于理解上下文。\n"
+                + "<available_skills>\n"
+                + buildSkillCatalog()
+                + "</available_skills>\n";
         }
 
         Map<String, String> placeholders = new HashMap<>();
@@ -137,5 +163,33 @@ public class ExplainResultService {
         placeholders.put("{{SKILL_HINT}}", "");
 
         return promptLoader.getPrompt("prompts/explain-result/api-explanation-prompt.template", placeholders);
+    }
+
+    private String buildSkillCatalog() {
+        StringBuilder catalog = new StringBuilder();
+        skillRegistry.all().forEach((name, skill) -> catalog
+            .append("- ")
+            .append(name)
+            .append(": ")
+            .append(skill.getMeta().getDescription())
+            .append("\n"));
+        return catalog.toString();
+    }
+
+    private String buildFallback(ExplainRequest request) {
+        boolean success = request.getStatusCode() >= 200 && request.getStatusCode() < 300;
+        String marker = success ? "✅" : "❌";
+        String statusDescription = success ? "API 请求已返回成功状态" : "API 请求返回失败状态";
+        String responseBody = request.getResponseBody() == null
+            ? ""
+            : request.getResponseBody();
+
+        return marker + " " + statusDescription + "\n\n"
+            + "- 端点: " + request.getMethod() + " " + request.getUrl() + "\n"
+            + "- HTTP " + request.getStatusCode() + "\n"
+            + "- 原始响应:\n"
+            + "```json\n"
+            + responseBody
+            + "\n```";
     }
 }

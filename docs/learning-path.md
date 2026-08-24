@@ -80,7 +80,34 @@ mvn -Dtest='BackendApiIntegrationTest,SkillToolsTest' test
 这个边界很重要：模型只能提出写操作，`buildHttpRequest` 不会执行 POST。传统页面或
 浏览器确认后才由客户端发出真正的写请求。
 
-### 4. 理解运行时 Skills 的渐进式披露
+### 4. 观察 API 结果解释的展示层后处理
+
+传统 Web UI 执行 `httpRequest` 后，会把真实请求的 method、URL、HTTP 状态和响应体提交
+到 `/api/explain-result`。这条链路适合单独学习“确定性 API 文档 + Spring AI 自然语言
+解释”的组合：
+
+```text
+真实 API 响应
+  -> SkillRegistry API index 匹配
+  -> 注入匹配的 API 描述或 Level 1 Skill 目录
+  -> 独立 ChatClient 生成 Markdown 解释
+  -> 模型失败时按原始 HTTP 状态确定性降级
+```
+
+重点源码：
+
+- 结果解释端点：[ExplainResultController](../src/main/java/com/example/demo/controller/ExplainResultController.java)
+- 解释服务：[ExplainResultService](../src/main/java/com/example/demo/service/ExplainResultService.java)
+- 端点与失败降级集成测试：[BackendApiIntegrationTest](../src/test/java/com/example/demo/BackendApiIntegrationTest.java)
+- 服务契约单元测试：[ExplainResultServiceTest](../src/test/java/com/example/demo/service/ExplainResultServiceTest.java)
+
+这里的解释客户端不是第二个 Agent：它不执行 `loadSkill`、不重新调用业务 API，也不改变
+对话记忆。已知 API 优先使用 Skill API index 的确定性正文；只有找不到匹配 API 时才
+提供当前真实 Skill 的 Level 1 name/description 目录。模型不可用时，降级标记仍依据
+原始业务 HTTP 状态，因此不会把 4xx/5xx 解释成“操作已完成”。完整请求字段和响应语义见
+[REST 与 SSE API](rest-api.md) 的“结果解释”章节。
+
+### 5. 理解运行时 Skills 的渐进式披露
 
 当前项目的 Skills 不是 Spring Bean，也不是 Spring AI 自动扫描的标准类型，而是本项目
 建立在 Spring AI Tool Calling 之上的资源协议：
@@ -113,7 +140,7 @@ frontmatter、links、reference 安全和 API index 的确定性测试见
 [SkillRegistryTest.java](../src/test/java/com/example/demo/agent/SkillRegistryTest.java) 和
 [SkillReferenceReaderTest.java](../src/test/java/com/example/demo/agent/SkillReferenceReaderTest.java)。
 
-### 5. 走一遍认证和用户确认
+### 6. 走一遍认证和用户确认
 
 Demo 认证不是生产 JWT，而是经过校验的 Base64 `username:password`。普通链路把当前已
 验证的 token 放进请求级 `ToolContext`；商品 Controller 只从
@@ -135,7 +162,7 @@ curl -s -X POST 'http://localhost:8080/api/products/cart?productId=3' \
 
 ## 继续学习
 
-### 6. JDBC 记忆和 RAG
+### 7. JDBC 记忆和 RAG
 
 Spring AI 提供 Chat Memory、VectorStore 和 `QuestionAnswerAdvisor`；本项目负责配置
 数据源、加载 Markdown、生成稳定文档 ID，并把知识库 VectorStore 与语义聊天记忆
@@ -157,7 +184,7 @@ Skill。查询订单、申请退款、创建售后单等动作才放到运行时
 RAG 和向量记忆默认关闭。只配置聊天模型时，仍可学习普通 Skills；打开 RAG 或语义记忆
 时，还需要 Embedding 和对应的 profile/VectorStore。
 
-### 7. 普通 SSE 和多模态
+### 8. 普通 SSE 和多模态
 
 普通文本流使用 `ChatController` 的 Spring MVC `SseEmitter`：
 
@@ -169,7 +196,7 @@ RAG 和向量记忆默认关闭。只配置聊天模型时，仍可学习普通 
 它与 AG-UI 的事件流不是同一协议。图片、音频和转写需要额外模型配置，适合在普通文本
 链路稳定后再学习。
 
-### 8. AG-UI/CopilotKit 高级链路
+### 9. AG-UI/CopilotKit 高级链路
 
 AG-UI 是独立的高级链路，不应作为普通 Skills 的第一课：
 

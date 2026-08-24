@@ -103,7 +103,35 @@ curl -s -H 'Authorization: Bearer <token>' \
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `POST` | `/api/explain-result` | 根据前端刚执行的 API 结果生成解释文本 |
+| `POST` | `/api/explain-result` | 根据前端刚执行的 API 结果生成解释文本；解释模型失败时仍返回纯文本降级结果 |
+
+请求体：
+
+```json
+{
+  "method": "GET",
+  "url": "/api/products",
+  "queryParams": {
+    "category": "耳机"
+  },
+  "statusCode": 200,
+  "responseBody": "[{\"id\":3,\"name\":\"Sony WH-1000XM5\"}]"
+}
+```
+
+该端点是传统 Web UI 的展示层后处理：前端先完成真实 API 请求，再把 method、URL、HTTP
+状态和原始响应体提交给它。服务优先从运行时 Skill API index 读取确定性的 API 描述，
+然后用独立 `ChatClient` 生成 2-3 句 Markdown；它不会重新执行业务 API，也不参与
+`loadSkill`/Tool Calling 循环。
+
+解释模型返回非空文本时，端点原样返回模型内容；模型异常、返回空内容或调用超时时，
+仍以 HTTP 200 返回展示文本，但会依据原始状态码使用 `✅`（2xx）或 `❌`（非 2xx）。
+这表示“解释服务本身可用”，不把业务 API 的失败状态伪装成成功。实现与确定性测试见：
+
+- [ExplainResultController](../src/main/java/com/example/demo/controller/ExplainResultController.java)
+- [ExplainResultService](../src/main/java/com/example/demo/service/ExplainResultService.java)
+- [ExplainResultServiceTest](../src/test/java/com/example/demo/service/ExplainResultServiceTest.java)
+- [BackendApiIntegrationTest](../src/test/java/com/example/demo/BackendApiIntegrationTest.java)
 
 ## 变更同步清单
 

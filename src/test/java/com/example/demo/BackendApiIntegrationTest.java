@@ -226,6 +226,55 @@ class BackendApiIntegrationTest {
     }
 
     @Test
+    void explainResultKeepsHttpSuccessAndFailureSemanticsWhenModelFails() {
+        scenario = "explain-failure";
+        HttpHeaders json = new HttpHeaders();
+        json.setContentType(MediaType.APPLICATION_JSON);
+
+        ResponseEntity<String> success = rest.postForEntity(
+            "/api/explain-result",
+            new HttpEntity<>(
+                """
+                {
+                  "method":"GET",
+                  "url":"/api/products",
+                  "statusCode":200,
+                  "responseBody":"{\\"items\\":[]}"
+                }
+                """,
+                json
+            ),
+            String.class
+        );
+        assertThat(success.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(success.getBody())
+            .startsWith("✅")
+            .contains("HTTP 200");
+
+        ResponseEntity<String> failure = rest.postForEntity(
+            "/api/explain-result",
+            new HttpEntity<>(
+                """
+                {
+                  "method":"POST",
+                  "url":"/api/products/cart",
+                  "statusCode":503,
+                  "responseBody":"{\\"message\\":\\"service unavailable\\"}"
+                }
+                """,
+                json
+            ),
+            String.class
+        );
+        assertThat(failure.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(failure.getBody())
+            .startsWith("❌")
+            .contains("HTTP 503")
+            .contains("service unavailable")
+            .doesNotContain("操作已完成");
+    }
+
+    @Test
     void ordinaryChatStopsAtMutationConfirmationThenConfirmedApiCompletesCartFlow() {
         scenario = "mutation";
         HttpHeaders authenticatedJson = new HttpHeaders();
@@ -317,6 +366,9 @@ class BackendApiIntegrationTest {
     }
 
     private ChatResponse scriptedResponse(Prompt prompt) {
+        if ("explain-failure".equals(scenario)) {
+            throw new IllegalStateException("simulated explanation model outage");
+        }
         if ("mutation".equals(scenario)) {
             return scriptedMutationResponse(prompt);
         }
