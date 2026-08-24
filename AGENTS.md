@@ -35,7 +35,8 @@
 - Spring Boot：3.5.16。
 - Spring AI：1.1.8。
 - Maven：3.8+。
-- 前端：Next.js 15.1.6、React 19、TypeScript、CopilotKit 1.60.x、Tailwind CSS 3。
+- 前端：Node.js 22.19+、Next.js 15.5.23、React 19、TypeScript、
+  CopilotKit 1.60.2、Tailwind CSS 3。
 - AG-UI：`ag-ui-4j` 子模块提供核心事件、Spring Server 和 Spring AI 集成源码；部分源码已复制到主仓库 `src/main/java/com/agui/`，且主仓库对 `SpringAIAgent` 有本地修改。
 
 Dockerfile 当前使用 Java 17 的 Amazon Corretto 构建和运行镜像，不启用 preview。修改 Docker
@@ -262,7 +263,10 @@ mvn test
 
 默认 `mvn test` 排除 `live-llm` 和 `container` 两个 JUnit 标签，因此不访问真实 LLM、
 PostgreSQL 或 Docker。真实 OpenAI-compatible provider 测试使用
-`RUN_LIVE_LLM_TESTS=true` 显式启用；PostgreSQL profile 测试使用 `container` 标签显式启用。
+`RUN_LIVE_LLM_TESTS=true` 显式启用，同时必须用
+`-Dtest.excluded-groups=container` 放开 `live-llm` 标签；PostgreSQL profile 测试使用
+`container` 标签显式启用。只设置环境变量而不覆盖 Maven 排除组会得到 `Tests run: 0`，
+不能作为真实调用证据。
 
 后端默认端口为 `8080`。应用运行后：
 
@@ -436,7 +440,7 @@ AG-UI Agent 的 `MessageWindowChatMemory` 当前只保留最近 4 条消息。�
 
 ```bash
 cd frontend
-npm ci
+npm ci --registry=https://registry.npmjs.org
 npm run dev
 ```
 
@@ -452,13 +456,28 @@ npm run dev
 
 CopilotKit 使用 v2 `CopilotKitProvider` 和 `useSingleEndpoint`。不要把 v1 的 `useCopilotAction.renderAndWaitForResponse` 方案重新引入。
 
-当前工作区存在但未被 Git 跟踪的前端辅助文件：
+前端构建所需的支持文件由主仓库跟踪：
 
 - `frontend/scripts/transform-v2-css.mjs`
 - `frontend/patches/copilotkit-v2-v3.css`
-- `frontend/patches/stubs/mermaid-core-stub.mjs`
 
-`package.json` 的 `postinstall` 和 `next.config.js` 会引用其中部分文件；由于根 `.gitignore` 忽略了 `frontend/scripts/` 和 `frontend/patches/`，全新 clone 后直接 `npm ci` 可能缺少这些文件。运行前先检查它们是否存在，修改前端构建链时也要处理这个可复现性问题。
+`package.json` 的 `postinstall` 会从锁定的 CopilotKit 依赖生成 CSS 补丁；
+`CHECK_ONLY=true node scripts/transform-v2-css.mjs` 可只读检查生成物是否过期。
+`frontend/patches/stubs/` 仅保留历史 Mermaid stub，当前不属于构建必需文件。
+`package-lock.json` 必须只使用 npm 官方 registry；Next 15.5.23 的 PostCSS/Sharp
+安全覆盖、旧 AI SDK 的 Undici 6.28.0 定向覆盖和 Node 22.19+ 门槛由
+`package.json` 与仓库检查共同约束。这些 overrides 是高危漏洞的兼容性边界，
+不要在没有干净安装、production build 和审计证据时删除或扩大。
+`next.config.js` 必须把 `outputFileTracingRoot` 固定在 `frontend/`，避免父目录中的
+其他 lockfile 改变 Next.js 构建追踪边界。
+前端仓库可复现性检查使用：
+
+```bash
+cd frontend
+npm run test:repository
+```
+
+全新 clone 不应依赖其他工作区或 ignored 文件恢复前端构建链。
 
 ## 测试与验证
 
@@ -519,14 +538,17 @@ cd frontend && npm run test:e2e:traditional
 
 ```bash
 cd frontend
+npm run test:repository
 npx tsc --noEmit
 npm run build
 npm run test:skills
+npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
 ```
 
 `test:skills` 只验证 Skill API index Mock、浏览器 URL allowlist 和工具 UI 的 DOM/网络
 行为，不使用截图作为证据。需要真实 AG-UI、认证或模型时，再运行已有专项脚本，并把
-环境依赖与实现结果分开记录。
+环境依赖与实现结果分开记录。Playwright 默认使用其安装的 Chromium；下载源不可用且
+机器已有 Chrome 时，可给同一测试命令增加 `PLAYWRIGHT_BROWSER_CHANNEL=chrome`。
 
 ## AG-UI 子模块与同步边界
 

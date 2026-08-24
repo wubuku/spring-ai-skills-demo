@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { chromium } from "playwright";
+import { launchChromium } from "./browser.mjs";
 
 const html = await readFile(
   new URL("../../src/main/resources/static/index.html", import.meta.url),
@@ -26,6 +26,11 @@ const server = createServer(async (request, response) => {
   if (request.url === "/" || request.url === "/index.html") {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     response.end(html);
+    return;
+  }
+  if (request.url === "/favicon.ico") {
+    response.writeHead(204);
+    response.end();
     return;
   }
   if (request.url === "/api/auth/verify") {
@@ -60,7 +65,7 @@ await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const address = server.address();
 const baseUrl = `http://127.0.0.1:${address.port}`;
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChromium();
 const context = await browser.newContext();
 const page = await context.newPage();
 const consoleErrors = [];

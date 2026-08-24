@@ -28,8 +28,7 @@ frontend/probe-*.mjs
 frontend/probe-*.sh
 frontend/repro-*.mjs
 frontend/full-cart-flow.mjs
-frontend/scripts/
-frontend/patches/
+frontend/patches/stubs/
 frontend/hooks/useHttpRequestTool.v2-attempt.tsx
 compile
 mvn

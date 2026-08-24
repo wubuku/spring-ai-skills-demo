@@ -1,7 +1,7 @@
 # 验证手册
 
 > **目的**: 根据改动范围选择最小的验证命令，并正确解释外部服务失败。
-> **最后核对**: 2026-08-23
+> **最后核对**: 2026-08-24
 
 ## 验证分层
 
@@ -14,6 +14,8 @@
 | Skills 确定性测试 | `mvn -Dtest='*Skill*Test,*Api*Test' test` | Skill、reference、API index 契约 | Maven 仓库，无 LLM |
 | Maven 测试 | `mvn test` | 默认确定性 Java 测试和上下文 | Maven 仓库；排除 live-llm/container |
 | 前端类型检查 | `cd frontend && npx tsc --noEmit` | TypeScript/React | Node 依赖 |
+| 前端仓库可复现性 | `cd frontend && npm run test:repository` | postinstall、CSS 补丁和入口引用 | Node 依赖 |
+| 前端生产依赖审计 | `cd frontend && npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org` | critical/high 生产依赖门槛 | npm 官方 registry |
 | 前端构建 | `cd frontend && npm run build` | Next.js、CopilotKit、CSS、TypeScript | Node 依赖和本地 patch |
 | 前端 Skills Mock 验收 | `cd frontend && npm run test:skills` | API index、URL 校验和工具 DOM/网络行为 | Node 依赖、Playwright |
 | 传统页面真实 E2E | `cd frontend && npm run test:e2e:traditional` | 内嵌页面登录、普通 Agent、DOM 商品结果 | 已启动后端、真实 LLM/Embedding、Playwright |
@@ -69,6 +71,18 @@
 4. 非 `main` 工作区必须使用隔离端口、服务、测试数据库/数据目录和日志；main 工作区
    的 `.env` 只用于获授权的本地测试，任何密钥都不能打印或提交。
 
+OpenAI-compatible provider 的独立真实测试：
+
+```bash
+set -a && source .env && set +a
+RUN_LIVE_LLM_TESTS=true \
+  mvn -Dtest.excluded-groups=container \
+  -Dtest=OpenAiCompatibleApiLiveTest test
+```
+
+`RUN_LIVE_LLM_TESTS=true` 只满足 JUnit 条件，不能自行覆盖 Surefire 默认排除组；命令输出
+必须明确显示 `Tests run: 1`，`Tests run: 0` 不算通过。
+
 例如本次 Skill 改动的真实证据应优先覆盖：`/api/agui/skills/api-index` 返回索引、
 AG-UI `loadSkill` 调用次数、必要的 `readSkillReference`、浏览器/后端工具回合，以及
 最终 API 路径或结果。Embedding、RAG、多模态和全量回归只有在确实属于改动范围时才加入。
@@ -89,11 +103,18 @@ git status --short
 
 ```bash
 cd frontend
-npm ci
+npm ci --registry=https://registry.npmjs.org
+npm run test:repository
 npx tsc --noEmit
 npm run build
 npm run test:skills
+npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
 ```
+
+Playwright 默认启动其安装的 Chromium，首次运行可执行
+`npx playwright install chromium`。如果下载源不可用且机器已有 Chrome，可在
+`test:skills`、`test:e2e:traditional:mock` 或真实 E2E 命令前设置
+`PLAYWRIGHT_BROWSER_CHANNEL=chrome`；这只切换浏览器发行通道，不改变断言。
 
 真实传统页面 E2E（必须先通过以上 Mock/构建门槛，并得到真实 LLM 使用授权）：
 
@@ -106,7 +127,10 @@ npm run test:skills
 该测试以 DOM、可访问状态、认证/聊天网络响应和页面消费 JSON 后的商品结果为证据，
 不使用截图；它覆盖内嵌传统页面的 `/api/chat/text`，不替代 AG-UI/Next.js E2E。
 
-如果 `postinstall` 引用的 `scripts/transform-v2-css.mjs`、`patches/copilotkit-v2-v3.css` 或 Mermaid stub 不存在，先检查工作区来源和 `.gitignore`，不要把构建失败直接归因于业务代码。
+如果仓库可复现性检查失败，先确认
+`scripts/transform-v2-css.mjs`、`patches/copilotkit-v2-v3.css` 和锁定的
+`@copilotkit/react-core` 版本一致；不要从其他工作区复制文件，也不要把构建失败直接
+归因于业务代码。
 
 ### 端点、Skill 或 Agent 工具改动
 

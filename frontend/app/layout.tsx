@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { CopilotProvider } from "@/components/CopilotProvider";
-// v2 入口（`@copilotkit/react-core/v2`）在 1.60.1 下会自动 import 它自带的
+// v2 入口（`@copilotkit/react-core/v2`）在 1.60.2 下会自动 import 它自带的
 // `dist/v2/index.css`，那份 CSS 是 Tailwind v4 输出（含 @layer properties /
 // @layer base），与项目 Tailwind v3 流水线不兼容，会抛
 // "`@layer base` is used but no matching `@tailwind base` directive is present"。

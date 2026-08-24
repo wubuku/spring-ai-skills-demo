@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { chromium } from "playwright";
+import { launchChromium } from "./browser.mjs";
 
 const baseUrl = process.env.TRADITIONAL_UI_URL || "http://localhost:8080";
 const timeoutMs = Number(process.env.TRADITIONAL_UI_E2E_TIMEOUT_MS || 180000);
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChromium();
 const context = await browser.newContext();
 const page = await context.newPage();
 const failures = [];

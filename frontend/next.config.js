@@ -2,6 +2,7 @@
 const path = require("path");
 
 const nextConfig = {
+  outputFileTracingRoot: __dirname,
   reactStrictMode: true,
 
   // CopilotKit v2 (1.60.x) 自带的 dist/v2/index.css 是 Tailwind v4 输出，
@@ -32,13 +33,10 @@ const nextConfig = {
     // match, so keep an absolute-path alias too.
     config.resolve.alias[copilotV2Css] = patched;
 
-    // streamdown 1.6.11 (bundled in @copilotkit/react-core 1.60.x) imports
-    // `mermaid` (bare specifier) which the mermaid 11.15.0 package's
-    // `exports` field resolves to `./dist/mermaid.core.mjs`. That entry
-    // references `./chunks/mermaid.core/xychartDiagram-2RQKCTM6.mjs` etc.,
-    // but only the .map siblings ship in the tarball. The full-fat
-    // `mermaid.esm.mjs` entry + its `chunks/mermaid.esm/*` siblings ARE
-    // present, so alias the bare `mermaid` specifier to the esm entry.
+    // streamdown (bundled in @copilotkit/react-core 1.60.x) imports the bare
+    // `mermaid` specifier. Some lockfile-resolved Mermaid packages expose a
+    // core entry whose referenced chunks are incomplete, while the full ESM
+    // entry and its chunks are present. Keep the alias on the complete entry.
     const mermaidEsm = path.resolve(
       __dirname,
       "node_modules/mermaid/dist/mermaid.esm.mjs"

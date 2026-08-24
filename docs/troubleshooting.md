@@ -1,7 +1,7 @@
 # 故障排查
 
 > **目的**: 按用户可见症状定位配置、依赖、工具、SSE 和前端问题。
-> **最后核对**: 2026-08-23
+> **最后核对**: 2026-08-24
 
 ## 应用无法启动
 
@@ -120,10 +120,26 @@ Embedding 返回 `400 parameter is invalid` 时，检查是否发送了不被当
 cd frontend
 test -f scripts/transform-v2-css.mjs
 test -f patches/copilotkit-v2-v3.css
+npm run test:repository
 npm run build
 ```
 
-当前 CopilotKit 1.60.x 的 v2 CSS 需要项目本地转换脚本和 webpack alias；Mermaid 入口也有本地 alias。支持文件缺失时，先检查 ignored 文件和安装流程。
+当前 CopilotKit 1.60.x 的 v2 CSS 需要项目跟踪的转换脚本和 webpack alias。
+`npm run test:repository` 会验证生成 CSS 与锁定依赖一致；支持文件缺失或过期时，先运行
+`npm ci --registry=https://registry.npmjs.org`，再重新执行该检查。
+
+如果安装阶段报告 Node engine 不匹配，确认使用 Node.js 22.19+。如果仓库检查报告
+lockfile 包含 `registry.npmmirror.com`，使用 npm 官方 registry 重新生成 lockfile，
+不要依赖机器本地镜像配置。不要随意删除 `package.json` 中 Next 和旧 AI SDK 的
+安全 overrides；它们分别覆盖 PostCSS/Sharp 和 Undici 的已知高危版本。生产依赖审计命令为：
+
+```bash
+npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
+```
+
+如果 Playwright 报告 Chromium executable 不存在，先运行
+`npx playwright install chromium`。下载源不可用且机器已有 Chrome 时，可给测试命令
+增加 `PLAYWRIGHT_BROWSER_CHANNEL=chrome`；不要因此跳过 DOM/网络断言。
 
 传统内嵌页面的真实浏览器验证：
 

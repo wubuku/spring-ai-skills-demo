@@ -1,13 +1,13 @@
 # 开发指南
 
 > **目的**: 说明本地构建、启动、profile 选择、前端开发和常用工作流。
-> **最后核对**: 2026-08-23
+> **最后核对**: 2026-08-24
 
 ## 前置条件
 
 - JDK 17+。
 - Maven 3.8+。
-- Node.js/npm，用于 `frontend/`。
+- Node.js 22.19+ 和 npm，用于 `frontend/`。
 - 一个可用的 OpenAI-compatible、Anthropic 或 MiniMax 模型配置。
 - 使用 `postgresql` profile 时，需要 PostgreSQL、`vector` 扩展和对应凭证。
 
@@ -93,7 +93,8 @@ LLM_PROVIDER=minimax
 
 ```bash
 cd frontend
-npm ci
+npm ci --registry=https://registry.npmjs.org
+npm run test:repository
 npm run dev
 ```
 
@@ -103,7 +104,21 @@ npm run dev
 - BFF：`http://localhost:4000/api/copilotkit`
 - Java 后端地址：由 `JAVA_BACKEND_URL` 和 `NEXT_PUBLIC_JAVA_BACKEND_URL` 分别控制服务端与浏览器端访问。
 
-如果 `frontend/scripts/transform-v2-css.mjs` 或 `frontend/patches/` 下的支持文件缺失，先恢复这些本地支持文件再运行 `npm ci`/`npm run build`。它们会被 `package.json`、`next.config.js` 或 postinstall 流程引用。
+`frontend/scripts/transform-v2-css.mjs` 和
+`frontend/patches/copilotkit-v2-v3.css` 已纳入 Git。`npm ci` 会按锁定的
+CopilotKit 版本重新生成 CSS；`npm run test:repository` 会在不修改工作区的情况下检查
+脚本、入口引用、依赖安全固定值、官方 registry lockfile 和生成物一致性。全新 clone
+不需要从其他工作区恢复构建支持文件。
+`next.config.js` 将 `outputFileTracingRoot` 固定为当前 `frontend/` 目录，避免父目录
+其他 lockfile 影响 Next.js 的构建追踪范围。
+
+当前固定 Next.js 15.5.23、CopilotKit 1.60.2 和 Undici 8.10.0。Undici 的引擎约束
+要求 Node.js 22.19+；`package.json` 还对 Next 的 PostCSS/Sharp 和旧 AI SDK 的
+Undici 传递依赖做了精确安全覆盖。生产依赖审计使用：
+
+```bash
+npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
+```
 
 ## 传统页面 Playwright E2E
 
@@ -117,6 +132,9 @@ npm run test:e2e:traditional
 ```
 
 测试覆盖页面 DOM、登录、认证网络请求、真实聊天响应状态和商品结果 DOM；不使用截图。
+首次运行通常需要 `npx playwright install chromium`。如果浏览器下载源不可用且机器
+已有 Chrome，可使用 `PLAYWRIGHT_BROWSER_CHANNEL=chrome npm run test:e2e:traditional`；
+测试断言和覆盖范围不变。
 
 ## 常用开发顺序
 

@@ -28,6 +28,7 @@
 
 - JDK 17+
 - Maven 3.8+
+- Node.js 22.19+ 和 npm，用于 `frontend/`
 - 一个可用的模型 API 配置
 - 使用 PostgreSQL profile 时，需要 PostgreSQL 和 `vector` 扩展
 
@@ -64,7 +65,7 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -DskipTests
 
 ```bash
 cd frontend
-npm ci
+npm ci --registry=https://registry.npmjs.org
 npm run dev
 ```
 
@@ -138,10 +139,12 @@ mvn test
 
 # 前端构建
 cd frontend
+npm run test:repository
 npx tsc --noEmit
 npm run build
 npm run test:skills
 npm run test:e2e:traditional:mock
+npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
 ```
 
 真实 provider、PostgreSQL Testcontainers、传统页面真实 LLM E2E，以及专项 Shell

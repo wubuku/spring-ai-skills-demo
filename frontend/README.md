@@ -6,9 +6,10 @@
 
 版本以 `package.json` 为准：
 
-- Next.js `15.1.6`
+- Node.js `22.19+`
+- Next.js `15.5.23`
 - React `19`
-- CopilotKit `1.60.x`
+- CopilotKit `1.60.2`
 - `@ag-ui/client` `^0.0.47`
 - TypeScript `5`
 - Tailwind CSS `3`
@@ -32,7 +33,7 @@ mvn spring-boot:run -DskipTests
 再在本目录安装和启动前端：
 
 ```bash
-npm ci
+npm ci --registry=https://registry.npmjs.org
 npm run dev
 ```
 
@@ -97,19 +98,26 @@ AG-UI 模式下后端只注册 `loadSkill` 和 `readSkillReference`。浏览器�
 
 ## CSS 和构建支持文件
 
-`next.config.js` 为 CopilotKit v2 CSS 和 Mermaid 入口配置了 webpack alias。`postinstall` 会调用：
+`next.config.js` 为 CopilotKit v2 CSS 和 Mermaid 入口配置了 webpack alias。以下构建支持
+文件已由 Git 跟踪：
 
 - `scripts/transform-v2-css.mjs`
 - `patches/copilotkit-v2-v3.css`
-- `patches/stubs/mermaid-core-stub.mjs`
 
-这些文件当前可能被 `.gitignore` 忽略。全新 clone 后运行 `npm ci` 或构建前，先确认它们存在；缺少时应先解决依赖来源和可复现性问题。
+`postinstall` 会按 `package-lock.json` 中的 CopilotKit 版本生成 CSS 补丁。
+`npm run test:repository` 会在不修改工作区的情况下检查安装入口、固定依赖、
+官方 registry lockfile 和生成物一致性；如果生成物过期，使用 npm 官方 registry
+重新执行 `npm ci`。
+`next.config.js` 同时把 Next.js 的 `outputFileTracingRoot` 固定在当前目录，避免父目录
+其他 lockfile 改变构建追踪范围。
 
 ## 验证
 
 ```bash
+npm run test:repository
 npm run build
 npm run test:skills
+npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
 ```
 
 内嵌在 Spring Boot 的传统页面真实 E2E（先启动根目录后端并准备 `.env` 中的真实
@@ -122,6 +130,8 @@ npm run test:e2e:traditional
 该测试使用 Playwright headless Chromium，覆盖页面 DOM、登录、`/api/auth/verify`、
 `/api/chat/text` 和最终商品结果；不使用截图。它验证普通 Agent，不是
 Next.js/CopilotKit AG-UI 流程。
+首次运行可执行 `npx playwright install chromium`；若下载源不可用且机器已有 Chrome，
+使用 `PLAYWRIGHT_BROWSER_CHANNEL=chrome npm run test:e2e:traditional`。
 
 涉及 AG-UI、认证、浏览器工具或 SSE 时，还需要启动后端并参考：
 

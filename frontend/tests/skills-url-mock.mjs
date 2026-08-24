@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { chromium } from "playwright";
 import { validateSkillApiUrl } from "../lib/api-index-validation.mjs";
+import { launchChromium } from "./browser.mjs";
 
 const apiIndex = {
   "GET /api/products": {
@@ -36,7 +36,7 @@ assert.equal(validateSkillApiUrl("GET", "/api/products/%2e%2e", apiIndex).valid,
 assert.equal(validateSkillApiUrl("GET", "/api/products/%00", apiIndex).valid, false);
 assert.equal(validateSkillApiUrl("GET", "api/products", apiIndex).valid, false);
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChromium();
 const page = await browser.newPage();
 const moduleSource = await readFile(
   new URL("../lib/api-index-validation.mjs", import.meta.url),
