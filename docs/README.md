@@ -12,6 +12,7 @@
 | 运行测试或回归 | [验证手册](HARNESS.md) | [测试报告](../TEST_REPORT.md) |
 | 排查启动、模型、SSE 或工具问题 | [故障排查](troubleshooting.md) | [历史诊断材料](#草稿与历史材料) |
 | 配置公司知识或新增服务能力 | [知识库与运行时 Skills](knowledge-and-skills.md) | [配置参考](configuration.md)、[系统架构](ARCHITECTURE.md) |
+| 按顺序学习 Spring AI 和当前 Demo | [Spring AI 学习主线](learning-path.md) | [验证手册](HARNESS.md)、[知识库与运行时 Skills](knowledge-and-skills.md) |
 | 评估社区 `SkillsTool` 或规划当前 Skills 改进 | [社区库审计报告](spring-ai-agent-utils-audit.md) | [SKILL 支持改进规划](drafts/skill-support-improvement-plan.md) |
 | 给 Agent 提供仓库上下文 | [AGENTS.md](../AGENTS.md) | [project-docs Skill](../.agents/skills/project-docs/SKILL.md) |
 
@@ -27,6 +28,7 @@
 | [HARNESS.md](HARNESS.md) | 编译、Maven、Shell、前端和 E2E 验证矩阵 | 测试源码和脚本 |
 | [troubleshooting.md](troubleshooting.md) | 按症状排查常见问题 | 当前实现和已验证记录 |
 | [knowledge-and-skills.md](knowledge-and-skills.md) | 知识库问答、运行时 Skills、扩展步骤和 Spring AI 能力边界 | `KnowledgeBaseInitializer`、`AgentService`、`SkillRegistry`、`SkillsAdvisor`、官方 Spring AI 文档 |
+| [learning-path.md](learning-path.md) | 按可运行顺序学习 REST、Tool Calling、Skills、记忆/RAG、SSE 和 AG-UI | 当前 Java、运行时 Skill、测试和稳定指南 |
 | [spring-ai-agent-utils-audit.md](spring-ai-agent-utils-audit.md) | 固定社区子模块 `v0.10.0` 的 `SkillsTool` 源码、测试、兼容性和迁移评估 | `spring-ai-agent-utils/` 子模块 |
 
 ## 组件和报告入口

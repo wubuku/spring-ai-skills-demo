@@ -97,8 +97,10 @@ test-*.sh        端到端、回归和专项诊断脚本
 - [docs/HARNESS.md](docs/HARNESS.md)：构建、测试和专项回归矩阵。
 - [docs/troubleshooting.md](docs/troubleshooting.md)：按症状排查启动、模型、工具、SSE 和前端问题。
 - [docs/knowledge-and-skills.md](docs/knowledge-and-skills.md)：知识库问答、运行时 Skills、扩展步骤和 Spring AI 能力边界。
+- [docs/learning-path.md](docs/learning-path.md)：从 REST、Tool Calling、Skills 到记忆、RAG、SSE 和 AG-UI 的学习主线。
 - [docs/spring-ai-agent-utils-audit.md](docs/spring-ai-agent-utils-audit.md)：与固定社区子模块版本对应的 `SkillsTool` 审计报告。
 - [docs/drafts/skill-support-improvement-plan.md](docs/drafts/skill-support-improvement-plan.md)：当前项目 SKILL 支持的自包含改进规划和实施验收标准。
+- [docs/drafts/backend-demo-hardening-follow-up-plan.md](docs/drafts/backend-demo-hardening-follow-up-plan.md)：后端契约、普通 Agent 写操作、SSE 和 Demo 教育性后续加固规划。
 - [docs/drafts/](docs/drafts/)：计划、诊断和历史材料，不是自动可信的当前事实。
 
 ## 规划与文档评审原则

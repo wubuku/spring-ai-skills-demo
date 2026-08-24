@@ -30,22 +30,31 @@ GET /api/products/cart
 ```
 
 ## 返回结构
+
+购物车中的 `items` 是商品对象数组，字段与 `GET /api/products/{id}` 返回的
+`Product` 模型一致；当前 Demo 使用列表中的重复商品表示数量，不返回独立的
+`productId`、`productName` 或 `quantity` 字段。
+
 ```json
 {
   "success": true,
   "items": [
     {
-      "productId": 3,
-      "productName": "Sony WH-1000XM5",
-      "price": 2499,
-      "quantity": 1
+      "id": 3,
+      "name": "Sony WH-1000XM5",
+      "category": "耳机",
+      "price": 2499.0,
+      "description": "降噪蓝牙耳机",
+      "stock": 80
     }
   ],
-  "totalAmount": 2499,
-  "itemCount": 1,
-  "username": "user1"
+  "totalAmount": 2499.0,
+  "itemCount": 1
 }
 ```
+
+购物车为空时仍返回 `success=true`、`items=[]`、`totalAmount=0.0` 和
+`itemCount=0`，并额外返回 `message="购物车为空"`。
 
 ## 下一步建议
 查看购物车后，可以：

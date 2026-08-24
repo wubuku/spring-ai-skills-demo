@@ -107,6 +107,7 @@ public class SkillRegistry {
             loadFromFileSystem();
         }
 
+        validateSkillLinks();
         log.info("技能加载完成，共加载 {} 个技能: {}", skills.size(), sortedSkillNames());
         for (Skill skill : skills.values()) {
             indexSkillApis(skill, resolver);
@@ -196,6 +197,42 @@ public class SkillRegistry {
                     + previousSource + " 和 " + source);
         }
         skills.put(name, skill);
+    }
+
+    /**
+     * Validate the Skill metadata graph after every resource has been registered.
+     *
+     * Keeping this check after discovery allows forward links between resources while
+     * still failing startup before an invalid link can reach a model prompt.
+     */
+    void validateSkillLinks() {
+        for (Map.Entry<String, Skill> entry : new TreeMap<>(skills).entrySet()) {
+            String skillName = entry.getKey();
+            Skill.SkillMeta meta = entry.getValue().getMeta();
+            if (meta.getLinks() == null || meta.getLinks().isEmpty()) {
+                continue;
+            }
+
+            Set<String> linkNames = new java.util.HashSet<>();
+            String source = skillSources.getOrDefault(skillName, skillName);
+            for (Skill.SkillLink link : meta.getLinks()) {
+                String target = link.getName().trim();
+                if (skillName.equals(target)) {
+                    throw new SkillDefinitionException(
+                        "Skill `" + skillName + "` 不能链接自身，来源: " + source);
+                }
+                if (!skills.containsKey(target)) {
+                    throw new SkillDefinitionException(
+                        "Skill `" + skillName + "` link 指向不存在的 Skill `"
+                            + target + "`，来源: " + source);
+                }
+                if (!linkNames.add(target)) {
+                    throw new SkillDefinitionException(
+                        "Skill `" + skillName + "` 存在重复 link `"
+                            + target + "`，来源: " + source);
+                }
+            }
+        }
     }
 
     static void validateApiDefinition(String method, String path) {

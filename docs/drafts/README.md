@@ -11,6 +11,8 @@
 - [skill-support-improvement-plan.md](skill-support-improvement-plan.md)：当前项目 SKILL 支持改进规划；依赖 [社区库审计报告](../spring-ai-agent-utils-audit.md) 的固定 `v0.10.0` 基线。
 - [backend-demo-hardening-plan.md](backend-demo-hardening-plan.md)：普通 Agent、后端、存储、
   测试和传统页面的全面加固实施记录。
+- [backend-demo-hardening-follow-up-plan.md](backend-demo-hardening-follow-up-plan.md)：后端
+  Skill 契约、普通 Agent 写操作闭环、SSE 和 Demo 学习路径的后续加固规划。
 - [frontend-reproducibility-hardening-plan.md](frontend-reproducibility-hardening-plan.md)：
   前端构建支持文件、全新 clone 和真实 LLM 闭环的可复现性加固记录。
 

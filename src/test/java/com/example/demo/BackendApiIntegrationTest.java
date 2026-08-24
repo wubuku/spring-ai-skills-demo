@@ -1,5 +1,6 @@
 package com.example.demo;
 
+import com.example.demo.agent.SkillRegistry;
 import com.example.demo.auth.AuthFilter;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.FilterChain;
@@ -28,6 +29,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -52,6 +56,7 @@ class BackendApiIntegrationTest {
 
     private static final int PORT = availablePort();
     private static final List<Prompt> PROMPTS = new CopyOnWriteArrayList<>();
+    private String scenario;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -62,6 +67,12 @@ class BackendApiIntegrationTest {
     @Autowired
     private TestRestTemplate rest;
 
+    @Autowired
+    private SkillRegistry skillRegistry;
+
+    @Autowired
+    private RequestMappingHandlerMapping requestMappingHandlerMapping;
+
     @MockitoBean(name = "openAiChatModel")
     private ChatModel chatModel;
 
@@ -71,6 +82,7 @@ class BackendApiIntegrationTest {
     @BeforeEach
     void setUpModel() {
         PROMPTS.clear();
+        scenario = "search";
         reset(chatModel);
         when(chatModel.call(any(Prompt.class))).thenAnswer(invocation ->
             scriptedResponse(invocation.getArgument(0)));
@@ -186,7 +198,129 @@ class BackendApiIntegrationTest {
             .doesNotContain("唯一可用的 HTTP 工具：`httpRequest`（前端执行");
     }
 
+    @Test
+    void runtimeSkillApiIndexMatchesSpringMvcHandlersAndSerializesReferences() {
+        ResponseEntity<JsonNode> response = rest.getForEntity(
+            "/api/agui/skills/api-index", JsonNode.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody()).hasSize(skillRegistry.getApiIndex().size());
+
+        skillRegistry.getApiIndex().forEach((key, entry) -> {
+            JsonNode item = response.getBody().path(key);
+            assertThat(item.path("skillName").asText()).as(key)
+                .isEqualTo(entry.getSkillName());
+            assertThat(item.path("method").asText()).as(key)
+                .isEqualTo(entry.getMethod());
+            assertThat(item.path("path").asText()).as(key)
+                .isEqualTo(entry.getPath());
+            if (entry.isHierarchical()) {
+                assertThat(item.path("referencePath").asText()).as(key)
+                    .isEqualTo(entry.getReferencePath());
+            }
+            assertThat(hasSpringMvcHandler(entry))
+                .as("Skill API index entry must map to a Spring MVC handler: " + key)
+                .isTrue();
+        });
+    }
+
+    @Test
+    void ordinaryChatStopsAtMutationConfirmationThenConfirmedApiCompletesCartFlow() {
+        scenario = "mutation";
+        HttpHeaders authenticatedJson = new HttpHeaders();
+        authenticatedJson.setContentType(MediaType.APPLICATION_JSON);
+
+        ResponseEntity<JsonNode> login = rest.postForEntity(
+            "/api/auth/login",
+            Map.of("username", "user1", "password", "password1"),
+            JsonNode.class
+        );
+        String token = login.getBody().path("token").asText();
+        authenticatedJson.setBearerAuth(token);
+
+        // Clean up state left by another test before starting this deterministic flow.
+        rest.exchange(
+            "/api/products/checkout",
+            HttpMethod.POST,
+            new HttpEntity<>(authenticatedJson),
+            JsonNode.class
+        );
+
+        ResponseEntity<JsonNode> chat = rest.postForEntity(
+            "/api/chat/text",
+            new HttpEntity<>(
+                """
+                {
+                  "query":"请把商品 3 加入购物车",
+                  "conversationId":"integration-mutation-confirmation"
+                }
+                """,
+                authenticatedJson
+            ),
+            JsonNode.class
+        );
+
+        assertThat(chat.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(chat.getBody().path("response").asText())
+            .contains("等待用户确认");
+        String confirmation = findToolResponse("buildHttpRequest");
+        assertThat(confirmation)
+            .contains("\"method\":\"POST\"")
+            .contains("/api/products/cart")
+            .contains("\"productId\":\"3\"");
+
+        ResponseEntity<JsonNode> beforeConfirmation = rest.exchange(
+            "/api/products/cart",
+            HttpMethod.GET,
+            new HttpEntity<>(authenticatedJson),
+            JsonNode.class
+        );
+        assertThat(beforeConfirmation.getBody().path("itemCount").asInt()).isZero();
+
+        ResponseEntity<JsonNode> add = rest.exchange(
+            "/api/products/cart?productId=3",
+            HttpMethod.POST,
+            new HttpEntity<>(authenticatedJson),
+            JsonNode.class
+        );
+        assertThat(add.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(add.getBody().path("success").asBoolean()).isTrue();
+        assertThat(add.getBody().path("cartSize").asInt()).isEqualTo(1);
+
+        ResponseEntity<JsonNode> cart = rest.exchange(
+            "/api/products/cart",
+            HttpMethod.GET,
+            new HttpEntity<>(authenticatedJson),
+            JsonNode.class
+        );
+        assertThat(cart.getBody().path("itemCount").asInt()).isEqualTo(1);
+        assertThat(cart.getBody().path("items").get(0).path("id").asLong()).isEqualTo(3L);
+
+        ResponseEntity<JsonNode> checkout = rest.exchange(
+            "/api/products/checkout",
+            HttpMethod.POST,
+            new HttpEntity<>(authenticatedJson),
+            JsonNode.class
+        );
+        assertThat(checkout.getBody().path("success").asBoolean()).isTrue();
+        assertThat(checkout.getBody().path("itemCount").asInt()).isEqualTo(1);
+        assertThat(checkout.getBody().path("totalAmount").asDouble()).isEqualTo(2499.0);
+
+        ResponseEntity<JsonNode> afterCheckout = rest.exchange(
+            "/api/products/cart",
+            HttpMethod.GET,
+            new HttpEntity<>(authenticatedJson),
+            JsonNode.class
+        );
+        assertThat(afterCheckout.getBody().path("itemCount").asInt()).isZero();
+    }
+
     private ChatResponse scriptedResponse(Prompt prompt) {
+        if ("mutation".equals(scenario)) {
+            return scriptedMutationResponse(prompt);
+        }
+
         PROMPTS.add(prompt.copy());
         Set<String> completedTools = prompt.getInstructions().stream()
             .filter(ToolResponseMessage.class::isInstance)
@@ -224,6 +358,69 @@ class BackendApiIntegrationTest {
         return new ChatResponse(List.of(new Generation(
             new AssistantMessage("已找到商品：iPhone 15、Sony WH-1000XM5。")
         )));
+    }
+
+    private ChatResponse scriptedMutationResponse(Prompt prompt) {
+        PROMPTS.add(prompt.copy());
+        Set<String> completedTools = completedToolNames(prompt);
+        if (!completedTools.contains("loadSkill")) {
+            return toolCall("call-load-skill", "loadSkill",
+                "{\"skillName\":\"add-to-cart\"}");
+        }
+        if (!completedTools.contains("buildHttpRequest")) {
+            return toolCall("call-build-http-request", "buildHttpRequest", """
+                {
+                  "method":"POST",
+                  "url":"/api/products/cart",
+                  "pathParams":{},
+                  "queryParams":{"productId":"3"},
+                  "body":{}
+                }
+                """);
+        }
+
+        assertThat(findToolResponse(prompt, "buildHttpRequest"))
+            .contains("\"method\":\"POST\"")
+            .contains("/api/products/cart")
+            .contains("\"productId\":\"3\"");
+        return new ChatResponse(List.of(new Generation(
+            new AssistantMessage("已生成加入购物车请求，等待用户确认。")
+        )));
+    }
+
+    private Set<String> completedToolNames(Prompt prompt) {
+        return prompt.getInstructions().stream()
+            .filter(ToolResponseMessage.class::isInstance)
+            .map(ToolResponseMessage.class::cast)
+            .flatMap(message -> message.getResponses().stream())
+            .map(ToolResponseMessage.ToolResponse::name)
+            .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private String findToolResponse(String toolName) {
+        return PROMPTS.stream()
+            .map(prompt -> findToolResponse(prompt, toolName))
+            .filter(response -> !response.isEmpty())
+            .findFirst()
+            .orElseThrow();
+    }
+
+    private String findToolResponse(Prompt prompt, String toolName) {
+        return prompt.getInstructions().stream()
+            .filter(ToolResponseMessage.class::isInstance)
+            .map(ToolResponseMessage.class::cast)
+            .flatMap(message -> message.getResponses().stream())
+            .filter(response -> response.name().equals(toolName))
+            .map(ToolResponseMessage.ToolResponse::responseData)
+            .findFirst()
+            .orElse("");
+    }
+
+    private boolean hasSpringMvcHandler(SkillRegistry.ApiIndexEntry entry) {
+        RequestMethod expectedMethod = RequestMethod.valueOf(entry.getMethod());
+        return requestMappingHandlerMapping.getHandlerMethods().keySet().stream()
+            .anyMatch(mapping -> mapping.getMethodsCondition().getMethods().contains(expectedMethod)
+                && mapping.getPatternValues().contains(entry.getPath()));
     }
 
     private ChatResponse toolCall(String id, String name, String arguments) {

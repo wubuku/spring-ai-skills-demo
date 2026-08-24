@@ -101,6 +101,75 @@ class SkillRegistryTest {
     }
 
     @Test
+    void rejectsDanglingSkillLinksAfterAllSkillsAreRegistered() {
+        SkillRegistry registry = new SkillRegistry();
+        registry.registerSkill("root/SKILL.md", SkillRegistry.parseSkillDocument("""
+            ---
+            name: root-skill
+            description: root
+            links:
+              - name: missing-skill
+                description: missing
+            ---
+            body
+            """, "root/SKILL.md"));
+
+        assertThatThrownBy(registry::validateSkillLinks)
+            .isInstanceOf(SkillDefinitionException.class)
+            .hasMessageContaining("root-skill")
+            .hasMessageContaining("missing-skill")
+            .hasMessageContaining("root/SKILL.md");
+    }
+
+    @Test
+    void rejectsSelfReferentialAndDuplicateSkillLinks() {
+        SkillRegistry selfReferential = new SkillRegistry();
+        selfReferential.registerSkill("self/SKILL.md", SkillRegistry.parseSkillDocument("""
+            ---
+            name: self-skill
+            description: self
+            links:
+              - name: self-skill
+                description: loop
+            ---
+            body
+            """, "self/SKILL.md"));
+
+        assertThatThrownBy(selfReferential::validateSkillLinks)
+            .isInstanceOf(SkillDefinitionException.class)
+            .hasMessageContaining("不能链接自身")
+            .hasMessageContaining("self-skill");
+
+        SkillRegistry duplicateLinks = new SkillRegistry();
+        duplicateLinks.registerSkill("duplicate-links/SKILL.md",
+            SkillRegistry.parseSkillDocument("""
+                ---
+                name: duplicate-links
+                description: duplicate links
+                links:
+                  - name: next-skill
+                    description: first
+                  - name: next-skill
+                    description: second
+                ---
+                body
+                """, "duplicate-links/SKILL.md"));
+        duplicateLinks.registerSkill("next/SKILL.md",
+            SkillRegistry.parseSkillDocument("""
+                ---
+                name: next-skill
+                description: next
+                ---
+                body
+                """, "next/SKILL.md"));
+
+        assertThatThrownBy(duplicateLinks::validateSkillLinks)
+            .isInstanceOf(SkillDefinitionException.class)
+            .hasMessageContaining("重复 link")
+            .hasMessageContaining("duplicate-links");
+    }
+
+    @Test
     void validatesApiDefinitionsAndMatchesIndexedPathParameters() throws Exception {
         assertThatCode(() -> SkillRegistry.validateApiDefinition("GET", "/api/items/{id}"))
             .doesNotThrowAnyException();

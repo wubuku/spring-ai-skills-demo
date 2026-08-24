@@ -12,6 +12,7 @@
 | Git 范围 | `git status --short` | 提交前 | 无 |
 | 后端硬门槛 | `mvn clean compile test-compile` | Java、配置、资源和 Skill | Maven 仓库 |
 | Skills 确定性测试 | `mvn -Dtest='*Skill*Test,*Api*Test' test` | Skill、reference、API index 契约 | Maven 仓库，无 LLM |
+| 后端教育闭环 | `mvn -Dtest='BackendApiIntegrationTest,ChatControllerTest' test` | API index mapping、Tool Calling 确认边界、购物车结算、普通文本 SSE | Maven 仓库；使用 Scripted ChatModel |
 | Maven 测试 | `mvn test` | 默认确定性 Java 测试和上下文 | Maven 仓库；排除 live-llm/container |
 | 前端类型检查 | `cd frontend && npx tsc --noEmit` | TypeScript/React | Node 依赖 |
 | 前端仓库可复现性 | `cd frontend && npm run test:repository` | postinstall、CSS 补丁和入口引用 | Node 依赖 |

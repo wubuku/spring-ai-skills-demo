@@ -16,6 +16,8 @@
 
 相关技术实现的深入入口：
 
+- [Spring AI 学习主线](learning-path.md)：按 REST、Tool Calling、运行时 Skills、记忆/RAG、SSE
+  和 AG-UI 的顺序理解当前实现。
 - [社区 `SkillsTool` 审计报告](spring-ai-agent-utils-audit.md)：固定对应仓库子模块
   `spring-ai-agent-utils/` 的 `v0.10.0` / `7f8bc47`。
 - [当前项目 SKILL 支持改进规划](drafts/skill-support-improvement-plan.md)：从当前源码缺口
