@@ -79,6 +79,38 @@ PostgreSQL profile：
 
 想了解“新增一份公司保修/服务条款后，如何进入 RAG 问答”，见 [知识库与运行时 Skills](knowledge-and-skills.md)。
 
+## 运行时 Skill 资源
+
+| 配置 | 用途 | 默认值 |
+|---|---|---|
+| `SKILL_LOCATIONS` | 逗号分隔的只读 Skill resource roots | `classpath*:skills` |
+| `app.skills.locations` | 对应的 Spring Boot `List<String>` 属性 | 由上面的环境变量映射 |
+
+支持的 root 示例：
+
+```text
+classpath*:skills
+file:/opt/company-skills
+jar:file:/opt/company-skills.jar!/skills
+classpath*:META-INF/skills
+```
+
+`classpath*:` 会扫描主应用和 classloader 可枚举的依赖 JAR；标准 Maven JAR 应包含
+`META-INF/MANIFEST.MF`。没有 manifest 或不能由当前 classloader 枚举的特殊 JAR，应使用
+显式 `jar:file:` root。应用自身打成 Spring Boot executable JAR 后，默认 root 会由
+Spring resolver 以 `jar:nested:` 方式读取，不需要把该内部 URL 写入
+`SKILL_LOCATIONS`。多个 root 按逗号分隔，例如：
+
+```bash
+SKILL_LOCATIONS="classpath*:skills,file:/opt/company-skills"
+```
+
+每个非空 root 必须至少发现一个 `SKILL.md`；空 root、无匹配资源、重复 Skill name、
+非法 frontmatter/link/API index 或 filesystem 符号链接越界都会使应用启动失败。资源
+在启动时扫描并构建 API index，修改后需要重启。配置路径不能来自模型输入，JAR/file
+来源也不会开放通用文件工具。目录布局和打包方式见
+[知识库与运行时 Skills](knowledge-and-skills.md#可复用-skill-资源包)。
+
 ## 视觉和语音转写
 
 | 环境变量 | 用途 |

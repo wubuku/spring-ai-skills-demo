@@ -127,15 +127,27 @@ AG-UI 模式下，后端只注册：
 
 ## Skills 渐进式披露
 
-`SkillRegistry` 启动时扫描 `classpath:skills/*/SKILL.md`：
+`SkillResourceCatalog` 先按 `app.skills.locations` 发现运行时 Skill，默认
+`classpath*:skills`，也支持显式 filesystem/JAR root 和 Spring Boot executable JAR
+中的 nested resource。`SkillRegistry` 只消费 catalog 返回的 entry：
 
 ```text
+classpath*: / file: / jar:file: / jar:nested:
+    -> SkillResourceCatalog：发现 SKILL.md、保存同源 resource scope
+    -> SkillRegistry：解析 frontmatter、links 和 API index
 Level 1: SkillsAdvisor 注入所有 Skill 的 name/description
     -> loadSkill(name)
 Level 2: 返回完整 SKILL.md 和关联 links
     -> readSkillReference(name, relativePath)
 Level 3: 读取 OpenAPI Skill references 下的资源/操作/schema 文档
 ```
+
+catalog 使 `SKILL.md`、`references/operations/*.md`、`getFullApiDescription` 和
+`readSkillReference` 始终从同一 file/JAR source 解析。filesystem entry 必须位于配置
+root 内，reference 还必须位于该 Skill 自己的 real root 内。普通 `jar:file:` 使用
+只读 entry-prefix scope；Spring Boot `jar:nested:` 交给 Spring resource resolver，
+但相对解析仍固定在已发现的 Skill 文档目录。任一配置 root 没有 Skill、重复 name 或
+扫描失败都会 fail-fast，不再回退到 `src/main/resources/skills`。
 
 同一数据还可以在不调用模型的情况下观察：
 
@@ -158,6 +170,10 @@ method/path 索引，但不会替代当前请求中的 `loadSkill`，也不会�
 [`SkillToolsTest`](../src/test/java/com/example/demo/agent/SkillToolsTest.java)、
 [`SkillReferenceReaderTest`](../src/test/java/com/example/demo/agent/SkillReferenceReaderTest.java)
 和 [`BackendApiIntegrationTest`](../src/test/java/com/example/demo/BackendApiIntegrationTest.java)。
+file/JAR、无目录 entry JAR、API 解释同源和符号链接边界由
+[`SkillResourceCatalogTest`](../src/test/java/com/example/demo/agent/SkillResourceCatalogTest.java)
+覆盖；实际 Spring Boot nested JAR 启动、目录索引和分层 operation reference 读取由
+[`test-executable-jar.sh`](../test-executable-jar.sh) 覆盖。
 
 当前运行时 Skill：
 

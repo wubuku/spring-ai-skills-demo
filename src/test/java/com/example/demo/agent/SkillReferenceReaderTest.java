@@ -1,33 +1,36 @@
 package com.example.demo.agent;
 
+import com.example.demo.config.SkillResourceProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.DefaultResourceLoader;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.ResourceLoader;
 import org.springframework.web.client.RestTemplate;
 
-import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class SkillReferenceReaderTest {
 
     private SkillRegistry registry;
+    private SkillResourceCatalog catalog;
     private SkillReferenceReader reader;
 
     @BeforeEach
     void setUp() throws Exception {
-        registry = new SkillRegistry();
-        Field resourceLoader = SkillRegistry.class.getDeclaredField("resourceLoader");
-        resourceLoader.setAccessible(true);
-        resourceLoader.set(registry, new DefaultResourceLoader());
+        catalog = new SkillResourceCatalog(
+            new DefaultResourceLoader(),
+            new SkillResourceProperties(List.of("classpath*:skills"))
+        );
+        registry = new SkillRegistry(catalog);
         registry.init();
-        reader = new SkillReferenceReader(registry, new DefaultResourceLoader());
+        reader = new SkillReferenceReader(registry, catalog);
     }
 
     @Test
@@ -156,20 +159,15 @@ class SkillReferenceReaderTest {
 
     @Test
     void rejectsAReferenceThatExceedsTheReadLimitBeforeReturningContent() {
-        ResourceLoader oversizedResourceLoader = new ResourceLoader() {
-            @Override
-            public Resource getResource(String location) {
-                return new ByteArrayResource(
-                    "x".repeat(64 * 1024 + 1).getBytes(StandardCharsets.UTF_8));
-            }
-
-            @Override
-            public ClassLoader getClassLoader() {
-                return getClass().getClassLoader();
-            }
-        };
+        SkillResourceCatalog oversizedCatalog = mock(SkillResourceCatalog.class);
+        when(oversizedCatalog.resolve(
+            "swagger-petstore-openapi-3-0",
+            "references/operations/addPet.md"
+        )).thenReturn(new ByteArrayResource(
+            "x".repeat(64 * 1024 + 1).getBytes(StandardCharsets.UTF_8)
+        ));
         SkillReferenceReader boundedReader =
-            new SkillReferenceReader(registry, oversizedResourceLoader);
+            new SkillReferenceReader(registry, oversizedCatalog);
 
         assertThat(boundedReader.read(
             "swagger-petstore-openapi-3-0", "operations/addPet.md"))

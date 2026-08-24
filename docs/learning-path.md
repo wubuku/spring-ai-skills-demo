@@ -152,7 +152,9 @@ mvn -Dtest='BackendApiIntegrationTest,SkillToolsTest' test
 建立在 Spring AI Tool Calling 之上的资源协议：
 
 ```text
-src/main/resources/skills/*/SKILL.md
+app.skills.locations
+  -> classpath*: / file: / jar:file: / Boot jar:nested:
+  -> SkillResourceCatalog：发现并固定每个 Skill 的同源 resource scope
   -> SkillRegistry：解析 frontmatter、校验 links、建立 API index
   -> SkillsAdvisor：注入 Level 1 name/description
   -> loadSkill：返回 Level 2 SKILL.md 正文
@@ -162,6 +164,8 @@ src/main/resources/skills/*/SKILL.md
 
 对应源码：
 
+- 资源发现与同源解析：[SkillResourceCatalog](../src/main/java/com/example/demo/agent/SkillResourceCatalog.java)
+- 类型化配置：[SkillResourceProperties](../src/main/java/com/example/demo/config/SkillResourceProperties.java)
 - 注册与索引：[SkillRegistry](../src/main/java/com/example/demo/agent/SkillRegistry.java)
 - 只读观察目录：[RuntimeSkillCatalogService](../src/main/java/com/example/demo/service/RuntimeSkillCatalogService.java)
 - 观察端点：[RuntimeSkillController](../src/main/java/com/example/demo/controller/RuntimeSkillController.java)
@@ -177,6 +181,9 @@ Skill 的当前契约是：
 - `links` 必须指向已注册、非自身且不重复的 Skill；
 - Skill 正文描述真实 Controller 的 method、path、参数、认证和返回结构；
 - API index 是 Java 工具和浏览器 URL 校验的边界，不允许模型凭记忆猜测 URL。
+- 默认 Skill 来自主应用 `classpath*:skills`；也可通过 `SKILL_LOCATIONS` 加载 filesystem
+  目录或普通 JAR；Boot executable JAR 的主应用资源由 Spring 解析为 `jar:nested:`。
+  正文、operation、reference 和 API 解释不会跨来源回退。
 
 #### Prompt、工具 schema 与后端门禁必须一起看
 
@@ -232,6 +239,9 @@ mvn -Dtest='SkillToolsTest#rejectsAnApiWhenOnlyAnotherSkillWasLoaded+rejectsARef
 frontmatter、links、reference 安全和 API index 的确定性测试见
 [SkillRegistryTest.java](../src/test/java/com/example/demo/agent/SkillRegistryTest.java) 和
 [SkillReferenceReaderTest.java](../src/test/java/com/example/demo/agent/SkillReferenceReaderTest.java)。
+filesystem/JAR 可复用包、无目录 entry JAR 和同源解析见
+[SkillResourceCatalogTest.java](../src/test/java/com/example/demo/agent/SkillResourceCatalogTest.java)。
+真实 Boot nested JAR 部署见 [`test-executable-jar.sh`](../test-executable-jar.sh)。
 普通 Agent 的加载门禁、请求级状态隔离和下游请求未发送证据见
 [SkillToolsTest.java](../src/test/java/com/example/demo/agent/SkillToolsTest.java)。
 

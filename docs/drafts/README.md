@@ -9,6 +9,8 @@
 
 - [DOCUMENTATION_PLAN.md](DOCUMENTATION_PLAN.md)：本轮文档体系建设计划。
 - [skill-support-improvement-plan.md](skill-support-improvement-plan.md)：当前项目 SKILL 支持改进规划；依赖 [社区库审计报告](../spring-ai-agent-utils-audit.md) 的固定 `v0.10.0` 基线。
+- [skill-resource-provider-hardening-plan.md](skill-resource-provider-hardening-plan.md)：
+  已实施的 filesystem/classpath/JAR Skill resource catalog、同源解析和安全 fixture 规划。
 - [backend-demo-hardening-plan.md](backend-demo-hardening-plan.md)：普通 Agent、后端、存储、
   测试和传统页面的全面加固实施记录。
 - [backend-demo-hardening-follow-up-plan.md](backend-demo-hardening-follow-up-plan.md)：后端

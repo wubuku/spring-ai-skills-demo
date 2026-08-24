@@ -1,7 +1,6 @@
 package com.example.demo.agent;
 
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -27,11 +26,14 @@ public class SkillReferenceReader {
         Pattern.compile("%(?:2e|2f|5c|00)", Pattern.CASE_INSENSITIVE);
 
     private final SkillRegistry registry;
-    private final ResourceLoader resourceLoader;
+    private final SkillResourceCatalog resourceCatalog;
 
-    public SkillReferenceReader(SkillRegistry registry, ResourceLoader resourceLoader) {
+    public SkillReferenceReader(
+        SkillRegistry registry,
+        SkillResourceCatalog resourceCatalog
+    ) {
         this.registry = registry;
-        this.resourceLoader = resourceLoader;
+        this.resourceCatalog = resourceCatalog;
     }
 
     public String read(String skillName, String relativePath) {
@@ -40,8 +42,21 @@ public class SkillReferenceReader {
             return validationError;
         }
 
-        String resourceLocation = "classpath:skills/" + skillName + "/references/" + relativePath;
-        Resource resource = resourceLoader.getResource(resourceLocation);
+        Resource resource;
+        try {
+            resource = resourceCatalog.resolve(
+                skillName,
+                "references/" + relativePath
+            );
+        } catch (SkillDefinitionException e) {
+            log.debug(
+                "解析 Skill reference 失败: skill={}, path={}, exception={}",
+                skillName,
+                relativePath,
+                e.getMessage()
+            );
+            return "✗ 读取参考文件失败：资源解析异常。";
+        }
         try {
             if (!resource.exists()) {
                 return "✗ 读取参考文件失败：文件不存在。";

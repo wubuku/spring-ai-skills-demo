@@ -14,6 +14,8 @@
 | Prompt fallback 契约 | `mvn -Dtest=PromptLoaderTest test` | SkillsAdvisor 资源模板、Java fallback、占位符和缓存 | Maven 仓库，无 LLM |
 | Advisor/Prompt 契约 | `mvn -Dtest='SkillsAdvisorTest,AgentServiceTest' test` | backend/frontend 模式提示词、Level 1 目录、Advisor 顺序、可选开关、SkillTools 注册 | Maven 仓库，无 LLM |
 | Skills 确定性测试 | `mvn -Dtest='*Skill*Test,*Api*Test' test` | Skill、reference、API index、普通 Agent 加载门禁契约 | Maven 仓库，无 LLM |
+| Skill 资源包 fixture | `mvn -Dtest='SkillResourceCatalogTest,SkillResourcePropertiesTest' test` | filesystem、classpath/显式 JAR、无目录 entry、同源读取和配置绑定 | Maven 仓库，无 LLM |
+| 可执行 JAR smoke | `./test-executable-jar.sh` | 实际 Boot `jar:nested:` Skill 发现、6/24 目录和分层 reference 读取 | Maven、Java、Node、curl、jq；本地 Mock LLM |
 | 后端教育闭环 | `mvn -Dtest='BackendApiIntegrationTest,ChatControllerTest' test` | API index mapping、Tool Calling 确认边界、购物车结算、普通文本 SSE | Maven 仓库；使用 Scripted ChatModel |
 | Maven 测试 | `mvn test` | 默认确定性 Java 测试和上下文 | Maven 仓库；排除 live-llm/container |
 | 前端类型检查 | `cd frontend && npx tsc --noEmit` | TypeScript/React | Node 依赖 |
@@ -108,6 +110,30 @@ mvn -Dtest='SkillsAdvisorTest,AgentServiceTest' test
 普通 Agent 的 `loadSkill` -> 业务工具回合、错误 Skill/跳过加载时的拒绝、
 `readSkillReference` 的请求级门禁，以及最终 API 路径或结果。Embedding、RAG、多模态和
 AG-UI/CopilotKit 只有在确实属于改动范围时才加入。
+
+涉及 `SKILL_LOCATIONS`、resource catalog 或可复用包时，还必须运行：
+
+```bash
+mvn -Dtest='SkillResourceCatalogTest,SkillResourcePropertiesTest,SkillRegistryTest,SkillReferenceReaderTest' test
+```
+
+该组测试使用临时 filesystem/JAR fixture，证明无目录 entry JAR 可发现、正文与
+operation/reference/API 解释同源、空 root fail-fast、路径/glob 和符号链接不能越界。
+它不需要真实模型、Embedding、PostgreSQL 或浏览器。
+
+随后必须运行：
+
+```bash
+./test-executable-jar.sh
+```
+
+脚本构建并启动真实 Spring Boot executable JAR，使用隔离端口和临时 H2/向量文件，
+断言 `/api/skills` 恰有 6 个 Skill、`/api/skills/api-index` 恰有 24 项，并核对启动
+日志。随后它以本地 Node Mock OpenAI-compatible 服务调用 `/api/explain-result`，命中
+PetStore 分层 operation 并断言 `getFullApiDescription` 实际读取了 nested reference。
+它专门覆盖单元测试 classpath 不会产生的 `jar:nested:` URL；不会读取 `.env` 或调用
+真实 LLM。脚本默认自动选择应用和 Mock LLM 的空闲端口；只有显式设置
+`EXECUTABLE_JAR_PORT` 或 `EXECUTABLE_JAR_MOCK_LLM_PORT` 时才固定端口并在冲突时失败。
 
 ## 标准序列
 

@@ -1,6 +1,8 @@
 package com.example.demo.service;
 
+import com.example.demo.agent.SkillResourceCatalog;
 import com.example.demo.agent.SkillRegistry;
+import com.example.demo.config.SkillResourceProperties;
 import com.example.demo.model.ExplainRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,7 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.core.io.DefaultResourceLoader;
 
-import java.lang.reflect.Field;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -30,10 +32,11 @@ class ExplainResultServiceTest {
         chatClient = mock(ChatClient.class);
         when(builder.build()).thenReturn(chatClient);
 
-        SkillRegistry registry = new SkillRegistry();
-        Field resourceLoader = SkillRegistry.class.getDeclaredField("resourceLoader");
-        resourceLoader.setAccessible(true);
-        resourceLoader.set(registry, new DefaultResourceLoader());
+        SkillResourceCatalog catalog = new SkillResourceCatalog(
+            new DefaultResourceLoader(),
+            new SkillResourceProperties(List.of("classpath*:skills"))
+        );
+        SkillRegistry registry = new SkillRegistry(catalog);
         registry.init();
 
         service = new ExplainResultService(

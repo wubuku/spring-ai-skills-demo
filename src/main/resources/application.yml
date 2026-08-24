@@ -106,6 +106,8 @@ management:
       probability: ${TRACING_SAMPLING_PROBABILITY:0.0}
 
 app:
+  skills:
+    locations: ${SKILL_LOCATIONS:classpath*:skills}
   llm:
     provider: ${LLM_PROVIDER:openai}
   api:

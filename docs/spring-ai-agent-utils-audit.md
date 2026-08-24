@@ -1,7 +1,7 @@
 # Spring AI Community `SkillsTool` 审计报告
 
 > **状态**: 已完成；作为当前项目的外部实现评估基线
-> **审计日期**: 2026-08-23
+> **审计日期**: 2026-08-23；当前项目能力矩阵于 2026-08-24 随资源 catalog 实施复核
 > **对应社区库**: `spring-ai-community/spring-ai-agent-utils`
 > **对应子模块路径**: `spring-ai-agent-utils/`
 > **对应 release**: `v0.10.0`
@@ -106,9 +106,9 @@ spring-ai-agent-utils/spring-ai-agent-utils/
 `MarkdownParserTest` 覆盖了基础键值 frontmatter、引号、冒号、空行、正文提取和无
 frontmatter 文档。
 
-这套测试组织方式比当前项目现有的 Skill 测试基础更完整，尤其适合作为资源扫描、
-可复用 Skill 包和确定性工具 callback 测试的参考。不过它没有证明社区实现天然适合
-当前项目的安全边界或业务 API 语义。
+这套测试组织方式是当前项目实现 `SkillResourceCatalog`、file/JAR fixture 和同源读取
+测试的重要参考。不过它没有证明社区实现天然适合当前项目的安全边界或业务 API 语义；
+当前项目吸收扫描思路后仍保留自己的 YAML、links、API index 和受限 reference reader。
 
 ### 本机验证限制
 
@@ -166,8 +166,8 @@ links:
 
 | 能力 | 社区 `SkillsTool` `v0.10.0` | 当前项目 | 结论 |
 |---|---|---|---|
-| 文件系统 Skill 发现 | 递归扫描 `SKILL.md` | classpath 优先、文件系统回退 | 借鉴社区扫描测试 |
-| Classpath/JAR 发现 | 多策略扫描并有测试 | 当前实现主要服务应用 classpath | 社区实现更系统 |
+| 文件系统 Skill 发现 | 递归扫描 `SKILL.md` | `SkillResourceCatalog` 按配置 root 扫描并校验 real path | 当前项目已吸收核心能力 |
+| Classpath/JAR 发现 | 多策略扫描并有测试 | `classpath*:`、显式 `jar:file:`、无目录 entry fixture 和实际 Boot `jar:nested:` smoke | 当前项目已覆盖主要 JVM 部署形态；native image 仍未验证 |
 | frontmatter | 轻量键值 parser | Jackson YAML + `SkillMeta.links` | 当前项目更贴合现有格式 |
 | Level 1/2 | tool description + Skill 调用 | `SkillsAdvisor` + `loadSkill` | 目标相似，编排不同 |
 | Level 3 references | 依赖额外文件工具 | `readSkillReference` | 当前项目边界更窄、更适合业务 |
@@ -175,7 +175,7 @@ links:
 | API index | 无 | `SkillRegistry` 建索引并给 AG-UI/前端校验 | 社区库不能替代 |
 | URL/方法校验 | 无业务白名单 | Java/AG-UI/浏览器多处校验 | 社区库不能替代 |
 | 认证透传与人工确认 | 无 | AG-UI 浏览器 Token 和写操作确认 | 社区库不能替代 |
-| 可复用 SkillsJar | 有 builder 和 JAR 扫描思路 | 尚未抽象 SkillProvider | 应作为 P1 参考 |
+| 可复用 SkillsJar | 有 builder、独立 artifact 和 JAR 扫描思路 | 支持外部目录、普通 JAR 和应用内 nested JAR，但 catalog 尚未独立发布 | 社区库的独立发布更成熟 |
 | Spring AI 兼容基线 | 2.0.0 | 1.1.8 | 不能直接混用 |
 
 ## 质量判断
@@ -187,7 +187,7 @@ links:
 
 - Apache-2.0；
 - 有独立模块、CI、发布流程和 Maven Central artifact；
-- JAR/ClassPath 资源扫描思路比当前项目完整；
+- JAR/ClassPath 资源扫描和独立发布仍有更长的上游实践；
 - `SkillsToolTest` 和 `MarkdownParserTest` 提供了可借鉴的测试分组；
 - API 面小，PoC 成本较低；
 - 支持把可复用 Skill 包作为依赖分发。
@@ -219,14 +219,16 @@ links:
 6. 浏览器认证 Token、写操作确认和前端 URL 校验；
 7. Spring Boot 3.5.16 / Spring AI 1.1.8 到上游 2.0 基线的兼容迁移。
 
-短期收益主要是资源扫描和现成测试；短期代价是主版本升级、格式迁移和安全边界
-重写，收益不足以覆盖风险。
+当前项目已经在不引入 Spring AI 2.x 依赖的情况下吸收了普通 file/JAR 扫描、无目录
+entry fallback、同源 resource scope 和 fixture 测试，并用真实 executable JAR smoke
+覆盖自身的 `jar:nested:` 路径。直接切换后剩余收益主要是独立 artifact 和更多上游
+发布能力；代价仍是主版本升级、格式迁移和安全边界重写，收益不足以覆盖风险。
 
 ## 推荐策略
 
 1. 当前继续使用项目自有 `SkillRegistry` / `SkillsAdvisor`。
-2. 借鉴社区库的 JAR 资源扫描、可复用 Skill 包和测试组织方式，但不复制实现、不把
-   子模块当 Maven 依赖。
+2. 已借鉴社区库的 JAR 资源扫描、可复用 Skill 包和测试组织方式，落地为项目自有
+   `SkillResourceCatalog`；继续保持子模块只作审计基线，不把它当 Maven 依赖。
 3. 如果未来升级到 Spring AI 2.x，单独做一个平面 Skill PoC，不直接替换生产链路。
 4. 优先补充当前项目自己的 frontmatter、API index、URL 校验和 `readSkillReference`
    单元测试。
@@ -238,6 +240,7 @@ links:
 | 日期 | 基线 | 结果 |
 |---|---|---|
 | 2026-08-23 | 子模块 `v0.10.0` / `7f8bc47` | 完成源码、测试、Maven 基线和当前项目兼容性审计 |
+| 2026-08-24 | 当前项目 `SkillResourceCatalog` 实施后 | 更新能力矩阵：file/JAR fixture 与 Boot `jar:nested:` smoke 已通过，切换建议不变 |
 
 更新子模块后，先同步本文顶部的版本和提交，再重新核对源码路径、测试覆盖、版本基线、
 格式兼容性和推荐策略；不要只修改版本号而保留旧结论。

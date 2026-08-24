@@ -9,17 +9,12 @@ import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.ResourceLoader;
-import org.springframework.core.io.support.ResourcePatternResolver;
-import org.springframework.core.io.support.ResourcePatternUtils;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -64,8 +59,19 @@ public class SkillRegistry {
      */
     private final Map<String, ApiIndexEntry> apiIndex = new ConcurrentHashMap<>();
 
+    private final SkillResourceCatalog resourceCatalog;
+
+    public SkillRegistry() {
+        this(new SkillResourceCatalog(
+            new org.springframework.core.io.DefaultResourceLoader(),
+            new com.example.demo.config.SkillResourceProperties()
+        ));
+    }
+
     @Autowired
-    private ResourceLoader resourceLoader;
+    public SkillRegistry(SkillResourceCatalog resourceCatalog) {
+        this.resourceCatalog = resourceCatalog;
+    }
 
     @Data
     @AllArgsConstructor
@@ -84,63 +90,39 @@ public class SkillRegistry {
         skillSources.clear();
         apiIndex.clear();
 
-        ResourcePatternResolver resolver =
-            ResourcePatternUtils.getResourcePatternResolver(resourceLoader);
-        Resource[] skillResources;
-        try {
-            skillResources = resolver.getResources("classpath:skills/*/SKILL.md");
-        } catch (IOException e) {
-            log.warn("类路径 Skill 扫描失败，回退文件系统: {}", e.getMessage());
-            skillResources = new Resource[0];
-        }
-
-        if (skillResources.length > 0) {
-            log.info("从类路径找到 {} 个技能", skillResources.length);
-            for (Resource resource : skillResources) {
-                String source = resource.getDescription();
-                String skillDir = extractSkillDirName(resource);
-                try {
-                    registerSkill(source, parseSkillDocument(readResourceAsString(resource), source));
-                    log.info("成功加载技能: {} (name={})", skillDir, skillDir);
-                } catch (IOException e) {
-                    throw new SkillDefinitionException("读取 Skill 失败: " + source, e);
+        List<SkillResourceCatalog.SkillResource> discovered = resourceCatalog.discover();
+        log.info("找到 {} 个 Skill resource", discovered.size());
+        for (SkillResourceCatalog.SkillResource resource : discovered) {
+            String source = resource.source();
+            try {
+                Skill skill = parseSkillDocument(
+                    readResourceAsString(resource.skillDocument()),
+                    source
+                );
+                if (!resource.skillName().equals(skill.getMeta().getName())) {
+                    throw new SkillDefinitionException(
+                        "Skill `" + skill.getMeta().getName()
+                            + "` 必须与资源目录名 `" + resource.skillName()
+                            + "` 一致，来源: " + source
+                    );
                 }
+                registerSkill(source, skill);
+                log.info(
+                    "成功加载技能: {} (source={})",
+                    skill.getMeta().getName(),
+                    source
+                );
+            } catch (IOException e) {
+                throw new SkillDefinitionException("读取 Skill 失败: " + source, e);
             }
-        } else {
-            log.warn("未从类路径找到技能，尝试从文件系统加载");
-            loadFromFileSystem();
         }
 
         validateSkillLinks();
         log.info("技能加载完成，共加载 {} 个技能: {}", skills.size(), sortedSkillNames());
-        for (Skill skill : skills.values()) {
-            indexSkillApis(skill, resolver);
+        for (String skillName : sortedSkillNames()) {
+            indexSkillApis(skills.get(skillName));
         }
         log.info("API 索引构建完成，共 {} 个端点", apiIndex.size());
-    }
-
-    private void loadFromFileSystem() throws IOException {
-        Path skillsPath = Path.of("src/main/resources/skills");
-        if (!Files.isDirectory(skillsPath)) {
-            throw new SkillDefinitionException("文件系统 skills 目录不存在: " + skillsPath);
-        }
-
-        try (var directories = Files.list(skillsPath)) {
-            directories.filter(Files::isDirectory)
-                .sorted()
-                .forEach(dir -> {
-                    Path skillFile = dir.resolve("SKILL.md");
-                    if (!Files.isRegularFile(skillFile)) {
-                        return;
-                    }
-                    try {
-                        String source = skillFile.toString();
-                        registerSkill(source, parseSkillDocument(Files.readString(skillFile), source));
-                    } catch (IOException e) {
-                        throw new SkillDefinitionException("读取 Skill 失败: " + skillFile, e);
-                    }
-                });
-        }
     }
 
     static Skill parseSkillDocument(String content, String source) {
@@ -279,30 +261,20 @@ public class SkillRegistry {
         }
     }
 
-    private void indexSkillApis(Skill skill, ResourcePatternResolver resolver) {
+    private void indexSkillApis(Skill skill) {
         String skillName = skill.getMeta().getName();
         String body = skill.getBody();
         if (body == null || body.isEmpty()) {
             return;
         }
 
-        try {
-            Resource operationsRoot = resolver.getResource(
-                "classpath:skills/" + skillName + "/references/operations");
-            if (!operationsRoot.exists()) {
-                indexFlatSkill(skillName, body, skill.getMeta().getDescription());
-                return;
-            }
-            Resource[] opResources = resolver.getResources(
-                "classpath:skills/" + skillName + "/references/operations/*.md");
-            if (opResources.length > 0) {
-                indexHierarchicalSkill(skillName, body, opResources);
-            } else {
-                indexFlatSkill(skillName, body, skill.getMeta().getDescription());
-            }
-        } catch (IOException e) {
-            log.debug("扫描 Skill {} 的分层操作文件失败，回退平面索引: {}",
-                skillName, e.getMessage());
+        Resource[] opResources = resourceCatalog.findResources(
+            skillName,
+            "references/operations/*.md"
+        );
+        if (opResources.length > 0) {
+            indexHierarchicalSkill(skillName, body, opResources);
+        } else {
             indexFlatSkill(skillName, body, skill.getMeta().getDescription());
         }
     }
@@ -517,11 +489,13 @@ public class SkillRegistry {
         }
         if (entry.isHierarchical() && entry.getReferencePath() != null) {
             try {
-                ResourcePatternResolver resolver =
-                    ResourcePatternUtils.getResourcePatternResolver(resourceLoader);
-                Resource resource = resolver.getResource(
-                    "classpath:skills/" + entry.getSkillName()
-                        + "/references/" + entry.getReferencePath());
+                Resource resource = resourceCatalog.resolve(
+                    entry.getSkillName(),
+                    "references/" + entry.getReferencePath()
+                );
+                if (!resource.exists()) {
+                    return null;
+                }
                 return readResourceAsString(resource);
             } catch (IOException e) {
                 log.warn("读取操作文件失败: {}", entry.getReferencePath(), e);
@@ -571,17 +545,6 @@ public class SkillRegistry {
     private static String normalizeMethodOrNull(String method) {
         String normalized = normalizeMethod(method);
         return SUPPORTED_METHODS.contains(normalized) ? normalized : null;
-    }
-
-    private String extractSkillDirName(Resource resource) {
-        String description = resource.getDescription();
-        int skillsIndex = description.lastIndexOf("/skills/");
-        if (skillsIndex < 0) {
-            return "unknown";
-        }
-        String afterSkills = description.substring(skillsIndex + "/skills/".length());
-        int nextSlash = afterSkills.indexOf('/');
-        return nextSlash > 0 ? afterSkills.substring(0, nextSlash) : "unknown";
     }
 
     private String readResourceAsString(Resource resource) throws IOException {

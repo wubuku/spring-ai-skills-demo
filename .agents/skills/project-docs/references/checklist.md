@@ -105,6 +105,7 @@ Use this checklist when creating or reviewing documentation in this repository. 
 - [ ] Commands match `pom.xml`, `frontend/package.json`, scripts, and `AGENTS.md`.
 - [ ] API paths match Controllers, Skill files, and the AG-UI API index when applicable.
 - [ ] Claims about profiles, providers, ports, authentication, or tool execution were checked against current source.
-- [ ] `mvn test` is not described as offline because the current tests call external LLM APIs.
+- [ ] `mvn test` is described as deterministic/Mock by default; `live-llm` and `container`
+      groups are documented as explicit opt-in verification.
 - [ ] The frontend is not described as running on port 3000/3001 when `frontend/package.json` says 4000.
 - [ ] Submodule state was checked when AG-UI documentation or copied sources are involved.

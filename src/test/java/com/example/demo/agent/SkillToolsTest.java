@@ -1,5 +1,6 @@
 package com.example.demo.agent;
 
+import com.example.demo.config.SkillResourceProperties;
 import com.example.demo.model.PendingHttpRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,8 +12,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
-import java.lang.reflect.Field;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,10 +32,11 @@ class SkillToolsTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        registry = new SkillRegistry();
-        Field resourceLoader = SkillRegistry.class.getDeclaredField("resourceLoader");
-        resourceLoader.setAccessible(true);
-        resourceLoader.set(registry, new DefaultResourceLoader());
+        SkillResourceCatalog catalog = new SkillResourceCatalog(
+            new DefaultResourceLoader(),
+            new SkillResourceProperties(List.of("classpath*:skills"))
+        );
+        registry = new SkillRegistry(catalog);
         registry.init();
 
         restTemplate = new RestTemplate();
@@ -43,7 +45,7 @@ class SkillToolsTest {
             registry,
             restTemplate,
             "http://localhost:18080",
-            new SkillReferenceReader(registry, new DefaultResourceLoader())
+            new SkillReferenceReader(registry, catalog)
         );
     }
 

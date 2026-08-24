@@ -1,10 +1,11 @@
 package com.example.demo.agent;
 
 import com.example.demo.model.Skill;
+import com.example.demo.config.SkillResourceProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
 
-import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -269,10 +270,11 @@ class SkillRegistryTest {
     }
 
     private SkillRegistry initializedRegistry() throws Exception {
-        SkillRegistry registry = new SkillRegistry();
-        Field resourceLoader = SkillRegistry.class.getDeclaredField("resourceLoader");
-        resourceLoader.setAccessible(true);
-        resourceLoader.set(registry, new DefaultResourceLoader());
+        SkillResourceCatalog catalog = new SkillResourceCatalog(
+            new DefaultResourceLoader(),
+            new SkillResourceProperties(List.of("classpath*:skills"))
+        );
+        SkillRegistry registry = new SkillRegistry(catalog);
         registry.init();
         return registry;
     }

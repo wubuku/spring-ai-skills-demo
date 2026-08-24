@@ -96,7 +96,8 @@ test-*.sh        端到端、回归和专项诊断脚本
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)：REST、聊天、记忆/RAG、多模态和 Docker 操作示例。
 - [docs/HARNESS.md](docs/HARNESS.md)：构建、测试和专项回归矩阵，包括普通 Agent 写操作确认的真实传统 UI E2E。
 - [docs/troubleshooting.md](docs/troubleshooting.md)：按症状排查启动、模型、工具、SSE 和前端问题。
-- [docs/knowledge-and-skills.md](docs/knowledge-and-skills.md)：知识库问答、运行时 Skills、扩展步骤和 Spring AI 能力边界。
+- [docs/knowledge-and-skills.md](docs/knowledge-and-skills.md)：知识库问答、运行时 Skills、
+  可复用 Skill 资源包、扩展步骤和 Spring AI 能力边界。
 - [docs/learning-path.md](docs/learning-path.md)：从 REST、Tool Calling、Skills 到记忆、RAG、SSE 和 AG-UI 的学习主线。
 - [Prompt 资源与 fallback 契约规划](docs/drafts/prompt-fallback-contract-hardening-plan.md)：`PromptLoader`、SkillsAdvisor 模板和资源缺失降级的对应关系。
 - [普通 Agent Advisor 与 Tool Calling 契约规划](docs/drafts/advisor-and-tool-loop-contract-hardening-plan.md)：`SkillsAdvisor` 模式提示词、Advisor 绝对顺序和 `defaultTools(skillTools)` 注册契约。
@@ -374,11 +375,19 @@ AG-UI Agent 的 `MessageWindowChatMemory` 当前只保留最近 4 条消息。�
 
 ### Skills 渐进式披露
 
-`SkillRegistry` 启动时扫描 `classpath:skills/*/SKILL.md`，解析 YAML frontmatter 和 Markdown body，并建立 API 索引：
+`SkillResourceCatalog` 按 `app.skills.locations` 发现只读 Skill 资源，默认
+`classpath*:skills`，并支持显式 `file:` 与 `jar:file:...!/skills` root，以及 Spring
+Boot 可执行 JAR 内的 `jar:nested:` 资源。
+`SkillRegistry` 再解析 YAML frontmatter、Markdown body 和分层 operation，建立 API 索引：
 
 - Level 1：`SkillsAdvisor` 注入所有 Skill 的名称和描述。
 - Level 2：`loadSkill` 返回某个 Skill 的完整 `SKILL.md` 内容及关联 Skill 提示。
 - Level 3：分层 Skill 使用 `readSkillReference` 读取 `references/` 下的单个资源、操作或 schema 文档。
+
+Skill 正文、`references/`、operation 和 API 解释必须来自同一个 catalog entry。
+`SkillReferenceReader` 只允许读取已注册 Skill 的 `references/`，filesystem 来源还会
+校验 real path，拒绝 `..`、绝对路径、编码逃逸和符号链接越界。JAR 来源不会获得 Shell、
+任意文件读取或写入能力。
 
 `RuntimeSkillCatalogService` 将同一 `SkillRegistry` 映射为只读观察 API：
 
@@ -407,6 +416,16 @@ Next.js/CopilotKit hook 当前仍使用旧兼容别名。
 3. 关联 Skill 使用 `links`，不要把所有文档一次性塞入系统提示。
 4. OpenAPI 分层 Skill 继续使用 `references/resources`、`references/operations` 和 `references/schemas`。
 5. 不要在提示词里硬编码业务 URL；模型应从 Skill 文档获取路径，前后端 API index 负责校验。
+6. 可复用包可把相同目录布局放入普通 JAR，并通过 Maven dependency +
+   `classpath*:skills` 或显式 `SKILL_LOCATIONS=jar:file:/path/to/skills.jar!/skills`
+   加载；每个配置 root 无匹配 Skill、重复 name 或来源越界都会启动失败。
+
+资源来源实现和 deterministic fixture 见
+[`SkillResourceCatalog`](src/main/java/com/example/demo/agent/SkillResourceCatalog.java)、
+[`SkillResourceCatalogTest`](src/test/java/com/example/demo/agent/SkillResourceCatalogTest.java)
+和 [知识库与运行时 Skills](docs/knowledge-and-skills.md#可复用-skill-资源包)。修改该链路
+后还必须运行 `./test-executable-jar.sh`，验证实际 Boot JAR 中 6 个 Skill、24 个
+API index 和分层 reference 相对读取，不得只依赖 exploded `target/classes` 测试。
 
 提示词本身也有明确的教育契约：`SkillsAdvisor` 通过
 [`PromptLoader`](src/main/java/com/example/demo/service/PromptLoader.java) 优先读取

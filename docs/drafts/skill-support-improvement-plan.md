@@ -154,7 +154,8 @@ references 可读取、API index 能区分方法和路径参数；普通 Agent �
 | 传统页面真实浏览器验收 | `frontend/tests/traditional-ui-e2e.mjs`、`frontend/package.json` | 已完成 |
 | Embedding provider 参数兼容 | `EmbeddingModelConfig.java`、`application.yml` | 已完成 |
 | 普通 Agent turn context | `SkillLoadSession`、`AgentService`、`SkillToolsTest`、`BackendApiIntegrationTest` | 已完成 |
-| 资源 provider/JAR、指标 | 本文 P1/P2 设计 | 未实施 |
+| 资源 provider/JAR | `SkillResourceCatalog`、`SkillResourceProperties`、file/JAR fixture | 已完成 |
+| 指标 | 本文 P2 设计 | 未实施 |
 
 离线硬门槛结果（2026-08-23）：
 
@@ -371,8 +372,12 @@ SkillSource
   -> SkillRegistry
 ```
 
-先只支持当前需要的 classpath 和 filesystem；JAR/SkillsJar 作为可选能力，必须有来源
-标识、版本、优先级和重复 name 冲突策略。不要把社区子模块路径硬编码到运行时。
+本阶段已用 `SkillResourceCatalog` 实现 `classpath*:`、filesystem 和显式 JAR root，
+保存同源 resource scope，并对无目录 entry JAR 提供扫描 fallback。重复 name 继续由
+registry fail-fast；没有把社区子模块路径硬编码到运行时，也没有引入其 Spring AI 2.x
+依赖。Spring Boot executable JAR 的 `jar:nested:` 路径使用 Spring resolver-backed
+scope，并由 `test-executable-jar.sh` 做真实启动 smoke。实施细节见
+[Skill 资源来源与可复用包加固规划](skill-resource-provider-hardening-plan.md)。
 
 **验收**：
 
@@ -588,7 +593,7 @@ git -C spring-ai-agent-utils status --short --branch
 | P0 | API index/URL 统一 | 先稳定索引模型 | Java/浏览器语义一致 | 已完成 |
 | P1 | deterministic tests | P0 契约 | 不依赖 LLM 可运行 | 已完成最小基线，待扩展 |
 | P1 | 普通 Agent turn state isolation | 测试基座 | `ToolContext`/`SkillLoadSession` 和工具回合证据 | 已完成；AG-UI 独立状态仍待后续 |
-| P1 | source/provider abstraction | P0 registry | classpath/filesystem/JAR fixture | 待实施 |
+| P1 | source/provider abstraction | P0 registry | classpath/filesystem/JAR fixture | 已完成 |
 | P2 | Level 1/2/3 观测与排序 | P1 tests | prompt 和耗时可观测 | 待实施 |
 | P2 | 文档发现链维护 | 当前文档入口 | 从 README/AGENTS 可到达 | 本次已补齐入口，持续维护 |
 | P3 | Spring AI 2.x PoC | 独立升级条件 | PoC 报告决定是否继续 | 待触发 |
