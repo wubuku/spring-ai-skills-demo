@@ -89,6 +89,8 @@ test-*.sh        端到端、回归和专项诊断脚本
 文档导航：
 
 - [docs/README.md](docs/README.md)：稳定文档、组件入口和草稿生命周期索引。
+- [docs/feature-map.md](docs/feature-map.md)：按功能定位端点、owner 代码、配置/资源、
+  自动化证据和深入文档。
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：当前系统、普通 Agent 与 AG-UI 工具边界。
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)：后端/前端启动、profile 和开发顺序。
 - [docs/configuration.md](docs/configuration.md)：环境变量、数据库、向量库和外部模型。
@@ -651,6 +653,8 @@ npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
 - 提示词、Skill 文档、前端工具 schema 和后端工具执行逻辑必须一起检查。
 - 涉及 API 路径时，同时检查 `SkillRegistry` API index 和前端
   `frontend/lib/api-index-validation.mjs`/`validateUrl`。
+- 新增或删除主要功能、入口端点、owner 模块或验收测试时，更新
+  `docs/feature-map.md`；仅内部实现细节变化时不必修改。
 - `.agents/skills/` 下的 Agent Skill 包必须自包含、使用相对引用，不能包含源机器绝对路径或密钥。
 - 不要提交 `.env`、`data/`、`target/`、`node_modules/`、Playwright 截图和调试产物。
 - 提交前至少运行 `mvn -DskipTests clean package`，并检查相关专项测试是否具备所需外部依赖。

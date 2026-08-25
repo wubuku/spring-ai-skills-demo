@@ -7,6 +7,7 @@
 | 读者 | 起点 | 下一步 |
 |---|---|---|
 | 第一次运行项目 | [根 README](../README.md) | [开发指南](DEVELOPMENT.md)、[配置参考](configuration.md) |
+| 按功能定位端点、代码、配置和测试 | [功能与代码地图](feature-map.md) | 对应 owner 源码、测试或深入指南 |
 | 修改 Agent 或工具 | [架构说明](ARCHITECTURE.md) | [运行时 Skills](../src/main/resources/skills/)、[API 参考](rest-api.md) |
 | 无需 LLM 观察 Skills 渐进式披露 | [Spring AI 学习主线](learning-path.md#5-理解运行时-skills-的渐进式披露) | [运行时 Skill API](rest-api.md#运行时-skill-发现) |
 | 修改前端或 AG-UI | [架构说明](ARCHITECTURE.md) | [前端指南](../frontend/README.md)、[CopilotKit 集成说明](../COPILOTKIT_INTEGRATION.md) |
@@ -22,6 +23,7 @@
 
 | 文档 | 内容 | 当前事实来源 |
 |---|---|---|
+| [feature-map.md](feature-map.md) | 功能/问题到入口、owner 代码、配置、测试和深入文档的横向索引 | Java/TypeScript、资源、配置和测试 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 后端、前端、AG-UI、Skills、记忆和数据流 | Java/TypeScript 源码 |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 安装、启动、profile、前端和日常开发 | `pom.xml`、`package.json`、配置文件 |
 | [configuration.md](configuration.md) | LLM、Embedding、数据库、运行时 Skill、视觉、转写和知识库配置 | `.env.example`、`application*.yml`、配置类 |
@@ -77,6 +79,8 @@
 
 1. 先修改事实来源，再更新稳定指南。
 2. 端点变更同时检查 Controller、运行时 Skill、API index、前端工具 schema 和测试脚本。
-3. 配置文档只写变量名、默认值和前置条件，不写密钥。
-4. 发现旧文档漂移时，优先在本索引中标注边界，再做针对性纠偏。
-5. 文档改动至少运行 `git diff --check`；涉及 Java 或前端命令时运行对应构建验证。
+3. 主要功能的入口、owner 模块、配置资源或验收测试发生变化时，更新
+   [功能与代码地图](feature-map.md)；仅内部实现细节变化时不要制造索引噪声。
+4. 配置文档只写变量名、默认值和前置条件，不写密钥。
+5. 发现旧文档漂移时，优先在本索引中标注边界，再做针对性纠偏。
+6. 文档改动至少运行 `git diff --check`；涉及 Java 或前端命令时运行对应构建验证。

@@ -1,13 +1,14 @@
 # 草稿与历史材料
 
 > **文档状态**: 导航索引
-> **最后核对**: 2026-08-24
+> **最后核对**: 2026-08-25
 
 `docs/drafts/` 保存计划、调查、诊断、比较和进度记录。这里的内容可能包含已替代的端口、工具、认证或配置方案，使用前必须回到源码和 `docs/` 稳定指南核对。
 
 ## 当前工作计划
 
-- [DOCUMENTATION_PLAN.md](DOCUMENTATION_PLAN.md)：本轮文档体系建设计划。
+- [DOCUMENTATION_PLAN.md](DOCUMENTATION_PLAN.md)：文档体系建设与 2026-08-25
+  `project-docs` 自包含/功能可发现性迭代计划。
 - [skill-support-improvement-plan.md](skill-support-improvement-plan.md)：当前项目 SKILL 支持改进规划；依赖 [社区库审计报告](../spring-ai-agent-utils-audit.md) 的固定 `v0.10.0` 基线。
 - [skill-resource-provider-hardening-plan.md](skill-resource-provider-hardening-plan.md)：
   已实施的 filesystem/classpath/JAR Skill resource catalog、同源解析和安全 fixture 规划。

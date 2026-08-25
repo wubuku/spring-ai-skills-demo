@@ -17,6 +17,7 @@
 
 | 我想做什么 | 从哪里开始 |
 |---|---|
+| 按功能快速定位端点、生产代码、配置和测试 | [功能与代码地图](docs/feature-map.md) |
 | 添加公司保修、服务条款、配送政策等知识，让 Agent 基于文档回答 | [知识库与运行时 Skills：通过知识库提供知识](docs/knowledge-and-skills.md#路径一通过知识库提供知识) |
 | 新增查询订单、创建售后单、申请退款等可执行服务 | [知识库与运行时 Skills：通过运行时 Skills 提供服务](docs/knowledge-and-skills.md#路径二通过运行时-skills-提供服务) |
 | 把一组运行时 Skills 作为外部目录或 JAR 复用 | [可复用 Skill 资源包](docs/knowledge-and-skills.md#可复用-skill-资源包) |
@@ -173,6 +174,7 @@ profile。启动前仍需按 [开发指南](docs/DEVELOPMENT.md) 和
 | [AGENTS.md](AGENTS.md) | Agent 使用的唯一当前状态导航 |
 | [CLAUDE.md](CLAUDE.md) | 兼容入口，跳转到 `AGENTS.md` |
 | [docs/README.md](docs/README.md) | 文档体系总索引 |
+| [docs/feature-map.md](docs/feature-map.md) | 功能、入口、owner 代码、配置和自动化证据的横向索引 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构和 Agent 工具边界 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 本地开发与启动 |
 | [docs/configuration.md](docs/configuration.md) | 配置和外部依赖 |

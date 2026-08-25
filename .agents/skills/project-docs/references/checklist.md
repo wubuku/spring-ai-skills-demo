@@ -44,6 +44,16 @@ Use this checklist when creating or reviewing documentation in this repository. 
 - [ ] Commands have been run or have their prerequisites documented.
 - [ ] Related docs are linked instead of duplicated.
 
+## Feature Discoverability
+
+- [ ] Common user/developer questions can reach the relevant feature from a top-level hub.
+- [ ] Each major feature points to its current endpoint/UI/command and owner code.
+- [ ] Material configuration or runtime resources are linked without copying their defaults.
+- [ ] Deterministic tests are listed before optional live/external verification.
+- [ ] Knowledge-base documents, runtime Skills, and `.agents/skills/` workflows are separate.
+- [ ] Historical drafts are not presented as current implementation.
+- [ ] The map is concise enough to remain an index rather than a duplicate architecture guide.
+
 ## REST/API Documentation
 
 - [ ] Base URL is documented.

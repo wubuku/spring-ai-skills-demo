@@ -50,6 +50,7 @@ COPILOTKIT_INTEGRATION.md         # integration overview
 TEST_REPORT.md                    # verified test report
 frontend/README.md                # frontend-specific guide
 docs/
+├── feature-map.md                # feature -> code/config/test cross-cutting index
 ├── *.md                          # stable integration and investigation docs
 └── drafts/                       # active plans, diagnoses, and working notes
 .agents/skills/                   # portable agent skills; this package lives here
@@ -59,6 +60,8 @@ src/main/resources/skills/        # runtime Skills exposed to the Spring AI agen
 Recommended layers for new documentation:
 
 - **Hub:** update `AGENTS.md` when navigation, constraints, or top-level structure changes.
+- **Cross-cutting map:** use `docs/feature-map.md` when readers otherwise need to assemble a
+  feature from several guides, source directories, resources, and tests.
 - **Guide:** use a focused file under `docs/` or a component README for setup, architecture, integration, or troubleshooting.
 - **Reference:** keep endpoint details in the current owner, such as Controller annotations, Swagger/OpenAPI, runtime Skill files, or a focused API/config reference.
 - **Draft:** use `docs/drafts/` for active plans and investigations.
@@ -90,6 +93,7 @@ Before editing a document, identify its owner:
 | REST/SSE endpoint behavior | Controllers and DTOs | Link from guides; keep examples synchronized |
 | Agent tool behavior | `agent/`, `AgUiConfig`, `SpringAIAgent`, frontend hook | Document flow and safety boundaries |
 | Runtime Skills | `src/main/resources/skills/` | Treat each `SKILL.md` as API instruction source |
+| Feature discoverability | Controllers, services, resources, configuration, and tests | Index stable owners in `docs/feature-map.md` |
 | AG-UI upstream boundary | `ag-ui-4j/`, copied `src/main/java/com/agui/` | Explain synchronization and local modifications |
 | Test behavior | `src/test/`, `test-*.sh`, frontend scripts | Document prerequisites and limitations |
 | Historical reasoning | `docs/drafts/`, investigation reports | Useful context, not current-state authority |
@@ -119,6 +123,8 @@ Assess:
 - What already exists?
 - Which documents are current, stale, duplicated, or orphaned?
 - Which facts are missing from the navigation hub?
+- Which common user/developer questions require traversing several documents before reaching
+  the owner code and verification evidence?
 - Which claims are contradicted by the current source?
 
 ### 2. Decide whether a plan file is warranted
@@ -137,6 +143,8 @@ For a substantive documentation initiative:
 
 - Update `AGENTS.md` for agent navigation, constraints, or top-level directory changes.
 - Update `README.md` for human quick start and feature overview.
+- Update `docs/feature-map.md` when a major feature's entry point, owner module, configuration
+  resource, verification evidence, or recommended deep-dive document changes.
 - Use `docs/` for stable architecture, integration, configuration, API, or troubleshooting material.
 - Use `docs/drafts/` for work in progress, design alternatives, diagnoses, and plans.
 - Use `frontend/README.md` for frontend-only setup and implementation details.
@@ -220,6 +228,24 @@ When an endpoint changes, inspect and update as applicable:
 7. Swagger/OpenAPI descriptions.
 
 Never invent an API path in documentation. Use the path from the Controller or runtime Skill and verify it with the API index when relevant.
+
+### Feature-to-code discoverability
+
+Use a feature map when the repository has enough surfaces that readers otherwise need to
+assemble one behavior from architecture, API, configuration, resources, and tests.
+
+Each feature entry should provide:
+
+- the user-visible goal or developer question;
+- the endpoint, UI, command, or observation surface;
+- the smallest set of owner source files;
+- the configuration or resource files that materially control behavior;
+- deterministic tests first, with external/live checks labeled separately;
+- one focused guide for deeper explanation.
+
+Keep the map as an index. Do not copy endpoint parameter tables, configuration defaults, protocol
+details, or draft reasoning into it. Update it when a major feature, entry point, owner, or
+verification path changes; do not churn it for internal refactors that preserve those boundaries.
 
 ### Agent and tool documentation
 
@@ -397,6 +423,7 @@ Then inspect links containing spaces, anchors, renamed files, or directories man
 - Examples match current package versions and method signatures.
 - Commands match `pom.xml`, `frontend/package.json`, scripts, and `AGENTS.md`.
 - Endpoint paths match Controllers, runtime Skills, and API index behavior.
+- Major features remain reachable from a hub and map to current owner code and verification.
 - Profile/provider/authentication claims match current source.
 - No source-machine absolute paths or secrets are present.
 - No duplicate current-state document contradicts `AGENTS.md`.
@@ -406,6 +433,7 @@ Then inspect links containing spaces, anchors, renamed files, or directories man
 | Mistake | Prevention |
 |---|---|
 | Giant README containing every diagnosis | Use hub -> guide -> reference |
+| Architecture is documented but features are hard to locate | Add or maintain a feature -> owner -> verification map |
 | Treating a draft as current truth | Recheck code and mark status |
 | Duplicating endpoint paths in many documents | Keep an owning source and link to it |
 | Confusing runtime Skills with agent Skills | Use the two explicit paths |
